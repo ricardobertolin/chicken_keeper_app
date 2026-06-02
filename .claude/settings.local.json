@@ -13,7 +13,16 @@
       "Bash(git -C \"c:/Users/ricar/Documentos/_PROJETOS/_GitPages/placeholder_app\" branch -vv)",
       "Bash(node -c \"c:/Users/ricar/Documentos/_PROJETOS/_GitPages/placeholder_app/index.html\")",
       "Bash(node -e \"const fs=require\\('fs'\\);const t=fs.readFileSync\\('c:/Users/ricar/Documentos/_PROJETOS/_GitPages/placeholder_app/index.html','utf8'\\);const m=t.match\\(/<script>\\([\\\\s\\\\S]*?\\)<\\\\/script>/g\\);for\\(const s of m\\){const code=s.replace\\(/^<script>/,''\\).replace\\(/<\\\\/script>$/,''\\);try{new Function\\(code\\);console.log\\('OK',code.length,'chars'\\);}catch\\(e\\){console.error\\('ERROR:',e.message\\);process.exit\\(1\\);}}\")",
-      "Bash(node -e \"const fs=require\\('fs'\\);const html=fs.readFileSync\\('index.html','utf8'\\);const m=html.match\\(/<script>\\([\\\\s\\\\S]*?\\)<\\\\/script>/g\\);if\\(!m\\){console.log\\('no scripts'\\);process.exit\\(0\\);}let i=0;for\\(const s of m\\){i++;const code=s.replace\\(/^<script>/,''\\).replace\\(/<\\\\/script>$/,''\\);try{new Function\\(code\\);console.log\\('block',i,'ok',code.length,'chars'\\);}catch\\(e\\){console.log\\('block',i,'FAIL:',e.message\\);}}\")"
+      "Bash(node -e \"const fs=require\\('fs'\\);const html=fs.readFileSync\\('index.html','utf8'\\);const m=html.match\\(/<script>\\([\\\\s\\\\S]*?\\)<\\\\/script>/g\\);if\\(!m\\){console.log\\('no scripts'\\);process.exit\\(0\\);}let i=0;for\\(const s of m\\){i++;const code=s.replace\\(/^<script>/,''\\).replace\\(/<\\\\/script>$/,''\\);try{new Function\\(code\\);console.log\\('block',i,'ok',code.length,'chars'\\);}catch\\(e\\){console.log\\('block',i,'FAIL:',e.message\\);}}\")",
+      "Bash(grep -n -E \"^\\(function|const|let|var|class|//|/\\\\*\\) \" index.html)",
+      "Bash(grep -n -E \"^\\\\s{0,4}\\(function |class |const [A-Z]|// ===|/\\\\* ===|// ---\\)\" index.html)",
+      "Bash(node -e ' *)",
+      "Bash(node --check \"c:\\\\Users\\\\ricar\\\\Documentos\\\\_PROJETOS\\\\_GitPages\\\\chicken_keeper_app\\\\__check.js\")",
+      "Bash(node --check __check.js)",
+      "Bash(rm -f __check.js)",
+      "Bash(grep -v \"^\\\\s*//\")",
+      "Bash(grep -v \"//\")",
+      "Bash(rm __check.js)"
     ]
   }
 }
