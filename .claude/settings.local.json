@@ -22,7 +22,12 @@
       "Bash(rm -f __check.js)",
       "Bash(grep -v \"^\\\\s*//\")",
       "Bash(grep -v \"//\")",
-      "Bash(rm __check.js)"
+      "Bash(rm __check.js)",
+      "Bash(node -e \"const fs=require\\('fs'\\);const h=fs.readFileSync\\('index.html','utf8'\\);const re=/<script>\\([\\\\s\\\\S]*?\\)<\\\\/script>/g;let m,best='';while\\(\\(m=re.exec\\(h\\)\\)\\){if\\(m[1].length>best.length\\)best=m[1];}fs.writeFileSync\\('__check.js',best\\);\")",
+      "Bash(node *)",
+      "Bash(echo *)",
+      "Skill(update-config)",
+      "Skill(update-config:*)"
     ]
   }
 }
