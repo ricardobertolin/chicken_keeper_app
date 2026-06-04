@@ -1,4 +1,4 @@
-const VERSION = 'placeholder-v1';
+const VERSION = 'chicken-keeper-v0.8.3-mp-turn';
 const ASSETS = [
   './',
   './index.html',

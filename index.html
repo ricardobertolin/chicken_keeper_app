@@ -17071,6 +17071,28 @@
   const ID_PREFIX = 'chicken-mp-v1-';
   const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const CODE_LEN = 6;
+
+  // ICE servers for WebRTC. STUN alone only works when both players can
+  // hole-punch directly (same network); cross-network play NEEDS a TURN relay
+  // to fall back on. We used to ride on the PeerJS cloud's bundled default
+  // relay, but that's unreliable — when it's down, different-network lobbies
+  // hang forever on "Reaching host…". Supplying our own relays (port 443 also
+  // tunnels through strict firewalls) fixes that.
+  //
+  // These are free public relays. If multiplayer still hangs across networks,
+  // grab your own free credentials (50GB/mo) at https://dashboard.metered.ca
+  // and drop them in below.
+  const ICE_SERVERS = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'turn:openrelay.metered.ca:80',                 username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443',                username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443?transport=tcp',  username: 'openrelayproject', credential: 'openrelayproject' },
+  ];
+  // How long the guest waits for the data channel to open before giving up,
+  // rather than spinning on "Reaching host…" indefinitely.
+  const CONNECT_TIMEOUT_MS = 15000;
+
   let peer = null;
   let conn = null;
   let netRole = null;          // 'host' | 'guest' | null
@@ -17106,7 +17128,8 @@
       setStatus(document.getElementById(targetId), 'PeerJS failed to load (offline?).', 'bad');
       return;
     }
-    peer = customId ? new Peer(customId) : new Peer();
+    const peerOpts = { config: { iceServers: ICE_SERVERS } };
+    peer = customId ? new Peer(customId, peerOpts) : new Peer(undefined, peerOpts);
     peer.on('error', err => {
       console.warn('[Peer] error', err);
       const targetEl = netRole === 'guest'
@@ -17688,7 +17711,21 @@
     peer.on('open', () => {
       setStatus(document.getElementById('joinStatus'), 'Reaching host…');
       const c = peer.connect(ID_PREFIX + code, { reliable: true });
+      // If the data channel never opens (relay unreachable, host firewalled),
+      // bail out with a readable error instead of spinning here forever.
+      let settled = false;
+      const failTimer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        setStatus(document.getElementById('joinStatus'),
+          'Couldn’t reach the host (timed out). Double-check the code, or the host may be behind a strict firewall.', 'bad');
+        document.getElementById('btnJoinConnect').disabled = false;
+        teardownConnection();
+      }, CONNECT_TIMEOUT_MS);
       c.on('open', () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(failTimer);
         attachConn(c);
         setStatus(document.getElementById('joinStatus'), 'Connected!', 'good');
         startGame(true);
