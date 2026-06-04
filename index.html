@@ -429,7 +429,7 @@
       <button class="menu-btn menu-btn--primary" id="btnSingle">Single Player</button>
       <button class="menu-btn" id="btnMulti">Multiplayer</button>
       <button class="menu-btn" id="btnHowTo">How to Play</button>
-      <p class="menu-version">v0.8.1 <span class="by">·  made by ricardobertolin</span></p>
+      <p class="menu-version">v0.8.2 <span class="by">·  made by ricardobertolin</span></p>
     </section>
 
     <!-- How to play — controls -->
@@ -528,12 +528,12 @@
     <div class="debug-row">
       <span class="debug-label">Combat</span>
       <button data-debug="kill-wolves">Kill all wolves</button>
-      <button data-debug="spawn-wolf">Spawn wolf</button>
       <button data-debug="toggle-wave-autostart" id="debug-wave-autostart-btn">Pause wave start</button>
       <button data-debug="add-hat">Add hat</button>
       <button data-debug="add-hat-leprechaun">Leprechaun hat</button>
       <button data-debug="add-hat-witch">Witch hat</button>
-      <button data-debug="add-mustache">Add mustache</button>
+      <button data-debug="grow-mustache">Grow mustache</button>
+      <button data-debug="reset-mustache">Reset mustache</button>
       <button data-debug="toggle-immortal" id="debug-immortal-btn">Immortal: OFF</button>
       <button data-debug="toggle-autocrit" id="debug-autocrit-btn">Auto reload+crit: OFF</button>
       <button data-debug="resurrect-both">Resurrect both</button>
@@ -2262,7 +2262,7 @@
   // roll to turn turncoat (blue eye, attacks other wolves).
   const SABOTAGE_DEFECT_CHANCE   = [0, 0.03, 0.06, 0.10, 0.14, 0.20];
   const SABOTAGE_TURNCOAT_CHANCE = 0.12; // chance a defective wolf hatches turncoat at max level
-  const GHOST_SABOTAGE_CHANCE    = 0.4;  // per-second chance a ghost keeper flips a wolf it drifts through to turncoat
+  const GHOST_SABOTAGE_CHANCE    = 0.15; // per-second chance a ghost keeper flips a wolf it drifts through to turncoat (reduced)
   const SABOTAGE_FUSE     = 30;   // seconds a sabotaged wolf lives before it cooks off
   const SABOTAGE_BLAST_R  = 2.4;  // blast radius of a sabotaged wolf's self-detonation
   const SABOTAGE_BLAST_DMG = 4;   // damage the blast deals to nearby pack wolves
@@ -2306,7 +2306,7 @@
   // Laser Bullets (wave 101+) — instant straight beam, like the ranged wolf's.
   // Per level scales damage + reach. Replaces the pellet burst entirely.
   const LASER_DMG          = [0, 2, 3, 4, 5, 7];
-  const LASER_RANGE        = [0, 5, 6.5, 8, 9.5, 11.5];
+  const LASER_RANGE        = [0, 5, 6.2, 7.4, 8.6, 9.8]; // gentler per-level range gain (+1.2 vs +1.5)
   // Cryptid Radar (wave 101+) — boosts the spawn chance of every rare wolf
   // variant (fox, sword wolf, hatted wolf, thing wolf) per level, and pings a
   // warning when one wanders near. Visually plants an antenna on about half
@@ -2557,6 +2557,7 @@
   let restartBonusTier = 0;
   let barrelBonusMul = 1;
   let passedBoss = false; // true once this run has cleared (or survived past) the boss
+  let pendingCarryMoney = 0; // post-boss restarts carry 0.1% of the run's money (NOT doubled)
   let rocketLaunch = null; // post-boss restart cutscene state, or null
   let fade = null;         // black screen wipe: { t, dur, phase:'out'|'in', onBlack } or null
   // Money helpers — in separateMoney mode, money goes to whoever earned it
@@ -2726,12 +2727,12 @@
   const BOSS_PACK_CAP = 26;       // max concurrent pack wolves
   const BOSS_DASH_SPEED = 9;      // tiles/s while charging
   const BOSS_DASH_TIME = 0.75;    // seconds a charge lasts
-  const BOSS_DASH_CD = 3.5;       // cooldown between charges
+  const BOSS_DASH_CD = 2.8;       // cooldown between charges (shortened a touch)
   const BOSS_DASH_CHANCE = 0.1;   // per-second roll to charge (MK-02 onward) — 5x rarer now
   // Phase-3 chicken-suck: MK-03 launches orbs that drag a chicken back to heal it.
-  const BOSS_SUCK_COOLDOWN = 5.5; // seconds between chicken-suck launches
+  const BOSS_SUCK_COOLDOWN = 8;   // seconds between chicken-suck launches (less frequent now)
   const BOSS_SUCK_SPEED = 6.5;    // tiles/s the suck orb travels
-  const BOSS_SUCK_HEAL = 440;     // HP the boss regains per chicken delivered (doubled)
+  const BOSS_SUCK_HEAL = 300;     // HP the boss regains per chicken delivered (reduced)
   const BOSS_SUCK_GRAB_R = 0.6;   // distance at which the orb grabs / delivers
   // Phase-4 missiles: MK-04 briefly winds up (the rack glows) then fires twin
   // wall-piercing missiles at a coop while it keeps fighting.
@@ -2743,6 +2744,9 @@
   // Shared coop-strike payload (reused by the boss AND the wave-101+ missile wolf).
   const MISSILE_MIN_FLOORS = 1;      // fewest floors a hit knocks off
   const MISSILE_MAX_FLOORS = 3;      // most floors a hit knocks off
+  const BOSS_BULLET_BLAST_R   = 1.9; // radius a cooked-off boss homing bullet flattens buildings in
+  const BOSS_BULLET_BOOM_CHANCE = 0.5; // chance a boss homing bullet explodes at end of life
+  const COOP_IGNITE_DURATION  = 4.5; // seconds a missile-struck coop stays on fire
   let bossPackSpawnT = 0;         // trickle timer during the 'pack' phase
   let bossWaveActive = false;     // true through the whole wave-100 fight
   let bossPhase = '';             // 'intro'|'fight'|'retreat'|'pack'|'explode'|'cleared'
@@ -2977,8 +2981,8 @@
     spinReload: [0, 0.04, 0.08, 0.12, 0.16, 0.20], // chance a reload becomes an instant twirl
     wolfDelay: [1, 2, 3, 4, 5, 10],    // seconds before wolves start spawning each wave
     hatchRate: [1.0, 0.95, 0.90, 0.85, 0.80, 0.75], // multiplier on coop chicken respawn interval
-    doubleBarrel: [0, 1.10, 1.20, 1.35, 1.50, 1.70], // double-barrel damage multiplier by level
-    machineGun: [0, 1.0, 0.80, 0.62, 0.48, 0.36],   // fire-cooldown multiplier by level (lower = faster); starts slow at lvl 1, mag size is now fixed (MG_MAG)
+    doubleBarrel: [0, 1.10, 1.25, 1.45, 1.70, 2.00], // double-barrel damage multiplier by level
+    machineGun: [0, 1.0, 0.84, 0.68, 0.54, 0.42],   // fire-cooldown multiplier by level (lower = faster); starts slow at lvl 1, mag size is now fixed (MG_MAG)
     rocket:     [0, 0.08, 0.16, 0.24, 0.34, 0.50],   // per-pellet chance to explode on contact / end of life (nerfed)
     minigun:    [1.0, 0.62, 0.50, 0.40, 0.32, 0.25], // extra fire-cooldown multiplier on top of the machine-gun rate (lower = faster); gentler ramp so it's not absurdly fast
     focusUp:  [0.50, 0.55, 0.60, 0.65, 0.75, 0.80],
@@ -5087,6 +5091,9 @@
       speedMul *= 1.25;
       hp = Math.max(hp, Math.ceil(hp * 1.5));
     }
+    // Endless ramp: past wave 100 the whole pack gets a little beefier every
+    // wave, so survival runs keep getting harder.
+    if (wave > 100) hp = Math.ceil(hp * (1 + (wave - 100) * 0.04));
 
     // Sabotage roll — applies only to plain wolves (not sword/assassin
     // specials, which already have their own personality). If they roll
@@ -6585,8 +6592,17 @@
     const ss = spreadStatsFor(who);
     const loose = (lvls.spreadUp || 0) > 0;
     const tight = (lvls.spreadDown || 0) > 0;
-    let beamCount = 1, arc = 0, dmgPer = baseDmg;
-    if (loose) {
+    const doubleHelix = loose && tight;
+    const HELIX_FAN = 0.34; // radians between the three Double Helix beams
+    let beamCount = 1, arc = 0, dmgPer = baseDmg, helixDirs = null;
+    if (doubleHelix) {
+      // Double Helix: the beam splits into THREE concentrated tight beams fanned
+      // left / centre / right (mirrors the pellet Double Helix).
+      reach *= 1.4;
+      dmgPer = baseDmg * 1.5;
+      helixDirs = [-HELIX_FAN, 0, HELIX_FAN];
+      beamCount = 3;
+    } else if (loose) {
       beamCount = Math.max(2, Math.min(ss.count, 7)); // a fan, capped so it stays readable
       arc = ss.spread;
       dmgPer = baseDmg * 0.6;                          // each beam is weaker
@@ -6595,17 +6611,22 @@
       dmgPer = baseDmg * 1.5;                          // and hits harder
     }
     for (let i = 0; i < beamCount; i++) {
-      const t = beamCount > 1 ? (i / (beamCount - 1)) * 2 - 1 : 0; // -1..+1
-      const a = aim + t * arc * 0.5;
+      const a = helixDirs ? (aim + helixDirs[i])
+                          : aim + (beamCount > 1 ? (i / (beamCount - 1)) * 2 - 1 : 0) * arc * 0.5;
       const bx1 = who.x + Math.cos(a) * muzzle;
       const by1 = who.y + Math.sin(a) * muzzle;
       // Clip the beam at the first stone wall in its path — lasers can't pass
       // through walls (the visual + damage both stop at the wall face). At Size
       // Matters MAX the beam also ricochets off the border into a chain of
-      // segments; otherwise it's a single straight segment.
-      const segs = homingBend
-        ? tracedHomingBeam(bx1, by1, a, reach, lvls.homing, sizeBounce)
-        : tracedBeamSegments(bx1, by1, a, reach, sizeBounce);
+      // segments; otherwise it's a single straight segment. For Double Helix the
+      // two LATERAL beams always fire straight — only the centre beam homes AND
+      // ricochets.
+      const isCenter = !helixDirs || helixDirs[i] === 0;
+      const useHoming = homingBend && isCenter;
+      const useBounce = sizeBounce && isCenter; // only the middle helix beam ricochets
+      const segs = useHoming
+        ? tracedHomingBeam(bx1, by1, a, reach, lvls.homing, useBounce)
+        : tracedBeamSegments(bx1, by1, a, reach, useBounce);
       for (const s of segs) {
         applyPlayerBeam(s.x1, s.y1, s.x2, s.y2, dmgPer, shooterId);
         beams.push({ x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2, t: 0, life: 0.22, color: beamColor, yOff: 18 });
@@ -6679,8 +6700,11 @@
     const isSlug = upgradeLevels.spreadDown >= MAX_LEVEL;
     const loose = upgradeLevels.spreadUp > 0;     // Loose Pattern: weaker, smaller pellets
     const tighter = upgradeLevels.spreadDown > 0; // Tighter Pattern: harder-hitting pellets
-    let pelletDmg = isSlug ? (5 + upgradeLevels.spreadDown2 * 2) : (loose && tighter) ? 1.1 : loose ? 0.7 : tighter ? 1.3 : 1;
-    const pelletR   = isSlug ? 3.5 : loose ? 1.3 : (tighter ? TIGHT_PELLET_R : 2);
+    // Double Helix (Loose + Tighter both owned): fires like a TIGHT shot — harder
+    // hits, tight grouping — but tripled across three fanned directions below.
+    const doubleHelix = loose && tighter;
+    let pelletDmg = isSlug ? (5 + upgradeLevels.spreadDown2 * 2) : doubleHelix ? 1.3 : loose ? 0.7 : tighter ? 1.3 : 1;
+    const pelletR   = isSlug ? 3.5 : doubleHelix ? TIGHT_PELLET_R : loose ? 1.3 : (tighter ? TIGHT_PELLET_R : 2);
     // Soft Bullet: per-pellet chance to pass through a chicken without harm.
     // Hard Bullet: scaling damage multiplier vs wolves. Mutually exclusive.
     const spareChance = upgradeLevels.softBullet > 0 ? tableAt('softBullet') : 0;
@@ -6724,37 +6748,47 @@
     const hotChance  = COLD_HOT_CHANCE[Math.min(5, upgradeLevels.hotShot || 0)];
     const coldDur = statusEffectDur(upgradeLevels.coldShot || 0);  // 3s → 7s at max
     const hotDur  = statusEffectDur(upgradeLevels.hotShot || 0);
-    for (let i = 0; i < pelletCount; i++) {
-      const t = pelletCount > 1 ? (i / (pelletCount - 1)) * 2 - 1 : 0; // -1 .. +1
-      const jitter = rand(-shotgunSpread, shotgunSpread) * 0.12;
-      const a = aim + t * shotgunSpread + jitter;
-      const sp = speedBase + rand(-2, 2) * (homingLvl > 0 ? HOMING_SPEED_MUL : 1);
-      pellets.push({
-        x: player.x + Math.cos(aim) * reach,
-        y: player.y + Math.sin(aim) * reach,
-        vx: Math.cos(a) * sp,
-        vy: Math.sin(a) * sp,
-        life: (shotgunLife * lifeMul + sizeLife) * critRange,
-        dmg: pelletDmg,
-        pierce: isSlug ? (10 + upgradeLevels.spreadDown2 * 3) : 1,
-        hit: isSlug ? new Set() : null,
-        spareChance: spareChance,
-        r: rocketLvl > 0 ? pelletR * ROCKET_PELLET_R_MUL : pelletR,
-        color: pelletColor,
-        trail: !isSlug,
-        shooter: 1,
-        crit: isCrit, // drives the fiery crit bullet look in drawPellet
-        critCol,      // crit tint based on current bullet (yellow/red/blue/purple)
-        bounce: sizeBounce,
-        cold: coldChance > 0 && Math.random() < coldChance, coldDur,
-        hot: hotChance > 0 && Math.random() < hotChance, hotDur,
-        rocket: rocketLvl > 0,
-        rocketChance,
-        rocketBoom,
-        homing: homingLvl > 0,
-        homingLvl,
-        homingTarget: null,
-      });
+    // Double Helix splits into THREE tight clusters fanned left / centre / right
+    // (like the boss's 3-way laser); everything else fires a single cluster.
+    const tightLvl = Math.min(upgradeLevels.spreadDown, MAX_LEVEL);
+    const HELIX_FAN = 0.34; // radians between the three directions
+    const clusterCount  = doubleHelix ? TIGHT_BULLETS[tightLvl] : pelletCount;
+    const clusterSpread = doubleHelix ? (TIGHT_SPREAD[tightLvl] * Math.PI / 180) : shotgunSpread;
+    const helixDirs     = doubleHelix ? [-HELIX_FAN, 0, HELIX_FAN] : [0];
+    for (const dirOff of helixDirs) {
+      const clusterAim = aim + dirOff;
+      for (let i = 0; i < clusterCount; i++) {
+        const t = clusterCount > 1 ? (i / (clusterCount - 1)) * 2 - 1 : 0; // -1 .. +1
+        const jitter = rand(-clusterSpread, clusterSpread) * 0.12;
+        const a = clusterAim + t * clusterSpread + jitter;
+        const sp = speedBase + rand(-2, 2) * (homingLvl > 0 ? HOMING_SPEED_MUL : 1);
+        pellets.push({
+          x: player.x + Math.cos(aim) * reach,
+          y: player.y + Math.sin(aim) * reach,
+          vx: Math.cos(a) * sp,
+          vy: Math.sin(a) * sp,
+          life: (shotgunLife * lifeMul + sizeLife) * critRange,
+          dmg: pelletDmg,
+          pierce: isSlug ? (10 + upgradeLevels.spreadDown2 * 3) : 1,
+          hit: isSlug ? new Set() : null,
+          spareChance: spareChance,
+          r: rocketLvl > 0 ? pelletR * ROCKET_PELLET_R_MUL : pelletR,
+          color: pelletColor,
+          trail: !isSlug,
+          shooter: 1,
+          crit: isCrit, // drives the fiery crit bullet look in drawPellet
+          critCol,      // crit tint based on current bullet (yellow/red/blue/purple)
+          bounce: sizeBounce,
+          cold: coldChance > 0 && Math.random() < coldChance, coldDur,
+          hot: hotChance > 0 && Math.random() < hotChance, hotDur,
+          rocket: rocketLvl > 0,
+          rocketChance,
+          rocketBoom,
+          homing: homingLvl > 0,
+          homingLvl,
+          homingTarget: null,
+        });
+      }
     }
     shake = 0.15;
   }
@@ -6863,9 +6897,9 @@
     ctx.fill();
   }
 
-  function spawnBlast(wx, wy) {
+  function spawnBlast(wx, wy, col) {
     spawnScorch(wx, wy);
-    blasts.push({ x: wx, y: wy, t: 0, life: MELEE_ANIM_DUR });
+    blasts.push({ x: wx, y: wy, t: 0, life: MELEE_ANIM_DUR, col: col || null });
     // Shove any nearby keeper away from the blast. Same kind of nudge the
     // Double-Barrel right-click gives the firer, but driven by distance from
     // the explosion centre instead of the player's aim.
@@ -7279,6 +7313,7 @@
   function tryReload() {
     if (multiplayer && !isHost) return;
     if (gameOver) return;
+    if (player.ghost) return; // ghosts have no gun — can't reload
     if ((player.danceT || 0) > 0) return; // stunned mid-dance
     if (buildMode) return; // can't reload while placing buildings
     if (upgradeLevels.sword >= 1) return; // the sword never reloads
@@ -7373,8 +7408,9 @@
     const isSlug = lvls.spreadDown >= MAX_LEVEL;
     const loose = lvls.spreadUp > 0;
     const tighter = lvls.spreadDown > 0;
-    let pelletDmg = isSlug ? (5 + lvls.spreadDown2 * 2) : (loose && tighter) ? 1.1 : loose ? 0.7 : tighter ? 1.3 : 1;
-    const pelletR  = isSlug ? 3.5 : loose ? 1.3 : (tighter ? TIGHT_PELLET_R : 2);
+    const doubleHelix = loose && tighter; // 3 fanned tight clusters (parity with P1)
+    let pelletDmg = isSlug ? (5 + lvls.spreadDown2 * 2) : doubleHelix ? 1.3 : loose ? 0.7 : tighter ? 1.3 : 1;
+    const pelletR  = isSlug ? 3.5 : doubleHelix ? TIGHT_PELLET_R : loose ? 1.3 : (tighter ? TIGHT_PELLET_R : 2);
     const spareChance = lvls.softBullet > 0 ? tableAtFor(player2, 'softBullet') : 0;
     if (lvls.hardBullet > 0) pelletDmg *= tableAtFor(player2, 'hardBullet');
     if (player2.spinDmg) { pelletDmg *= SPIN_DMG_MUL; player2.spinDmg = false; }
@@ -7405,37 +7441,46 @@
     const hotChance2  = COLD_HOT_CHANCE[Math.min(5, lvls.hotShot || 0)];
     const coldDur2 = statusEffectDur(lvls.coldShot || 0);
     const hotDur2  = statusEffectDur(lvls.hotShot || 0);
-    for (let i = 0; i < ss.count; i++) {
-      const t = ss.count > 1 ? (i / (ss.count - 1)) * 2 - 1 : 0;
-      const jitter = rand(-ss.spread, ss.spread) * 0.12;
-      const a = aim + t * ss.spread + jitter;
-      const sp = speedBase + rand(-2, 2) * (homingLvl2 > 0 ? HOMING_SPEED_MUL : 1);
-      pellets.push({
-        x: player2.x + Math.cos(aim) * reach2,
-        y: player2.y + Math.sin(aim) * reach2,
-        vx: Math.cos(a) * sp,
-        vy: Math.sin(a) * sp,
-        life: life,
-        dmg: pelletDmg,
-        pierce: isSlug ? (10 + lvls.spreadDown2 * 3) : 1,
-        hit: isSlug ? new Set() : null,
-        spareChance: spareChance,
-        r: rocketLvl > 0 ? pelletR * ROCKET_PELLET_R_MUL : pelletR,
-        color: pelletColor,
-        trail: !isSlug,
-        shooter: 2, // tags this pellet as player2's (drives friendly-fire checks)
-        crit: isCrit2, // drives the fiery crit bullet look in drawPellet
-        critCol: critCol2, // crit tint based on current bullet (yellow/red/blue/purple)
-        bounce: sizeBounce2,
-        cold: coldChance2 > 0 && Math.random() < coldChance2, coldDur: coldDur2,
-        hot: hotChance2 > 0 && Math.random() < hotChance2, hotDur: hotDur2,
-        rocket: rocketLvl > 0,
-        rocketChance,
-        rocketBoom,
-        homing: homingLvl2 > 0,
-        homingLvl: homingLvl2,
-        homingTarget: null,
-      });
+    // Double Helix fans into THREE tight clusters (left / centre / right).
+    const tightLvl2 = Math.min(lvls.spreadDown, MAX_LEVEL);
+    const HELIX_FAN = 0.34;
+    const clusterCount2  = doubleHelix ? TIGHT_BULLETS[tightLvl2] : ss.count;
+    const clusterSpread2 = doubleHelix ? (TIGHT_SPREAD[tightLvl2] * Math.PI / 180) : ss.spread;
+    const helixDirs2     = doubleHelix ? [-HELIX_FAN, 0, HELIX_FAN] : [0];
+    for (const dirOff of helixDirs2) {
+      const clusterAim = aim + dirOff;
+      for (let i = 0; i < clusterCount2; i++) {
+        const t = clusterCount2 > 1 ? (i / (clusterCount2 - 1)) * 2 - 1 : 0;
+        const jitter = rand(-clusterSpread2, clusterSpread2) * 0.12;
+        const a = clusterAim + t * clusterSpread2 + jitter;
+        const sp = speedBase + rand(-2, 2) * (homingLvl2 > 0 ? HOMING_SPEED_MUL : 1);
+        pellets.push({
+          x: player2.x + Math.cos(aim) * reach2,
+          y: player2.y + Math.sin(aim) * reach2,
+          vx: Math.cos(a) * sp,
+          vy: Math.sin(a) * sp,
+          life: life,
+          dmg: pelletDmg,
+          pierce: isSlug ? (10 + lvls.spreadDown2 * 3) : 1,
+          hit: isSlug ? new Set() : null,
+          spareChance: spareChance,
+          r: rocketLvl > 0 ? pelletR * ROCKET_PELLET_R_MUL : pelletR,
+          color: pelletColor,
+          trail: !isSlug,
+          shooter: 2, // tags this pellet as player2's (drives friendly-fire checks)
+          crit: isCrit2, // drives the fiery crit bullet look in drawPellet
+          critCol: critCol2, // crit tint based on current bullet (yellow/red/blue/purple)
+          bounce: sizeBounce2,
+          cold: coldChance2 > 0 && Math.random() < coldChance2, coldDur: coldDur2,
+          hot: hotChance2 > 0 && Math.random() < hotChance2, hotDur: hotDur2,
+          rocket: rocketLvl > 0,
+          rocketChance,
+          rocketBoom,
+          homing: homingLvl2 > 0,
+          homingLvl: homingLvl2,
+          homingTarget: null,
+        });
+      }
     }
     shake = 0.15;
   }
@@ -8804,7 +8849,7 @@
     b.gaitT = (b.gaitT || 0) - dt;
     if (b.gaitT <= 0) { b.walking = !b.walking; b.gaitT = b.walking ? rand(1.3, 2.1) : rand(0.9, 1.5); }
     const standoff = 7;
-    const spd = 0.7; // slower than before
+    const spd = 0.9; // a touch faster than before
     if (b.walking && d > standoff + 0.5)      { b.vx = (dx / d) * spd;       b.vy = (dy / d) * spd; }
     else if (b.walking && d < standoff - 0.5) { b.vx = -(dx / d) * spd * 0.7; b.vy = -(dy / d) * spd * 0.7; }
     else                                      { b.vx = 0; b.vy = 0; }
@@ -8853,6 +8898,7 @@
         vy: Math.sin(a) * HOMER_BULLET_SPEED * 0.6,
         life: HOMER_BULLET_LIFE * 1.6, dmg: 0, pierce: 1, r: 5.5,
         color: '#ff6a2a', trail: true, shooter: 'wolf', wolfHoming: true, homingTarget: tgt,
+        bossBullet: true, // 50% chance to cook off (red) at end of life, flattening nearby buildings
       });
     }
   }
@@ -8995,6 +9041,25 @@
     }
     if (lost > 0) toast('A coop took a missile — lost ' + lost + ' floor' + (lost > 1 ? 's' : '') + '!', 1.8);
     else toast('A coop took a missile hit!', 1.6);
+    // Set the coop ablaze on random floors for a few seconds (drawCoop renders
+    // the hot-shot flames; igniteT is synced so the guest sees it too).
+    coop.igniteT = COOP_IGNITE_DURATION;
+  }
+
+  // A boss homing bullet that cooked off at the end of its flight: a red blast
+  // that hurts keepers in range AND flattens any buildings close to it.
+  function bossBulletExplode(x, y) {
+    spawnBlast(x, y, '#ff2a2a'); // red detonation
+    playExplosion();
+    shake = Math.max(shake, 0.3);
+    explosionHitKeepers(x, y, BOSS_BULLET_BLAST_R);
+    const r2 = BOSS_BULLET_BLAST_R * BOSS_BULLET_BLAST_R;
+    for (let i = fences.length - 1; i >= 0; i--) if (dist2(fences[i].x, fences[i].y, x, y) < r2) { spawnFenceDebris(fences[i]); spawnSmoke(fences[i].x, fences[i].y, 3); fences.splice(i, 1); }
+    for (let i = dummies.length - 1; i >= 0; i--) if (dist2(dummies[i].x, dummies[i].y, x, y) < r2) { spawnSmoke(dummies[i].x, dummies[i].y, 4); dummies.splice(i, 1); }
+    for (let i = statues.length - 1; i >= 0; i--) if (dist2(statues[i].x, statues[i].y, x, y) < r2) { spawnSmoke(statues[i].x, statues[i].y, 4); statues.splice(i, 1); }
+    for (let i = farms.length - 1; i >= 0; i--) if (dist2(farms[i].x, farms[i].y, x, y) < r2) { spawnSmoke(farms[i].x, farms[i].y, 3); farms.splice(i, 1); }
+    // NOTE: coops are deliberately spared here — only the MK-04 missiles damage
+    // coops (lose floors + ignite). Bullets just flatten the smaller placeables.
   }
 
   function updateBossMissiles(dt) {
@@ -10240,6 +10305,9 @@
       const wm = Math.hypot(wdx, wdy) || 1;
       hurtWolf(w, 9999, (wdx / wm) * 0.6, (wdy / wm) * 0.6);
     }
+    // Karma's wrath even cracks FANGUS — instakill the boss's current phase
+    // (it soaks capped damage normally, so force its HP to zero directly).
+    if (boss && boss.alive && bossPhase === 'fight') boss.hp = 0;
     // Bad karma also slaughters the flock — the rescue is paid in chickens.
     if (!good) {
       for (const c of chickens) {
@@ -10392,7 +10460,12 @@
       p.age = (p.age || 0) + dt;
       if (p.age >= ROCKET_MIN_FLIGHT && Math.random() < ROCKET_MIDAIR_BOOM * dt) { p.rocketBoom = true; p.didHit = true; return false; }
     }
-    if (p.life <= 0) return false;
+    if (p.life <= 0) {
+      // Boss homing bullets have a chance to cook off in a red blast at the end
+      // of their flight, flattening any buildings they died near.
+      if (p.bossBullet && Math.random() < BOSS_BULLET_BOOM_CHANCE) bossBulletExplode(p.x, p.y);
+      return false;
+    }
     // Size Matters MAX: instead of dying at the map edge, the shot ricochets
     // off an invisible border wall just past the map and curves back into play.
     if (p.bounce) {
@@ -10419,6 +10492,22 @@
     if (p2Cameo && !p2Cameo.ghost && (p.shooter === 1 || p.shooter === 2) &&
         dist2(p.x, p.y, p2Cameo.x, p2Cameo.y) < 0.3) {
       spookCameo();
+    }
+    // Shoot the FANGUS siphon orb to break the tractor beam: the chicken drops
+    // free ALIVE (saved from being devoured), with a brief grace so it can't be
+    // re-snagged instantly. The pellet is spent breaking the orb.
+    if ((p.shooter === 1 || p.shooter === 2) && chickenSuckers.length) {
+      for (let si = chickenSuckers.length - 1; si >= 0; si--) {
+        const s = chickenSuckers[si];
+        if (dist2(p.x, p.y, s.x, s.y) < 0.5) {
+          if (s.target) { s.target.suckedBy = null; s.target.savedT = 1.5; }
+          spawnSmoke(s.x, s.y, 4);
+          playChickenPop();
+          toast('You shot the orb free — chicken saved!', 1.2);
+          chickenSuckers.splice(si, 1);
+          return false;
+        }
+      }
     }
     // Hit wolves — a pellet expires once its pierce budget runs out (1 for
     // normal pellets, 10 for the Tighter Pattern MAX slug). The hit set stops
@@ -10618,8 +10707,13 @@
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     update(dt);
-    updateRocketLaunch(dt); // post-boss restart cutscene (ticks even when frozen)
-    updateFade(dt);         // black screen wipe — ticks even when frozen
+    // The cutscene + wipe are host-authoritative in co-op: the guest mirrors
+    // them from the snapshot (rocketLaunch / fade), so it must NOT advance them
+    // locally or it would double-drive the animation.
+    if (!(multiplayer && !isHost)) {
+      updateRocketLaunch(dt); // post-boss restart cutscene (ticks even when frozen)
+      updateFade(dt);         // black screen wipe — ticks even when frozen
+    }
     // Refresh player1's weapon-mirror on the player object so the keeper-draw
     // helpers can read everything from one place.
     syncP1Weapon();
@@ -10644,8 +10738,10 @@
 
   function update(dt) {
     if (!gameStarted) return;
-    // Frozen while fading to black before the world swaps in (the boss-restart
-    // wipe) — this also stops any upgrade screen from opening mid-transition.
+    // Frozen while the post-boss rocket cutscene plays or while fading to black
+    // before the world swaps in — this keeps the host's snapshot stable so the
+    // guest mirrors a clean cutscene, and stops any upgrade screen mid-transition.
+    if (rocketLaunch) return;
     if (fade && fade.phase === 'out') return;
     if (gameOver && gameOverPanelDelayT > 0) {
       gameOverPanelDelayT = Math.max(0, gameOverPanelDelayT - dt);
@@ -10873,7 +10969,9 @@
     updateBlasts(dt);
     updateScorches(dt);
     updateBeams(dt);
-    updateBossMissiles(dt); // boss MK-04 + missile-wolf rockets (any wave)
+    if (!(multiplayer && !isHost)) {
+      updateBossMissiles(dt); // boss MK-04 + missile-wolf rockets (any wave)
+    }
     // Decoy hit-flash timer drains naturally each frame.
     for (const dm of dummies) if (dm.hurtT > 0) dm.hurtT -= dt;
     for (const st of statues) if (st.hurtT > 0) st.hurtT -= dt;
@@ -10964,6 +11062,7 @@
       for (const c of coops) {
         c.spawnT -= dt;
         if (c.shakeT > 0) c.shakeT -= dt; // missile-strike shudder, drives drawCoop jitter
+        if (c.igniteT > 0) c.igniteT -= dt; // missile fire dies down after COOP_IGNITE_DURATION
         // The bare-earth patch around a coop slowly spreads outward as it ages.
         c.dirtR = Math.min(3.0, (c.dirtR || 0) + dt * 0.01);
         if (c.spawnT <= 0) {
@@ -11879,17 +11978,23 @@
   // The FANGUS-kill trophy: a big, bushy Pringles-style mustache — two full,
   // filled lobes under the nose whose tips flick sharply upward. Each boss kill
   // widens and fattens it (level 1..N). `headY` is the head's centre y.
-  function drawMustache(cx, headY, level) {
+  function drawMustache(cx, headY, level, age) {
     const n = Math.max(1, level || 1);
     // Slow, diminishing growth: it widens with every kill but settles toward a
     // sane max size rather than scaling linearly forever (so it stays "to the
     // sizes" instead of ballooning across the face).
     const g = Math.log2(n + 1);      // 1 → 1.0, 3 → 2.0, 7 → 3.0, 15 → 4.0 …
     const half  = 4 + g * 1.4;       // half-width — grows wider with every kill
-    const thick = 2.4 + g * 0.45;    // vertical bushiness
-    const my = headY + 2.3;          // sits just under the nose
+    const thick = 1.8 + g * 0.34;    // vertical bushiness (slimmer now)
+    const my = headY + 3.2;          // sits just under the nose (nudged up a touch)
+    // Greys with age — every post-boss restart the trophy survives adds a little
+    // salt to the pepper, capped so it never goes fully white.
+    const grayFrac = Math.min(0.65, Math.max(0, age || 0) * 0.1);
+    const blend = (a, b) => Math.round(a + (b - a) * grayFrac);
+    const mainCol = 'rgb(' + blend(58, 150) + ',' + blend(33, 145) + ',' + blend(19, 140) + ')';
+    const hiCol   = 'rgb(' + blend(107, 195) + ',' + blend(67, 190) + ',' + blend(38, 185) + ')';
     ctx.save();
-    ctx.fillStyle = '#3a2113';       // dark espresso brown, like the mascot
+    ctx.fillStyle = mainCol;         // dark espresso brown, greying with age
     ctx.lineJoin = 'round';
     // Mirror-draw each half as a filled lobe: out from the centre along the top,
     // an upward-hooked tip, then a bushy belly sweeping back to the middle.
@@ -11907,7 +12012,7 @@
     }
     // A soft highlight ridge along the top to give it some body.
     ctx.globalAlpha = 0.18;
-    ctx.fillStyle = '#6b4326';
+    ctx.fillStyle = hiCol;
     for (const s of [-1, 1]) {
       ctx.beginPath();
       ctx.moveTo(cx, my - thick * 0.3);
@@ -12605,12 +12710,12 @@
 
   // A white melee-swing arc: a forward crescent, or a full ring when `full`.
   // `t` is the remaining animation time; the arc expands and fades as it plays.
-  function drawMeleeArc(sx, sy, worldDir, full, t, scale = 1) {
+  function drawMeleeArc(sx, sy, worldDir, full, t, scale = 1, col = '#ffffff') {
     const prog = clamp(1 - t / MELEE_ANIM_DUR, 0, 1);
     const radius = (12 + prog * 13) * scale;
     ctx.save();
     ctx.globalAlpha = (1 - prog) * 0.9;
-    ctx.strokeStyle = '#ffffff';
+    ctx.strokeStyle = col;
     ctx.lineWidth = 4.5 * scale * (1 - prog * 0.55);
     ctx.lineCap = 'round';
     ctx.beginPath();
@@ -12743,7 +12848,10 @@
       ctx.lineTo(baseX - px * 1.5, baseY - py * 1.5);
       ctx.closePath();
       ctx.fill();
-    } else if (ulvls.spreadDown >= MAX_LEVEL) {
+    }
+    // Independent of the funnel, so owning BOTH (metaverse) shows the funnel AND
+    // the scope rather than just one.
+    if (ulvls.spreadDown >= MAX_LEVEL) {
       // Tighter Pattern MAX: scope on top.
       const mx2 = cx + gx * (barrelLength * 0.4), my2 = gunY + gy * (barrelLength * 0.4);
       const ax = mx2 + px * 4, ay = my2 + py * 4;
@@ -13102,7 +13210,7 @@
     ctx.fill();
     // FANGUS-kill trophy mustache — widens with each boss kill. Only the keeper
     // who earned it wears one.
-    if ((player.mustache || 0) > 0 && !player.ghost) drawMustache(cx, cy - 30 + crouchYAdd, player.mustache);
+    if ((player.mustache || 0) > 0 && !player.ghost) drawMustache(cx, cy - 30 + crouchYAdd, player.mustache, player.mustacheAge);
     // Hats — the player's health. Starts at START_HATS, stacked on the head;
     // each wolf hit knocks the top one off until none remain.
     const HAT_STEP = 5;
@@ -13286,6 +13394,16 @@
     ctx.translate(cx, cy - liftY2);
     ctx.scale(PLAYER_SCALE, PLAYER_SCALE);
     ctx.translate(-cx, -cy);
+    // Dance stun — rock side to side with little hops (mirrors player1) so the
+    // other keeper sees the jig in co-op.
+    if ((player2.danceT || 0) > 0) {
+      const t = player2.danceAnimT || 0;
+      const sway = Math.sin(t * 16) * 0.30;
+      const hop = Math.abs(Math.sin(t * 9)) * 5;
+      ctx.translate(cx, cy - hop);
+      ctx.rotate(sway);
+      ctx.translate(-cx, -cy);
+    }
     // Death fall — same topple as player1, before the buddy turns to a ghost.
     const downed2 = !!player2.dying;
     if (downed2) {
@@ -13316,7 +13434,7 @@
     ctx.arc(cx, cy - 30 + crouchYAdd2, 6, 0, Math.PI * 2);
     ctx.fill();
     // FANGUS-kill trophy mustache — widens with each boss kill.
-    if ((player2.mustache || 0) > 0 && !player2.ghost) drawMustache(cx, cy - 30 + crouchYAdd2, player2.mustache);
+    if ((player2.mustache || 0) > 0 && !player2.ghost) drawMustache(cx, cy - 30 + crouchYAdd2, player2.mustache, player2.mustacheAge);
     // Hat stack — same mechanic as player1: one per remaining HP.
     // Each client receives the host's authoritative hatColors array via the
     // snapshot, so a Buy-Hat green hat shows up on both screens. Falls back
@@ -13382,6 +13500,16 @@
         ctx.ellipse(cx + off, footY, 1.2, 2.2 + Math.cos(flickT * 1.7 + off) * 0.4, 0, 0, Math.PI * 2);
         ctx.fill();
       }
+    }
+    // Dance stun — jaunty music notes bob up over the buddy (mirrors player1).
+    if ((player2.danceT || 0) > 0) {
+      const t = player2.danceAnimT || 0;
+      ctx.save();
+      ctx.font = 'bold 13px sans-serif';
+      ctx.fillStyle = '#ffe27a';
+      ctx.fillText('♪', cx + 12 + Math.sin(t * 5) * 3, cy - 42 - ((t * 9) % 16));
+      ctx.fillText('♫', cx - 16 + Math.cos(t * 4) * 3, cy - 38 - ((t * 7 + 8) % 16));
+      ctx.restore();
     }
     // Melee-swing arc — drawn outside the player scale, around the torso.
     if (showWeapon && player2.meleeT > 0) {
@@ -13829,6 +13957,31 @@
           ctx.restore();
         }
       }
+    }
+    // Missile fire — random floors blaze with the hot-shot flame look for a few
+    // seconds after a strike (igniteT is synced, so the guest sees it too).
+    if ((c.igniteT || 0) > 0 && !launching) {
+      ctx.save();
+      ctx.globalAlpha = 1; // flames always full opacity, even behind the occlusion fade
+      const ft = Date.now() / 55;
+      const nF = Math.max(1, floors);
+      for (let f = 0; f < nF; f++) {
+        if ((vhash(f + 11) % 3) === 0) continue; // only "random" floors catch fire
+        const baseY = cy - f * wallH - wallH * 0.55;
+        for (let i = 0; i < 3; i++) {
+          const off = (i - 1) * 5;
+          const flick = 0.7 + Math.sin(ft + f * 1.7 + i * 2.3) * 0.3;
+          ctx.fillStyle = i === 1 ? 'rgba(255,150,40,0.9)' : 'rgba(225,70,20,0.85)';
+          ctx.beginPath();
+          ctx.ellipse(cx + off, baseY - 3, 2.8, (7 + (i % 2) * 2) * flick, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = 'rgba(255,236,140,0.95)';
+          ctx.beginPath();
+          ctx.ellipse(cx + off, baseY - 4, 1.3, 3.4 * flick, 0, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      ctx.restore();
     }
     ctx.restore();
   }
@@ -15130,12 +15283,12 @@
       // with a bright white core so a primed shot pops regardless of tint.
       const tint = p.critCol || '#ffae2a';
       const pulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.03 + p.x * 5 + p.y * 5);
-      const rr = (p.r || 2) * 1.3;
+      const rr = (p.r || 2) * 1.08; // close to the normal round size — a subtler crit
       ctx.save();
       ctx.globalCompositeOperation = 'lighter';
       ctx.globalAlpha = 0.4 + 0.4 * pulse;
       ctx.fillStyle = tint;
-      ctx.beginPath(); ctx.arc(sp.x, y, rr + 3.2 + pulse * 1.6, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(sp.x, y, rr + 1.6 + pulse * 0.9, 0, Math.PI * 2); ctx.fill();
       ctx.restore();
       ctx.fillStyle = tint;
       ctx.beginPath(); ctx.arc(sp.x, y, rr, 0, Math.PI * 2); ctx.fill();
@@ -15509,7 +15662,7 @@
   // A bursting fat-chicken explosion — drawn as the white melee-swing ring.
   function drawBlast(b) {
     const p = worldToScreen(b.x, b.y);
-    drawMeleeArc(p.x, p.y + TILE_H / 2, 0, true, b.life - b.t, 1.8);
+    drawMeleeArc(p.x, p.y + TILE_H / 2, 0, true, b.life - b.t, 1.8, b.col || '#ffffff');
   }
 
   // World-space offset from the tent to the fire pit — one tile forward in
@@ -16127,7 +16280,11 @@
     player.chickensShot = 0;
     player2.chickensShot = 0;
     // NOTE: player.mustache / player2.mustache are intentionally NOT reset —
-    // the FANGUS-kill mustache is kept across restarts.
+    // the FANGUS-kill mustache (and each keeper's count) is kept across restarts,
+    // so beating the boss as one keeper never wipes the other's progress.
+    // Each restart a keeper's surviving mustache ages one notch (greys a little).
+    if ((player.mustache || 0) > 0) player.mustacheAge = (player.mustacheAge || 0) + 1;
+    if ((player2.mustache || 0) > 0) player2.mustacheAge = (player2.mustacheAge || 0) + 1;
     player.danceT = 0; player.danceAnimT = 0;
     wdWStamps.length = 0; wdDStamps.length = 0;
     player.deathCause = '';
@@ -16303,12 +16460,18 @@
   // cutscene first (then restarts with the doubled bonus); otherwise restart now.
   function requestRestart() {
     if (rocketLaunch) return; // cutscene already running
-    if (passedBoss && !multiplayer) {
+    // Post-boss runs carry 0.1% of the wallet into the next run (added flat after
+    // the reset, NOT scaled by the new-game-plus doubling). Captured now, before
+    // any reset wipes the money.
+    pendingCarryMoney = passedBoss ? Math.floor(money * 0.001) : 0;
+    if (passedBoss) {
       // Coop blasts off, then a fast black wipe swaps in the fresh run. Kill any
       // wave-cleared / upgrade overlay up front so it can never flash during the
       // launch or wipe (the wipe also freezes the sim, and resetRunState clears
       // these again at the swap). With NO coop there's nothing to animate, so
-      // skip the cutscene and go straight to the wipe.
+      // skip the cutscene and go straight to the wipe. In co-op the host drives
+      // the cutscene and the guest mirrors it through the snapshot (rocketLaunch
+      // + fade are synced), so both keepers watch the launch.
       endScreen = false;
       upgradeMode = false;
       upgradeDelayT = 0;
@@ -16318,7 +16481,6 @@
       else launchDone();
       return;
     }
-    if (passedBoss) restartBonusTier++; // co-op: bonus without the local cutscene
     restartRun();
   }
 
@@ -16533,6 +16695,7 @@
     }
     // Spawn-a-single-variant helpers + karma + wave skip.
     const TOOL_BUTTONS = [
+      ['spawn-wolf',      'Spawn wolf',           'Spawn a single regular wolf'],
       ['spawn-chicken',   'Spawn chicken',         'Hatch a single chicken near you'],
       ['spawn-wolf-fast', 'Spawn very fast wolf',  'Spawn a single extremely fast (pale) wolf'],
       ['spawn-wolf-big',  'Spawn very big wolf',   'Spawn a single extremely big (resistant) wolf'],
@@ -16710,9 +16873,16 @@
         playerHats++;
         hatColors.push(NIGHT_OF_WOLF_WITCH_HAT_COLOR);
         toast('Witch hat added — ' + playerHats + ' hats', 0.6);
-      } else if (action === 'add-mustache') {
+      } else if (action === 'grow-mustache') {
+        // Each press = finishing another run: the mustache grows one level AND
+        // ages one notch (greys a little), like surviving into a fresh run.
         player.mustache = (player.mustache || 0) + 1;
-        toast('Mustache level ' + player.mustache, 0.6);
+        player.mustacheAge = (player.mustacheAge || 0) + 1;
+        toast('Mustache level ' + player.mustache + ', age ' + player.mustacheAge, 0.8);
+      } else if (action === 'reset-mustache') {
+        player.mustache = 0; player.mustacheAge = 0;
+        player2.mustache = 0; player2.mustacheAge = 0;
+        toast('Mustache progress reset', 0.8);
       } else if (action === 'toggle-autocrit') {
         debugAutoReloadCrit = !debugAutoReloadCrit;
         refreshAutoCritButton();
@@ -16721,19 +16891,29 @@
         nightOfWolfDebugForce = true;
         toast('Next wave will be a Night of the Wolf', 1.6);
       } else if (action === 'resurrect-both') {
-        // Brings BOTH keepers back if they're ghosts — the single debug
-        // resurrect (no separate self/buddy buttons doing the same thing).
-        let revived = 0;
-        if (player.ghost) { reviveKeeper(player); revived++; }
-        if (player2.active && player2.ghost) { reviveKeeper(player2); revived++; }
-        if (revived > 0) {
-          if (gameOver) {
-            gameOver = false;
-            gameOverMsg = '';
-            gameOverCause = '';
+        // Brings BOTH keepers back. In co-op a dead keeper is a ghost; in
+        // single-player a death goes straight to game-over (no ghost), so this
+        // force-revives from EITHER state — clearing ghost/dying, restoring hats,
+        // and lifting the game-over screen.
+        const forceRevive = (who) => {
+          who.ghost = false; who.dying = false; who.downT = 0; who.hurtT = 0;
+          if (who === player) {
+            playerHats = Math.max(playerHats, 3);
+            hatColors.length = 0;
+            for (let i = 0; i < playerHats; i++) hatColors.push('#5a3825');
+          } else {
+            player2.hats = Math.max(player2.hats || 0, 3);
           }
+        };
+        let revived = 0;
+        if (player.ghost || gameOver) { forceRevive(player); revived++; }
+        if (player2.active && (player2.ghost || gameOver)) { forceRevive(player2); revived++; }
+        if (revived > 0) {
+          gameOver = false; gameOverMsg = ''; gameOverCause = ''; gameOverPanelDelayT = 0;
+          paused = false;
+          toast('Resurrected ' + revived + ' keeper' + (revived > 1 ? 's' : '') + '!', 1.4);
         } else {
-          toast('Nobody to resurrect — neither keeper is a ghost', 1.2);
+          toast('Nobody to resurrect — nobody is down', 1.2);
         }
       } else if (action === 'buy-all-upgrades') {
         // Grant every LEVELED upgrade across ALL tiers (starter, wave 15, wave
@@ -16872,6 +17052,13 @@
     inMenu = false;
     last = performance.now(); // avoid a huge dt on the first frame after the menu
     getAudio(); // priming audio off a user gesture so sounds play on first shot
+    // Post-boss carryover: add the flat 0.1% from the last run AFTER every reset
+    // (so it isn't caught by the new-game-plus doubling), then consume it.
+    if (pendingCarryMoney > 0) {
+      money += pendingCarryMoney;
+      toast('Carried over $' + pendingCarryMoney + ' from your last run', 2.4);
+      pendingCarryMoney = 0;
+    }
     if (!multiplayer) {
       showBuildHint(); // stays up until the player first opens build mode
     }
@@ -17012,6 +17199,11 @@
         player2.dir = msg.dir;
         player2.moving = !!msg.moving;
         player2.mouseDown = !!msg.mouseDown;
+        // Mirror the guest's locally-computed Rocket Boots / Last Stand so the
+        // host renders the buddy flying / crouched / cloaked.
+        if (typeof msg.flightT === 'number') player2.flightT = msg.flightT;
+        if (typeof msg.lastStandIdleT === 'number') player2.lastStandIdleT = msg.lastStandIdleT;
+        if (typeof msg.lastStandStealth === 'boolean') player2.lastStandStealth = msg.lastStandStealth;
         return;
       }
       // Guest → host: a one-shot action (shoot, reload, magDump, doubleShot,
@@ -17077,6 +17269,11 @@
         dir: player.dir,
         moving: !!player.moving,
         mouseDown: !!mouse.down, // drives auto-fire for sword / machine-gun on host
+        // The guest computes its own Rocket Boots + Last Stand locally; forward
+        // them so the HOST can render the buddy flying / crouched / cloaked.
+        flightT: player.flightT || 0,
+        lastStandIdleT: player.lastStandIdleT || 0,
+        lastStandStealth: !!player.lastStandStealth,
       });
     } catch (e) { /* channel may be mid-teardown */ }
   }
@@ -17102,20 +17299,31 @@
   const SNAP_FIELDS = {
     wolves:   ['x','y','size','fasterLevel','hurtT','facingLeft','alive','fox','bomb','sword','assassin','hatted','aggroT','carrying','fleeing','meleeT','meleeDir','bob','smokeT','defective','turncoat','coldT','burnT','boss','aimDir','walkT','missileWolf','missilePhase','missileChargeT','jumper','jumpT','jumpDur','hunterWolf','muzzleT','maxHp','hp','hatColor','gunColor','pup','ranged','homer','parachuting','parachuteH','parachuteSway','crawler','legPhase'],
     chickens: ['x','y','alive','facingLeft','fat','worker','rich','bob','fleeT'],
-    coops:    ['x','y','level','dirtR','builtWave'],
+    coops:    ['x','y','level','dirtR','builtWave','shakeT','igniteT','launching'],
     fences:   ['x','y','kind','hp','hurtT'],
     farms:    ['x','y','growth','need','trampleFlash'],
     dogs:     ['x','y','facingLeft','bob','variant'],
     corpses:  ['x','y','kind','t','frost','fried'],
     pellets:  ['x','y','vx','vy','r','color','trail','pierce','crit','critCol','homing','wolfHoming'],
     smoke:    ['x','y','t','life','r'],
-    blasts:   ['x','y','t','life'],
+    blasts:   ['x','y','t','life','col'],
     dummies:  ['x','y','hp','maxHp','hurtT','_decoy'],
     statues:  ['x','y','hp','maxHp','hurtT','_decoy'],
     debris:   ['x','y','kind','hp'],
     mines:    ['x','y','level','_decoy'],
     holes:    ['x','y'],
+    scorches: ['x','y','t','life','r'],
     rooftoppers: ['x','y','fireT','dir','aimDir','facingLeft','alive','coopLevel','aiming','targetX','targetY'],
+    // Laser / hit-scan beams (player, wolf, boss — incl. bending & ricochet
+    // segments) so the guest sees every beam flash.
+    beams:    ['x1','y1','x2','y2','t','life','color','yOff','thick'],
+    // Hunter crew + their camps — a co-op upgrade both keepers share and see.
+    hunters:  ['x','y','alive','hurtT','facingLeft','dir','walkT','weapon','dying','downT','tauntT','sombrero','hp','maxHp'],
+    huntersCamps: ['x','y','dirtR','smokeT'],
+    // FANGUS chicken-siphon orbs so the guest sees the steal-and-heal attack.
+    chickenSuckers: ['x','y','phase'],
+    // Boss/wave-101 missile rockets so the guest sees the incoming salvo.
+    bossMissiles: ['x','y','vx','vy'],
   };
 
   function netSendSnapshot() {
@@ -17135,6 +17343,7 @@
           chickensShot: player.chickensShot || 0,
           deathCause: player.deathCause || '',
           mustache: player.mustache || 0, // FANGUS-kill mustache width
+          mustacheAge: player.mustacheAge || 0, // greys the mustache with run age
           // Full hat-colour stack so the guest sees host's green-hats etc.
           hatColors: hatColors.slice(),
           buildMode: !!buildMode, // host's legacy build globals carry P1's state
@@ -17143,6 +17352,8 @@
           // gun/sword/melee swing with the right state every frame.
           reloadT: player.reloadT, jamT: player.jamT, spinT: player.spinT,
           meleeT: player.meleeT, meleeDir: player.meleeDir, meleeFull: !!player.meleeFull,
+          // Dance stun (host-only mechanic) so the guest sees the host jig.
+          danceT: player.danceT || 0, danceAnimT: player.danceAnimT || 0,
         },
         guest: { hats: player2.hats, hurtT: player2.hurtT, ghost: player2.ghost, dying: !!player2.dying },
         // Player2's authoritative weapon state, so the guest can render its
@@ -17167,6 +17378,7 @@
           chickensShot: player2.chickensShot || 0,
           deathCause:  player2.deathCause || '',
           mustache:    player2.mustache || 0, // FANGUS-kill mustache width
+          mustacheAge: player2.mustacheAge || 0, // greys the mustache with run age
           buildMode:   !!player2.buildMode,
           buildType:   player2.buildType,
           // Guest's reload skill-check (authoritative on host since host runs
@@ -17213,13 +17425,31 @@
         debris:   snapList(debris,   SNAP_FIELDS.debris),
         mines:    snapList(mines,    SNAP_FIELDS.mines),
         holes:    snapList(holes,    SNAP_FIELDS.holes),
+        scorches: snapList(scorches, SNAP_FIELDS.scorches),
         rooftoppers: snapList(rooftoppers, SNAP_FIELDS.rooftoppers),
+        beams:    snapList(beams,    SNAP_FIELDS.beams),
+        hunters:  snapList(hunters,  SNAP_FIELDS.hunters),
+        huntersCamps: snapList(huntersCamps, SNAP_FIELDS.huntersCamps),
+        chickenSuckers: snapList(chickenSuckers, SNAP_FIELDS.chickenSuckers),
+        bossMissiles: snapList(bossMissiles, SNAP_FIELDS.bossMissiles),
+        huntersLeavePending: huntersLeavePending, // drives the hunters' stand/flee pose
         money: money,
         wave: wave,
         kills: kills,
         waveActive: waveActive,
         waveTimer: waveTimer,
         mapSize: MAP_SIZE,
+        // Boss fight + end-of-boss screen state so the guest sees the health bar
+        // and the "Wave 100 conquered" continue/restart screen.
+        bossWaveActive: bossWaveActive,
+        bossPhase: bossPhase,
+        bossSidesDone: bossSidesDone,
+        bossTint: bossTint, // dusk-orange boss overlay strength
+        // Post-boss restart cutscene + black wipe, mirrored so the guest watches
+        // the launch and the wipe before the world resets.
+        rocketLaunch: rocketLaunch ? { x: rocketLaunch.coop.x, y: rocketLaunch.coop.y, level: rocketLaunch.coop.level || 0, t: rocketLaunch.t, riseY: rocketLaunch.riseY, lifted: !!rocketLaunch.lifted } : null,
+        fade: fade ? { phase: fade.phase, t: fade.t, dur: fade.dur } : null,
+        endScreen: endScreen,
         gameOver: gameOver,
         gameOverMsg: gameOverMsg,
         gameOverCause: gameOverCause,
@@ -17253,6 +17483,8 @@
       player2.meleeT = msg.host.meleeT || 0;
       player2.meleeDir = msg.host.meleeDir || 0;
       player2.meleeFull = !!msg.host.meleeFull;
+      player2.danceT = msg.host.danceT || 0;       // host's dance jig
+      player2.danceAnimT = msg.host.danceAnimT || 0;
       // Host can ghost now too — mirror the flag so the guest renders the
       // host translucently after they fall.
       if (typeof msg.host.ghost === 'boolean') player2.ghost = msg.host.ghost;
@@ -17266,6 +17498,7 @@
       if (typeof msg.host.chickensShot === 'number') player2.chickensShot = msg.host.chickensShot;
       if (typeof msg.host.deathCause === 'string') player2.deathCause = msg.host.deathCause;
       if (typeof msg.host.mustache === 'number') player2.mustache = msg.host.mustache;
+      if (typeof msg.host.mustacheAge === 'number') player2.mustacheAge = msg.host.mustacheAge;
       // Host's hat-colour stack so the guest renders the host with the
       // actual mix (green hats from Buy Hat, etc.).
       if (Array.isArray(msg.host.hatColors)) player2.hatColors = msg.host.hatColors.slice();
@@ -17313,6 +17546,7 @@
       if (typeof msg.guestWeapon.chickensShot === 'number') player.chickensShot = msg.guestWeapon.chickensShot;
       if (typeof msg.guestWeapon.deathCause === 'string') player.deathCause = msg.guestWeapon.deathCause;
       if (typeof msg.guestWeapon.mustache === 'number') player.mustache = msg.guestWeapon.mustache;
+      if (typeof msg.guestWeapon.mustacheAge === 'number') player.mustacheAge = msg.guestWeapon.mustacheAge;
       if (typeof msg.guestWeapon.buildMode === 'boolean') player.buildMode = msg.guestWeapon.buildMode;
       if (typeof msg.guestWeapon.buildType === 'number') player.buildType = msg.guestWeapon.buildType;
       if (typeof msg.guestWeapon.skillCheckActive === 'boolean') player.skillCheckActive = msg.guestWeapon.skillCheckActive;
@@ -17352,6 +17586,9 @@
     upgradeMode = !!msg.upgradeMode;
     hostPaused = !!msg.paused;
     replaceArray(wolves,   msg.wolves);
+    // The boss lives inside the synced wolves array; point the guest's `boss`
+    // global at it so the health bar + boss name render (null when it's gone).
+    boss = wolves.find(w => w.boss) || null;
     replaceArray(chickens, msg.chickens);
     replaceArray(coops,    msg.coops);
     replaceArray(fences,   msg.fences);
@@ -17366,7 +17603,31 @@
     if (msg.debris) replaceArray(debris, msg.debris);
     if (msg.mines)  replaceArray(mines,  msg.mines);
     if (msg.holes)  replaceArray(holes,  msg.holes);
+    if (msg.scorches) replaceArray(scorches, msg.scorches);
     if (msg.rooftoppers) replaceArray(rooftoppers, msg.rooftoppers);
+    if (msg.beams)  replaceArray(beams,  msg.beams);
+    if (msg.hunters) replaceArray(hunters, msg.hunters);
+    if (msg.huntersCamps) replaceArray(huntersCamps, msg.huntersCamps);
+    if (msg.chickenSuckers) replaceArray(chickenSuckers, msg.chickenSuckers);
+    if (msg.bossMissiles) replaceArray(bossMissiles, msg.bossMissiles);
+    if (typeof msg.huntersLeavePending === 'boolean') huntersLeavePending = msg.huntersLeavePending;
+    // Boss state so the guest renders the health bar + boss-cleared end screen.
+    if (typeof msg.bossWaveActive === 'boolean') bossWaveActive = msg.bossWaveActive;
+    if (typeof msg.bossPhase === 'string') bossPhase = msg.bossPhase;
+    if (typeof msg.bossSidesDone === 'number') bossSidesDone = msg.bossSidesDone;
+    if (typeof msg.bossTint === 'number') bossTint = msg.bossTint;
+    // Mirror the host's post-boss cutscene + black wipe. The matching coop is
+    // hidden by its synced `launching` flag, so we find it for the rising draw
+    // (falling back to a light stand-in if it's already out of the array).
+    if (msg.rocketLaunch) {
+      const rlc = coops.find(c => Math.abs(c.x - msg.rocketLaunch.x) < 0.01 && Math.abs(c.y - msg.rocketLaunch.y) < 0.01)
+                || { x: msg.rocketLaunch.x, y: msg.rocketLaunch.y, level: msg.rocketLaunch.level || 0 };
+      rocketLaunch = { coop: rlc, t: msg.rocketLaunch.t, riseY: msg.rocketLaunch.riseY, lifted: msg.rocketLaunch.lifted };
+    } else {
+      rocketLaunch = null;
+    }
+    fade = msg.fade ? { phase: msg.fade.phase, t: msg.fade.t, dur: msg.fade.dur, onBlack: null } : null;
+    endScreen = !!msg.endScreen;
     money = msg.money;
     wave = msg.wave;
     kills = msg.kills;
