@@ -429,7 +429,7 @@
       <button class="menu-btn menu-btn--primary" id="btnSingle">Single Player</button>
       <button class="menu-btn" id="btnMulti">Multiplayer</button>
       <button class="menu-btn" id="btnHowTo">How to Play</button>
-      <p class="menu-version">v0.8.3 <span class="by">·  made by ricardobertolin</span></p>
+      <p class="menu-version">v0.8.4 <span class="by">·  made by ricardobertolin</span></p>
     </section>
 
     <!-- How to play — controls -->
@@ -1865,8 +1865,10 @@
       return;
     }
     // Fast A+D mashing (a left-right wiggle) taps the dance-stun. Distinct
-    // presses only — ignore the OS key-repeat. Local player-1 only.
-    if (!e.repeat && !(multiplayer && !isHost)) {
+    // presses only — ignore the OS key-repeat. Works for whichever keeper is
+    // local: host OR guest. Each side roots its own `player` and syncs the jig
+    // across the wire (host → snapshot, guest → pos).
+    if (!e.repeat) {
       const lk = e.key.toLowerCase();
       if (lk === 'a' || lk === 'd') registerWdSpam(lk);
     }
@@ -1944,13 +1946,21 @@
     if (multiplayer && !isHost) {
       const lvls = lvlsFor(player);
       let action = 'shoot';
-      if (e.button === 2 && lvls.doubleBarrel > 0 && lvls.sword < 1)      action = 'doubleShot';
-      else if (e.button === 2 && lvls.machineGun > 0 && lvls.sword < 1)   action = 'magDump';
+      // Machine-Gun (incl. the Double-Machine combo) → mag dump; pure
+      // Double-Barrel → double shot. Mirrors the host's dispatch order.
+      if (e.button === 2 && lvls.machineGun > 0 && lvls.sword < 1)        action = 'magDump';
+      else if (e.button === 2 && lvls.doubleBarrel > 0 && lvls.sword < 1) action = 'doubleShot';
       sendP2Input(action);
       return;
     }
-    if (e.button === 2 && upgradeLevels.doubleBarrel > 0 && upgradeLevels.sword < 1) { doubleShot(); return; }
-    if (e.button === 2 && upgradeLevels.machineGun > 0 && upgradeLevels.sword < 1) { magDump(); return; }
+    // Right-click. When BOTH Double-Barrel and Machine-Gun are owned (the
+    // Double-Machine combo via Metaverse) the gun IS a machine gun, so the
+    // mag-dump path takes precedence — it fires a double burst per round (see
+    // the dump loop). Machine-Gun is therefore checked first.
+    if (e.button === 2 && upgradeLevels.sword < 1) {
+      if (upgradeLevels.machineGun > 0)  { magDump();   return; }
+      if (upgradeLevels.doubleBarrel > 0){ doubleShot(); return; }
+    }
     tryShoot();
   });
   canvas.addEventListener('mouseup', () => { mouse.down = false; });
@@ -2012,6 +2022,7 @@
     dir: 0,             // facing angle (world radians)
     reloadT: 0,
     jamT: 0,
+    jamFlashT: 0,       // cosmetic-only jam flash (a dud SHOT reds the gun without rooting you)
     hurtT: 0,           // counts down after taking a hit — flashes the player red
     walkT: 0,           // animation phase for the walk cycle
     moving: false,
@@ -2063,6 +2074,7 @@
     // its keeper's gun/sword/melee correctly. Unused on the host side.
     reloadT: 0,
     jamT: 0,
+    jamFlashT: 0,       // cosmetic-only jam flash (mirrors player1)
     spinT: 0,
     meleeT: 0,
     meleeDir: 0,
@@ -2417,6 +2429,8 @@
   const RELOAD_SC_CRIT_HALF  = 0.035; // half-width of the central critical band (thin line in the middle)
   const RELOAD_SC_CRIT_DMG   = 2.0;  // damage multiplier on the shot fired after a critical reload
   const RELOAD_SC_CRIT_RANGE = 1.6;  // crit shots also fly farther (pellet lifetime / laser reach ×)
+  const CRIT_SPEED_BOOST_MUL = 1.3;  // a critical reload also gives a brief footwork boost…
+  const CRIT_SPEED_BOOST_T   = 2.0;  // …for this many seconds (drains in the movement step)
   const CRIT_MG_SHOTS        = 3;    // machine-gun: a crit reload primes up to this many continuous shots
   const SPIN_DMG_MUL         = 3.0;  // max-level Quickdraw twirl: the next burst hits triple
   // Cold Shot / Hot Shot (wave 15, mutually exclusive). Each level raises the
@@ -3091,6 +3105,21 @@
     el.classList.add('show');
     clearTimeout(toast._t);
     toast._t = setTimeout(() => el.classList.remove('show'), dur * 1000);
+  }
+
+  // One-shot toasts the host needs to surface on the GUEST's screen. The
+  // guest's keeper (player2) resolves its builds on the host, where a plain
+  // toast() would only pop on the host — so its feedback is queued here,
+  // shipped in every snapshot, and replayed by the guest via its own toast().
+  const pendingGuestToasts = [];
+  function toastGuest(msg, dur = 1.5) {
+    if (multiplayer && isHost) pendingGuestToasts.push({ msg, dur });
+  }
+  // Route a builder's feedback to the right screen: player2's builds run on the
+  // host, so relay them to the guest; player1 / single-player just pops locally.
+  function buildToast(builder, msg, dur) {
+    if (builder === player2 && multiplayer && isHost) toastGuest(msg, dur);
+    else toast(msg, dur);
   }
 
   // Enemy-intro toasts should only fire once per run.
@@ -4036,13 +4065,21 @@
         },
         desc() {
           const who = player.ghost ? 'You' : 'Buddy';
-          return 'Spend $' + hatPrice + ' → ' + who + ' rises with 3 hats';
+          return firstReviveFree
+            ? 'FREE (first one) → ' + who + ' rises with 3 hats'
+            : 'Spend $' + hatPrice + ' → ' + who + ' rises with 3 hats';
         },
         apply() {
-          const wallet = survivorWallet();
-          wallet.spend(hatPrice);
-          hatPrice += 10; // each resurrection makes the next one steeper, mirrors Buy Hat
-          hatsBought++;
+          // The first resurrection of the run is free — it doesn't touch the
+          // wallet or ratchet the price, so the buddy comeback always lands once.
+          if (firstReviveFree) {
+            firstReviveFree = false;
+          } else {
+            const wallet = survivorWallet();
+            wallet.spend(hatPrice);
+            hatPrice += 10; // each paid resurrection makes the next one steeper, mirrors Buy Hat
+            hatsBought++;
+          }
           if (player.ghost) reviveKeeper(player);
           else              reviveKeeper(player2);
         },
@@ -4052,7 +4089,7 @@
 
   // Filler shown when fewer than 3 real upgrades are available.
   // The payout scales with progress: one third of the current wave.
-  function cashReward() { return Math.max(1, Math.floor(wave / 2)); }
+  function cashReward() { return Math.max(2, Math.floor(wave / 2)); }
   function makeCashOption() {
     return {
       id: 'cash',
@@ -4077,7 +4114,28 @@
   // Take up to `n` DISTINCT options (by id) from a (possibly bias-duplicated)
   // pool, then pad with at most ONE Pocket Money. Prevents the same upgrade —
   // or Pocket Money — from appearing twice when the pool is short.
-  function pickDistinct(pool, n, cashFn) {
+  // Mutually-exclusive upgrade pairs — picking one permanently locks the other
+  // out. Hoisted to module scope so BOTH the upgrade-card renderer and the
+  // pick builder can read it (the builder uses it to avoid railroading a broke
+  // player into a forced lock).
+  const LOCKS_OUT = {
+    spreadUp: 'Tighter Pattern', spreadDown: 'Loose Pattern',
+    focusUp: 'Wolf Repellent', focusDown: 'Meat Bait',
+    doubleBarrel: 'Machine-Gun', machineGun: 'Double-Barrel',
+    softBullet: 'Hard Bullets', hardBullet: 'Soft Bullets',
+    dummy: 'Chicken Statue', statue: 'Scarecrow',
+    nerdReload: 'Jock Reload', jockReload: 'Nerd Reload',
+    coldShot: 'Hot Shot', hotShot: 'Cold Shot',
+    calmWaves: 'Rough Waves', roughWaves: 'Calm Waves',
+  };
+  // True when picking `option` right now would FRESHLY lock out its counterpart:
+  // it's a paired upgrade, the Metaverse hasn't dissolved the locks, and it's
+  // still at level 0 (a higher level means that lock already happened earlier).
+  function optionLocksOut(option, levels) {
+    return !!(option && !metaverseOn() && LOCKS_OUT[option.id] && ((levels || upgradeLevels)[option.id] || 0) === 0);
+  }
+
+  function pickDistinct(pool, n, cashFn, levels) {
     cashFn = cashFn || makeCashOption;
     const seen = new Set();
     const out = [];
@@ -4092,6 +4150,20 @@
     // grid is always full — an undefined option in a card slot used to crash
     // the upgrade screen (toast fired but the screen never left).
     while (out.length < n) out.push(makeChickenOption());
+    // Don't railroad a broke player into a permanent lock: if two or more of
+    // the picks cost money, none of the remaining (free) picks may be a
+    // mutually-exclusive lock-out — otherwise a player with no cash is forced
+    // to take it. Swap any such lock for a safe free option from the pool, or
+    // Pocket Money (which never locks anything) as a last resort.
+    const costsMoney = o => !!o.affordable;
+    if (out.filter(costsMoney).length >= 2) {
+      for (let i = 0; i < out.length; i++) {
+        if (costsMoney(out[i]) || !optionLocksOut(out[i], levels)) continue;
+        const repl = pool.find(o => !seen.has(o.id) && !costsMoney(o) && !optionLocksOut(o, levels));
+        if (repl) { seen.add(repl.id); out[i] = repl; }
+        else out[i] = cashFn(); // free filler — never forces a lock
+      }
+    }
     return out;
   }
 
@@ -4208,7 +4280,7 @@
           const r = p2Avail.splice(resIdx, 1)[0];
           p2Avail.unshift(r);
         }
-        upgradeOptions2 = pickDistinct(p2Avail, 3, makeP2CashOption);
+        upgradeOptions2 = pickDistinct(p2Avail, 3, makeP2CashOption, upgradeLevels2);
       }
     } else {
       // Otherwise the buddy just spectates the host's pick.
@@ -4422,7 +4494,7 @@
       .map(opt => personal[opt.id] || opt);
   }
   function makeP2CashOption() {
-    const r = Math.max(1, Math.floor(wave / 3));
+    const r = Math.max(2, Math.floor(wave / 3));
     return {
       id: 'cash', title: 'Cash',
       desc: () => 'Pick up $' + r,
@@ -4783,38 +4855,38 @@
   function placeFarm(builder) {
     builder = builder || player;
     const cost = farmCost();
-    if (moneyOf(builder) < cost) { toast('Need $' + cost + ' to start a farm'); return; }
+    if (moneyOf(builder) < cost) { buildToast(builder, 'Need $' + cost + ' to start a farm'); return; }
     const target = getBuildTarget(builder);
-    if (!target.valid) { toast(target.reason); return; }
+    if (!target.valid) { buildToast(builder, target.reason); return; }
     farms.push({ x: target.x, y: target.y, growth: 0, trampleFlash: 0, need: wavesToFinish() });
     spendMoney(builder, cost);
     playBuild();
-    toast('Farm started!  -$' + cost, 1.2);
+    buildToast(builder, 'Farm started!  -$' + cost, 1.2);
   }
 
   function removeBuilding(builder) {
     builder = builder || player;
     const target = getBuildTarget(builder);
-    if (!target.valid || !target.removeTarget) { toast(target.reason || 'Nothing to remove'); return; }
+    if (!target.valid || !target.removeTarget) { buildToast(builder, target.reason || 'Nothing to remove'); return; }
     const b = target.removeTarget;
     b.array.splice(b.index, 1);
     // Refunds always go to whoever pulled the building down.
     if (b.refund > 0) addMoney(builder, b.refund);
     playBuild();
-    toast(b.label + ' removed' + (b.refund > 0 ? '  +$' + b.refund : '  (no refund)'), 1.0);
+    buildToast(builder, b.label + ' removed' + (b.refund > 0 ? '  +$' + b.refund : '  (no refund)'), 1.0);
   }
 
   function placeDummy(builder) {
     builder = builder || player;
-    if (upgradeLevels.dummy < 1) { toast('Scarecrow upgrade needed'); return; }
-    if (moneyOf(builder) < DUMMY_COST) { toast('Need $' + DUMMY_COST + ' to build a scarecrow'); return; }
+    if (upgradeLevels.dummy < 1) { buildToast(builder, 'Scarecrow upgrade needed'); return; }
+    if (moneyOf(builder) < DUMMY_COST) { buildToast(builder, 'Need $' + DUMMY_COST + ' to build a scarecrow'); return; }
     const target = getBuildTarget(builder);
-    if (!target.valid) { toast(target.reason); return; }
+    if (!target.valid) { buildToast(builder, target.reason); return; }
     const hp = DUMMY_HP_TABLE[upgradeLevels.dummy];
     dummies.push({ x: target.x, y: target.y, hp, maxHp: hp, hurtT: 0, _decoy: 'dummy' });
     spendMoney(builder, DUMMY_COST);
     playBuild();
-    toast('Scarecrow placed!  -$' + DUMMY_COST, 1.0);
+    buildToast(builder, 'Scarecrow placed!  -$' + DUMMY_COST, 1.0);
   }
 
   // Debug-only build: drop an indestructible DPS readout dummy on the targeted
@@ -4823,43 +4895,43 @@
   // the 'remove' tool. Free — it's a debug instrument, not a real building.
   function placeDpsDummyBuilding(builder) {
     builder = builder || player;
-    if (!debugUnlocked) { toast('DPS dummy is a debug tool'); return; }
+    if (!debugUnlocked) { buildToast(builder, 'DPS dummy is a debug tool'); return; }
     const target = getBuildTarget(builder);
-    if (!target.valid) { toast(target.reason); return; }
+    if (!target.valid) { buildToast(builder, target.reason); return; }
     wolves.push({
       x: target.x, y: target.y, vx: 0, vy: 0,
       alive: true, dpsDummy: true, hp: 1e9, maxHp: 1e9, size: 1.3,
       hurtT: 0, dps: 0, dpsAccum: 0, dpsWindowT: 1, facingLeft: false,
     });
     playBuild();
-    toast('DPS dummy placed — shoot it!', 1.2);
+    buildToast(builder, 'DPS dummy placed — shoot it!', 1.2);
   }
 
   function placeStatue(builder) {
     builder = builder || player;
-    if (upgradeLevels.statue < 1) { toast('Chicken Statue upgrade needed'); return; }
-    if (moneyOf(builder) < STATUE_COST) { toast('Need $' + STATUE_COST + ' to build a statue'); return; }
+    if (upgradeLevels.statue < 1) { buildToast(builder, 'Chicken Statue upgrade needed'); return; }
+    if (moneyOf(builder) < STATUE_COST) { buildToast(builder, 'Need $' + STATUE_COST + ' to build a statue'); return; }
     const target = getBuildTarget(builder);
-    if (!target.valid) { toast(target.reason); return; }
+    if (!target.valid) { buildToast(builder, target.reason); return; }
     const hp = STATUE_HP_TABLE[upgradeLevels.statue];
     statues.push({ x: target.x, y: target.y, hp, maxHp: hp, hurtT: 0, _decoy: 'statue' });
     spendMoney(builder, STATUE_COST);
     playBuild();
-    toast('Chicken statue placed!  -$' + STATUE_COST, 1.0);
+    buildToast(builder, 'Chicken statue placed!  -$' + STATUE_COST, 1.0);
   }
 
   function placeMine(builder) {
     builder = builder || player;
-    if (upgradeLevels.mine < 1) { toast('Explosive Mine upgrade needed'); return; }
-    if (moneyOf(builder) < MINE_COST) { toast('Need $' + MINE_COST + ' to bury a mine'); return; }
+    if (upgradeLevels.mine < 1) { buildToast(builder, 'Explosive Mine upgrade needed'); return; }
+    if (moneyOf(builder) < MINE_COST) { buildToast(builder, 'Need $' + MINE_COST + ' to bury a mine'); return; }
     const target = getBuildTarget(builder);
-    if (!target.valid) { toast(target.reason); return; }
+    if (!target.valid) { buildToast(builder, target.reason); return; }
     // Snapshot the current mine tier — later upgrades won't retroactively
     // beef this mine up, so the player has to weigh placing now vs banking.
     mines.push({ x: target.x, y: target.y, level: upgradeLevels.mine, _decoy: 'mine' });
     spendMoney(builder, MINE_COST);
     playBuild();
-    toast('Mine buried.  -$' + MINE_COST, 0.9);
+    buildToast(builder, 'Mine buried.  -$' + MINE_COST, 0.9);
   }
 
   // Check every buried mine for an entity standing on it. The trigger
@@ -4945,27 +5017,27 @@
   function placeFence(kind, builder) {
     builder = builder || player;
     const target = getBuildTarget(builder);
-    if (!target.valid) { toast(target.reason); return; }
+    if (!target.valid) { buildToast(builder, target.reason); return; }
     const cost = kind === 'stone' ? STONE_FENCE_COST : FENCE_COST;
     const name = kind === 'stone' ? 'Stone wall' : 'Fence';
-    if (moneyOf(builder) < cost) { toast('Need $' + cost + ' to build ' + name.toLowerCase()); return; }
+    if (moneyOf(builder) < cost) { buildToast(builder, 'Need $' + cost + ' to build ' + name.toLowerCase()); return; }
     const hp = kind === 'stone' ? tableAt('stoneWall') : tableAt('woodFence');
     fences.push({ x: target.x, y: target.y, kind: kind, hp: hp, hurtT: 0 });
     spendMoney(builder, cost);
     playBuild();
-    toast(name + ' placed!  -$' + cost, 0.8);
+    buildToast(builder, name + ' placed!  -$' + cost, 0.8);
   }
 
   function placeCoop(builder) {
     builder = builder || player;
     const cost = coopCost();
-    if (moneyOf(builder) < cost) { toast('Need $' + cost + ' to build coop'); return; }
+    if (moneyOf(builder) < cost) { buildToast(builder, 'Need $' + cost + ' to build coop'); return; }
     const target = getBuildTarget(builder);
-    if (!target.valid) { toast(target.reason); return; }
+    if (!target.valid) { buildToast(builder, target.reason); return; }
     coops.push({ x: target.x, y: target.y, spawnT: 3, hp: 3, builtWave: wave, level: 0, dirtR: 0 });
     spendMoney(builder, cost);
     playBuild();
-    toast('Coop placed!  -$' + cost);
+    buildToast(builder, 'Coop placed!  -$' + cost);
     // Coops close out the builder's build mode (you only need one at a time).
     if (builder === player2) player2.buildMode = false;
     else                     buildMode = false;
@@ -6377,9 +6449,10 @@
   }
 
   // Player-fired beam damage along a straight segment. Hits wolves in the path
-  // (the laser passes harmlessly through allied hunters). Used by the Laser
-  // Bullets upgrade — drops the pellet system and shoots like a ranged wolf.
-  function applyPlayerBeam(x1, y1, x2, y2, dmg, shooter) {
+  // and friendly-fires any hunters it sweeps (unless `homing` — the bending
+  // homing-laser spares allies). Used by the Laser Bullets upgrade — drops the
+  // pellet system and shoots like a ranged wolf.
+  function applyPlayerBeam(x1, y1, x2, y2, dmg, shooter, homing) {
     const shooterObj = shooter === 2 ? player2 : player;
     const sLvls = lvlsFor(shooterObj);
     // Laser beam gets a bit thicker with every Laser Bullets tier — at max
@@ -6403,7 +6476,20 @@
         if (w.alive && rocketChance && Math.random() < rocketChance) rocketBlastAt(w.x, w.y, shooterObj);
       }
     }
-    // The laser passes harmlessly through hunters — no friendly fire on allies.
+    // Friendly fire: the keeper's beam burns any hunter it sweeps across too —
+    // parity with the pellet system, so spraying the laser into your own crew
+    // mows them down. Only the bending homing-laser spares allies (it seeks
+    // wolves, mirroring how homing pellets pass through hunters).
+    if (!homing && hunters.length) {
+      for (const h of hunters) {
+        if (!h.alive) continue;
+        if (segmentDist2(x1, y1, x2, y2, h.x, h.y) < t2) {
+          h.hp -= dmg;
+          h.hurtT = 0.18;
+          if (h.hp <= 0) onHunterKilled(h, true); // a keeper's beam always counts as a player kill
+        }
+      }
+    }
   }
 
   // A hunter's laser beam — same hit-scan as the keeper's, but it only burns
@@ -6628,7 +6714,7 @@
         ? tracedHomingBeam(bx1, by1, a, reach, lvls.homing, useBounce)
         : tracedBeamSegments(bx1, by1, a, reach, useBounce);
       for (const s of segs) {
-        applyPlayerBeam(s.x1, s.y1, s.x2, s.y2, dmgPer, shooterId);
+        applyPlayerBeam(s.x1, s.y1, s.x2, s.y2, dmgPer, shooterId, useHoming);
         beams.push({ x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2, t: 0, life: 0.22, color: beamColor, yOff: 18 });
       }
     }
@@ -6687,6 +6773,7 @@
   }
 
   function fireBurst(dmgMul = 1, opts = {}) {
+    player.jamFlashT = 0; // a real shot fired — clear any lingering dud-jam flash
     // Laser Bullets: the burst is replaced by a single hit-scan beam. Skips
     // the pellet spawn entirely — laser fires take precedence over Rocket
     // and Homing, since the bullet itself is gone.
@@ -7159,7 +7246,7 @@
       if (player.skillCheckNeedsRelease) return;
       // Every round can jam too — a rusty machine gun is cranky. Scaled down
       // since it fires far faster than the shotgun (no jam at MAX Rusty Springs).
-      if (!debugAutoReloadCrit && Math.random() < jamChance * MG_JAM_MUL) { handleJam(); return; }
+      if (!debugAutoReloadCrit && Math.random() < jamChance * MG_JAM_MUL) { handleJam(); player.reloadT = mgShotCooldown(player); return; } // dud round — keeps the cadence, no lockout
       const wasCritMG = (player.critShots || 0) > 0;
       fireBurst();
       if (!wasCritMG) ammo--; // crit shots don't eat the magazine
@@ -7171,7 +7258,7 @@
     }
     // Shotgun: an empty chamber also routes the click into reload.
     if (shells <= 0) { tryReload(); return; }
-    if (!debugAutoReloadCrit && Math.random() < jamChance) { handleJam(); return; }
+    if (!debugAutoReloadCrit && Math.random() < jamChance) { handleJam(); player.reloadT = shotgunCooldown * fireMul; return; } // dud shell — normal cadence, keeper keeps moving
     // Each left-click fires a single barrel. With Double-Barrel the gun holds
     // two shells, so you can fire twice before reloading (right-click fires
     // both at once — see doubleShot).
@@ -7186,13 +7273,21 @@
   // every consecutive jam (capped). NOTE: jam no longer touches reloadingT,
   // since reloadingT crossing 0 refills the MG mag — using it for jams would
   // hand the player a free refill on every jam.
-  // `fromShot` defaults to true — every jam called by the firing paths pays
-  // golden gold. The reload skill-check miss path passes `false` so a botched
-  // reload locks the gun like a normal jam but never feeds the jackpot.
+  // `fromShot` defaults to true. A jam mid-FIRE just eats that shot — the gun
+  // coughs (jam thunk) but the keeper keeps moving and isn't locked; the
+  // caller imposes the normal fire cadence so the dud doesn't re-roll every
+  // frame. A botched RELOAD (`fromShot` false) still roots the gun while you
+  // clear it, the way it always has.
   function handleJam(fromShot) {
     if (fromShot === undefined) fromShot = true;
     const lvls = lvlsFor(player);
-    player.jamT = 1.2 * ((lvls.jam >= MAX_LEVEL) ? 0.5 : 1); // max Better Springs halves stun duration
+    if (!fromShot) {
+      player.jamT = 1.2 * ((lvls.jam >= MAX_LEVEL) ? 0.5 : 1); // max Better Springs halves stun duration
+    } else {
+      // A dud shot doesn't root you, but it should still LOOK (and sound) like a
+      // jam — flash the gun red for the same window a reload jam would.
+      player.jamFlashT = 1.2 * ((lvls.jam >= MAX_LEVEL) ? 0.5 : 1);
+    }
     playReloadJam();
     // A jam (botched reload, or a random shooting jam pre-max) breaks the
     // crit streak that the max-rust golden gun pays out on. The jam sound is
@@ -7357,6 +7452,7 @@
       if (distFromCenter <= skillCheckCritHalf()) {
         // Machine gun primes a whole burst of crit shots; everything else one.
         player.critShots = (upgradeLevels.machineGun > 0) ? CRIT_MG_SHOTS : 1;
+        player.critSpeedT = CRIT_SPEED_BOOST_T; // nailing the centre also kicks in a footwork burst
         // Max Rusty Springs golden gun: every consecutive critical reload pays $1.
         if (upgradeLevels.rust >= 5) {
           critStreak++;
@@ -7398,6 +7494,7 @@
   // independently. Visual + audio happen on the host as usual; the snapshot
   // ships player2's weapon timers down so the guest sees its own gun.
   function fireBurstP2(dmgMul = 1, opts = {}) {
+    player2.jamFlashT = 0; // a real shot fired — clear any lingering dud-jam flash
     if ((lvlsFor(player2).laser || 0) > 0) {
       fireLaserShot(player2, dmgMul, opts);
       return;
@@ -7510,7 +7607,14 @@
 
   function handleJamP2(fromShot) {
     if (fromShot === undefined) fromShot = true;
-    player2.jamT = 1.2 * ((lvlsFor(player2).jam >= MAX_LEVEL) ? 0.5 : 1); // max Better Springs halves stun duration
+    // Mirror P1: a jam mid-fire only eats the shot (caller sets the cadence),
+    // while a botched reload still roots the buddy's gun.
+    if (!fromShot) {
+      player2.jamT = 1.2 * ((lvlsFor(player2).jam >= MAX_LEVEL) ? 0.5 : 1); // max Better Springs halves stun duration
+    } else {
+      // Dud shot — cosmetic red flash only, no root (mirrors player1).
+      player2.jamFlashT = 1.2 * ((lvlsFor(player2).jam >= MAX_LEVEL) ? 0.5 : 1);
+    }
     playReloadJam();
     player2.critStreak = 0; // a jam breaks P2's crit streak (no toast — the sound is the cue)
   }
@@ -7559,7 +7663,7 @@
       // Machine-gun: starts slow, faster each level (mag size is fixed).
       if (player2.ammo <= 0) { tryReloadP2(); return; }
       if (player2.skillCheckNeedsRelease) return; // wait for trigger release after a reload
-      if (Math.random() < jamChanceFor(player2) * MG_JAM_MUL) { handleJamP2(); return; } // per-round jam roll (scaled for fire rate)
+      if (Math.random() < jamChanceFor(player2) * MG_JAM_MUL) { handleJamP2(); player2.reloadT = mgShotCooldown(player2); return; } // dud round — keeps the cadence, no lockout
       const wasCritMG2 = (player2.critShots || 0) > 0;
       fireBurstP2();
       if (!wasCritMG2) player2.ammo--; // crit shots don't eat the magazine
@@ -7568,7 +7672,7 @@
     }
     // Empty shotgun chamber: same routing into reload.
     if ((player2.shells || 0) <= 0) { tryReloadP2(); return; }
-    if (Math.random() < jamChanceFor(player2)) { handleJamP2(); return; }
+    if (Math.random() < jamChanceFor(player2)) { handleJamP2(); player2.reloadT = shotgunCooldownFor(player2) * fireMul2; return; } // dud shell — normal cadence, buddy keeps moving
     // One barrel per left-click; Double-Barrel just lets you fire twice before
     // reloading (right-click fires both at once — see doubleShotP2).
     const wasCritSG2 = (player2.critShots || 0) > 0;
@@ -7679,6 +7783,7 @@
       player2.skillCheckNeedsRelease = false;
       if (distFromCenter2 <= skillCheckCritHalf()) {
         player2.critShots = (lvlsFor(player2).machineGun > 0) ? CRIT_MG_SHOTS : 1;
+        player2.critSpeedT = CRIT_SPEED_BOOST_T; // buddy gets the same footwork burst on a crit
         if ((lvlsFor(player2).rust || 0) >= 5) {
           player2.critStreak = (player2.critStreak || 0) + 1;
           addMoney(player2, GOLD_PER_CRIT);
@@ -10363,6 +10468,7 @@
   let playerHats = START_HATS;
   let hatPrice = 20;      // Buy Hat cost — climbs by $2 with every purchase
   let hatsBought = 0;     // lifetime Buy Hat purchases — green hats can appear after 5
+  let firstReviveFree = true; // the first Resurrect Buddy of a run is on the house
   let hatPackPrice = 100; // Buy Hat Pack (wave 80+) — 3 hats at once, ratchets up
   // Weapon Oil is single-tier. While active it widens the reload skill-check
   // accept band by `WEAPON_OIL_PER_CHARGE` for `weaponOilWaves` waves.
@@ -10800,6 +10906,10 @@
     const sprinting = player.moving && myReloadingT <= 0 && !player.skillCheckActive && player.reloadT <= 0 && player.jamT <= 0;
     player.runT = sprinting ? player.runT + dt : 0;
     const runMul = 1 + clamp((player.runT - RUN_WARMUP) / RUN_RAMP, 0, 1) * tableAtFor(player, 'sprint');
+    // Critical-reload footwork burst — a brief flat speed bump that drains here
+    // (set on a centre-band reload; synced to the guest so its keeper feels it).
+    const critBoost = (player.critSpeedT || 0) > 0 ? CRIT_SPEED_BOOST_MUL : 1;
+    if ((player.critSpeedT || 0) > 0) player.critSpeedT -= dt;
     // Rocket Boots: while at a full sprint, roll a per-second chance to
     // launch the player into a short flight. Flying = no fence collision,
     // mine immunity, melee bites miss. Tail off naturally when the timer
@@ -10846,7 +10956,7 @@
       // Flying skips fence collision entirely so the player can soar over
       // walls / fence pens for the duration.
       const flyMul = flying ? ROCKET_BOOTS_SPEED : 1;
-      const sp = player.speed * moveMul * runMul * flyMul;
+      const sp = player.speed * moveMul * runMul * flyMul * critBoost;
       const pInside = fenceBlocks(player.x, player.y);
       const pStepX = player.x + mx * sp * dt;
       const pStepY = player.y + my * sp * dt;
@@ -10902,6 +11012,7 @@
     if (player.reloadT > 0) player.reloadT -= dt;
     if (player.spinT > 0) player.spinT -= dt;
     if (player.jamT > 0) player.jamT -= dt;
+    if (player.jamFlashT > 0) player.jamFlashT -= dt; // cosmetic dud-shot flash
     if (player.hurtT > 0) player.hurtT -= dt;
     if (player.meleeT > 0) player.meleeT -= dt;
     // Reload skill-check sweep — only advances while the bar is up.
@@ -10947,11 +11058,15 @@
       // guaranteed-explode flag for as long as this mag dump is running.
       const dumpKnockMul = (upgradeLevels.minigun > 0) ? (1 + upgradeLevels.minigun * 0.7) : 1;
       const dumpRocketOpts = player.magDumpRocket ? { rocketBoom: true } : undefined;
+      // Double-Machine combo: owning Double-Barrel too fires BOTH barrels each
+      // round — a second burst per shot — until the mag runs dry.
+      const dumpDblBarrel = upgradeLevels.doubleBarrel > 0;
       magDumpT -= dt;
       // Steady per-shot cadence — the dump fires one round per MAG_DUMP_INTERVAL
       // so it audibly rattles through the whole mag rather than emptying instantly.
       while (magDumpT <= 0 && magDumpLeft > 0 && ammo > 0) {
         fireBurst(1, dumpRocketOpts);
+        if (dumpDblBarrel) fireBurst(1, dumpRocketOpts); // twice every shot
         ammo--;
         magDumpLeft--;
         knockbackPlayer(0.12 * dumpKnockMul);
@@ -10982,12 +11097,17 @@
     // We just advance the local walk animation while the remote is moving.
     if (player2.active) {
       if (player2.moving) player2.walkT += dt * 12;
+      // Buddy's dance jig is driven by the guest's pos messages; advance the
+      // animation phase locally between updates so the hops stay smooth.
+      if ((player2.danceT || 0) > 0) player2.danceAnimT = (player2.danceAnimT || 0) + dt;
       // Host runs player2's weapon timers + auto-fire here. The guest only
       // mirrors timers from the snapshot, so it skips this block entirely.
       if (isHost) {
         if (player2.reloadT > 0) player2.reloadT -= dt;
         if (player2.spinT > 0) player2.spinT -= dt;
         if (player2.jamT > 0) player2.jamT -= dt;
+        if (player2.jamFlashT > 0) player2.jamFlashT -= dt; // cosmetic dud-shot flash
+        if (player2.critSpeedT > 0) player2.critSpeedT -= dt; // drain the crit footwork burst (guest reads it)
         if (player2.meleeT > 0) player2.meleeT -= dt;
         if (player2.skillCheckActive) {
           player2.skillCheckT += dt;
@@ -11016,9 +11136,11 @@
           const p2Lvls = lvlsFor(player2);
           const p2DumpKnockMul = (p2Lvls.minigun > 0) ? (1 + p2Lvls.minigun * 0.7) : 1;
           const p2DumpRocketOpts = player2.magDumpRocket ? { rocketBoom: true } : undefined;
+          const p2DumpDblBarrel = p2Lvls.doubleBarrel > 0; // Double-Machine combo — both barrels each round
           player2.magDumpT -= dt;
           while (player2.magDumpT <= 0 && player2.magDumpLeft > 0 && player2.ammo > 0) {
             fireBurstP2(1, p2DumpRocketOpts);
+            if (p2DumpDblBarrel) fireBurstP2(1, p2DumpRocketOpts); // twice every shot
             player2.ammo--;
             player2.magDumpLeft--;
             knockbackPlayer2(0.12 * p2DumpKnockMul);
@@ -11194,7 +11316,7 @@
     const localReload = hudIsGuest ? player.reloadingT : reloadingT;
     let gunStatus;
     if (localLvls.sword >= 1) gunStatus = 'sword';
-    else if (player.jamT > 0) gunStatus = 'JAMMED';
+    else if (player.jamT > 0 || player.jamFlashT > 0) gunStatus = 'JAMMED';
     else if (nerdActive) gunStatus = 'solve it!';
     else if (jockActive) gunStatus = 'MASH SPACE!';
     else if (player.skillCheckActive) gunStatus = 'reload — time it!';
@@ -12103,9 +12225,12 @@
       if (!option) continue;
       const rect = rects[i];
       const hovered = !upgradePicked2 && mouse.x >= rect.x && mouse.x <= rect.x + rect.w && mouse.y >= rect.y && mouse.y <= rect.y + rect.h;
+      // Resurrect Buddy reads red here too, matching the host's picker so the
+      // guest sees the same "this is the revive" cue.
+      const accent2 = option.id === 'resurrect' ? '#ff5a5a' : null;
       ctx.fillStyle = hovered ? 'rgba(255, 209, 102, 0.24)' : 'rgba(255, 255, 255, 0.08)';
       ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
-      ctx.strokeStyle = hovered ? '#ffd166' : 'rgba(255,255,255,0.18)';
+      ctx.strokeStyle = accent2 || (hovered ? '#ffd166' : 'rgba(255,255,255,0.18)');
       ctx.lineWidth = 2;
       ctx.strokeRect(rect.x + 1, rect.y + 1, rect.w - 2, rect.h - 2);
       // Easter-egg chicken filler — just the chicken, no text.
@@ -12218,17 +12343,8 @@
       ? 'Flock-protection bonus — choose a second upgrade'
       : 'Choose one upgrade to resume the next wave', W / 2, panelY + 68);
 
-    // Picking one of a mutually-exclusive pair locks the other out for good.
-    const LOCKS_OUT = {
-      spreadUp: 'Tighter Pattern', spreadDown: 'Loose Pattern',
-      focusUp: 'Wolf Repellent', focusDown: 'Meat Bait',
-      doubleBarrel: 'Machine-Gun', machineGun: 'Double-Barrel',
-      softBullet: 'Hard Bullets', hardBullet: 'Soft Bullets',
-      dummy: 'Chicken Statue', statue: 'Scarecrow',
-      nerdReload: 'Jock Reload', jockReload: 'Nerd Reload',
-      coldShot: 'Hot Shot', hotShot: 'Cold Shot',
-      calmWaves: 'Rough Waves', roughWaves: 'Calm Waves',
-    };
+    // (LOCKS_OUT — the mutually-exclusive pair map — is now hoisted to module
+    // scope near pickDistinct so the pick builder shares it.)
     const rects = getUpgradeOptionRects();
     for (let i = 0; i < rects.length; i++) {
       const option = upgradeOptions[i];
@@ -12821,7 +12937,7 @@
     // Barrel — uses the screen direction. Grows a touch with each Longer Barrel pick.
     const barrelLength = (16 + Math.min((ulvls.range || 0) + (ulvls.sizeMatters || 0) * SIZE_MATTERS_BARREL_MUL, MAX_RANGE_LEVEL) * 0.6) * barrelBonusMul;
     let barrelColor = '#2b2b2b';
-    if (keeper.jamT > 0)              barrelColor = '#ff3c3c';
+    if (keeper.jamT > 0 || keeper.jamFlashT > 0) barrelColor = '#ff3c3c';
     else if (ulvls.rust >= 5)         barrelColor = '#ffcf3a'; // golden gun
     else if (ulvls.rust > 0)          barrelColor = RUST_COLORS[ulvls.rust];
     else if (!cham)                   barrelColor = '#6a6a6a';
@@ -13024,8 +13140,9 @@
       ctx.lineTo(dropX - dnx * 1.4, dropY - dny * 1.4);
       ctx.stroke();
     }
-    // Muzzle flash — bright yellow puff right after firing.
-    if (keeper.reloadT > 0.3) {
+    // Muzzle flash — bright yellow puff right after firing. A jammed dud sets
+    // the cooldown too, so suppress the flash while the jam-flash is up.
+    if (keeper.reloadT > 0.3 && !(keeper.jamFlashT > 0)) {
       ctx.fillStyle = 'rgba(255,220,80,0.9)';
       ctx.beginPath();
       ctx.arc(cx + gx * (barrelLength + 2), gunY + gy * (barrelLength + 2), 4, 0, Math.PI * 2);
@@ -13042,7 +13159,8 @@
     const reloadingTv = keeper.reloadingT || 0;
     const chamberedv  = keeper.chambered;
     let badgeColor;
-    if (keeper.jamT > 0) badgeColor = (Math.floor(keeper.jamT * 12) & 1) ? '#ff3c3c' : '#3a0000';
+    const jamVis = Math.max(keeper.jamT || 0, keeper.jamFlashT || 0); // root jam OR cosmetic dud flash
+    if (jamVis > 0) badgeColor = (Math.floor(jamVis * 12) & 1) ? '#ff3c3c' : '#3a0000';
     else if (reloadingTv > 0) badgeColor = '#ffd166';
     else if (chamberedv) badgeColor = '#4be04b';
     else badgeColor = '#888';
@@ -13051,7 +13169,7 @@
     ctx.strokeStyle = '#000';
     ctx.lineWidth = 1;
     ctx.strokeRect(cx - 2, badgeY, 4, 4);
-    if (keeper.jamT > 0) {
+    if (jamVis > 0) {
       ctx.strokeStyle = '#fff';
       ctx.beginPath();
       ctx.moveTo(cx - 2, badgeY); ctx.lineTo(cx + 2, badgeY + 4);
@@ -13629,6 +13747,11 @@
     // rather than popping out the moment the threshold is crossed.
     // A launching coop always draws at full opacity (it's flying free of the
     // field, so the keeper-occlusion fade shouldn't apply).
+    // Whatever alpha the caller set coming in (1 in the normal world pass, but
+    // ~0.4 for the translucent placement preview). drawCoop sets globalAlpha
+    // ABSOLUTELY below, so scale every write by this to honour a pre-dimmed
+    // canvas — otherwise the coop preview renders fully opaque and looks placed.
+    const coopBaseAlpha = ctx.globalAlpha;
     const groundAlpha = launching ? 1 : occlusionAlpha(c);
     const MIN_A = 0.35; // matches occlusionAlpha's floor — see that function.
     // Linear remap: 1 (no occlusion) → 1, MIN_A (fully behind) → 0.
@@ -13693,7 +13816,7 @@
     // when the player is behind the coop.
     if (upgradeLevels.hatchRate >= 5 && upperAlpha > 0.02) {
       ctx.save();
-      ctx.globalAlpha = upperAlpha;
+      ctx.globalAlpha = coopBaseAlpha * upperAlpha;
       const chW = 7;
       const wallsH = floors * wallH;
       const chx = cx + hw * 0.34;
@@ -13751,7 +13874,7 @@
       if (f > 0 && upperAlpha <= 0.02) continue;
       const floorAlpha = f === 0 ? groundAlpha : upperAlpha;
       ctx.save();
-      ctx.globalAlpha = floorAlpha;
+      ctx.globalAlpha = coopBaseAlpha * floorAlpha;
       const bl = f * wallH;    // this floor's base lift
       const tl = bl + wallH;   // this floor's top lift
       // Per-floor feature variant: 0 = windows both sides, 1 = one bare side,
@@ -13834,7 +13957,7 @@
     // floors so the building gets see-through as the player walks behind it.
     if (upperAlpha <= 0.02) return;
     ctx.save();
-    ctx.globalAlpha = upperAlpha;
+    ctx.globalAlpha = coopBaseAlpha * upperAlpha;
     const topLift = floors * wallH;
     const B2 = up(B, topLift), R2 = up(R, topLift), L2 = up(L, topLift);
     const roofV = vhash(0) % 3;
@@ -13898,7 +14021,7 @@
           const mount = onRight ? rightWallPt(u, v, baseLift) : leftWallPt(u, v, baseLift);
           const mountX = mount.x, mountY = mount.y;
           ctx.save();
-          ctx.globalAlpha = 1; // always fully opaque, even when the roof above is fading
+          ctx.globalAlpha = coopBaseAlpha; // ignore the roof fade, but still honour a preview dim
           // Mounting bracket + short arm jutting out from the wall.
           ctx.strokeStyle = '#2a2a30';
           ctx.lineWidth = 1.2;
@@ -13962,7 +14085,7 @@
     // seconds after a strike (igniteT is synced, so the guest sees it too).
     if ((c.igniteT || 0) > 0 && !launching) {
       ctx.save();
-      ctx.globalAlpha = 1; // flames always full opacity, even behind the occlusion fade
+      ctx.globalAlpha = coopBaseAlpha; // flames ignore the occlusion fade, but honour a preview dim
       const ft = Date.now() / 55;
       const nF = Math.max(1, floors);
       for (let f = 0; f < nF; f++) {
@@ -16242,6 +16365,8 @@
     for (let i = 0; i < playerHats; i++) hatColors.push('#5a3825');
     player.hurtT = 0;
     player.jamT = 0;
+    player.jamFlashT = 0;
+    player.critSpeedT = 0;
     player.reloadT = 0;
     player.meleeT = 0;
     player.spinT = 0;
@@ -16291,6 +16416,7 @@
     player2.deathCause = '';
     hatPrice = 20;
     hatsBought = 0;
+    firstReviveFree = true;
     hatPackPrice = 100;
     swordWolfSlain = false;
     swordWolfAppeared = false;
@@ -17018,6 +17144,8 @@
       player2.spinDmg = false;
       player2.reloadT = 0;
       player2.jamT = 0;
+      player2.jamFlashT = 0;
+      player2.critSpeedT = 0;
       player2.spinT = 0;
       player2.meleeT = 0;
       player2.skillCheckActive = false;
@@ -17227,6 +17355,9 @@
         if (typeof msg.flightT === 'number') player2.flightT = msg.flightT;
         if (typeof msg.lastStandIdleT === 'number') player2.lastStandIdleT = msg.lastStandIdleT;
         if (typeof msg.lastStandStealth === 'boolean') player2.lastStandStealth = msg.lastStandStealth;
+        // Guest's dance jig — render the buddy dancing (and rooted) on the host.
+        if (typeof msg.danceT === 'number') player2.danceT = msg.danceT;
+        if (typeof msg.danceAnimT === 'number') player2.danceAnimT = msg.danceAnimT;
         return;
       }
       // Guest → host: a one-shot action (shoot, reload, magDump, doubleShot,
@@ -17297,6 +17428,10 @@
         flightT: player.flightT || 0,
         lastStandIdleT: player.lastStandIdleT || 0,
         lastStandStealth: !!player.lastStandStealth,
+        // Dance stun — the guest's keeper jigs locally; forward it so the HOST
+        // renders the buddy busting a move (and sees them rooted in place).
+        danceT: player.danceT || 0,
+        danceAnimT: player.danceAnimT || 0,
       });
     } catch (e) { /* channel may be mid-teardown */ }
   }
@@ -17373,7 +17508,7 @@
           buildType: buildType,
           // Weapon-animation timers so the guest can render the host's
           // gun/sword/melee swing with the right state every frame.
-          reloadT: player.reloadT, jamT: player.jamT, spinT: player.spinT,
+          reloadT: player.reloadT, jamT: player.jamT, jamFlashT: player.jamFlashT || 0, spinT: player.spinT,
           meleeT: player.meleeT, meleeDir: player.meleeDir, meleeFull: !!player.meleeFull,
           // Dance stun (host-only mechanic) so the guest sees the host jig.
           danceT: player.danceT || 0, danceAnimT: player.danceAnimT || 0,
@@ -17391,7 +17526,9 @@
           // Animation timers the guest's drawKeeperWeapon/Badge read directly.
           reloadT:     player2.reloadT,
           jamT:        player2.jamT,
+          jamFlashT:   player2.jamFlashT || 0, // cosmetic dud-shot flash
           spinT:       player2.spinT,
+          critSpeedT:  player2.critSpeedT || 0, // crit footwork burst — guest's keeper moves quicker
           meleeT:      player2.meleeT,
           meleeDir:    player2.meleeDir,
           meleeFull:   !!player2.meleeFull,
@@ -17478,8 +17615,11 @@
         gameOverCause: gameOverCause,
         // One-shot sound events fired since the last snapshot — guest replays.
         sounds: pendingNetSounds.length ? pendingNetSounds.slice() : null,
+        // One-shot toasts the guest needs to see (e.g. its own build feedback).
+        guestToasts: pendingGuestToasts.length ? pendingGuestToasts.slice() : null,
       });
       pendingNetSounds.length = 0; // queue is drained on every send
+      pendingGuestToasts.length = 0;
     } catch (e) { /* channel may be mid-teardown */ }
   }
 
@@ -17502,6 +17642,8 @@
       // Weapon animation timers — drive gun spin / muzzle flash / melee arc.
       player2.reloadT = msg.host.reloadT || 0;
       player2.jamT = msg.host.jamT || 0;
+      player2.jamFlashT = msg.host.jamFlashT || 0; // host's cosmetic dud-shot flash
+
       player2.spinT = msg.host.spinT || 0;
       player2.meleeT = msg.host.meleeT || 0;
       player2.meleeDir = msg.host.meleeDir || 0;
@@ -17559,7 +17701,9 @@
       // melee swing arc visuals.
       player.reloadT     = msg.guestWeapon.reloadT || 0;
       player.jamT        = msg.guestWeapon.jamT || 0;
+      player.jamFlashT   = msg.guestWeapon.jamFlashT || 0; // cosmetic dud-shot flash
       player.spinT       = msg.guestWeapon.spinT || 0;
+      player.critSpeedT  = msg.guestWeapon.critSpeedT || 0; // crit footwork burst (host-authoritative)
       player.meleeT      = msg.guestWeapon.meleeT || 0;
       player.meleeDir    = msg.guestWeapon.meleeDir || 0;
       player.meleeFull   = !!msg.guestWeapon.meleeFull;
@@ -17663,6 +17807,10 @@
     // self-queues only when isHost, so the guest's replay never echoes back.
     if (msg.sounds && msg.sounds.length) {
       for (let i = 0; i < msg.sounds.length; i++) playSoundByName(msg.sounds[i]);
+    }
+    // Replay any toasts the host queued for this guest (e.g. its build feedback).
+    if (msg.guestToasts && msg.guestToasts.length) {
+      for (let i = 0; i < msg.guestToasts.length; i++) toast(msg.guestToasts[i].msg, msg.guestToasts[i].dur);
     }
     // The host's map grows as they place coops; mirror the new bounds and
     // regenerate the forest border so the guest's render matches.
