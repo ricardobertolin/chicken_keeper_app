@@ -539,6 +539,8 @@
       <button data-debug="resurrect-both">Resurrect both</button>
       <button data-debug="force-night">Force Night of the Wolf</button>
       <button data-debug="buy-all-upgrades">Buy all upgrades</button>
+      <button data-debug="give-upgrade">Give upgrade (+bonus)</button>
+      <button data-debug="toggle-parry" id="debug-parry-btn">Parry mode: OFF</button>
     </div>
     <div class="debug-row" id="debug-tools">
       <span class="debug-label">Spawns &amp; Tools</span>
@@ -646,7 +648,52 @@
       case 'rocketBoots':      playRocketBoots(); break;
       case 'critical':         playCritical(); break;
       case 'critShot':         playCritShot(); break;
+      case 'sparkle':          playSparkle(); break;
     }
+  }
+
+  // Parry Mode: a tiny twinkly chime when a wolf's eye sparkles before it lunges.
+  function playSparkle() {
+    queueNetSound('sparkle');
+    const ctx = getAudio();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    // Two quick rising sine blips — a glassy "tink-tink".
+    [0, 0.06].forEach((off, i) => {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1800 + i * 600, now + off);
+      osc.frequency.exponentialRampToValueAtTime(3200 + i * 700, now + off + 0.05);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, now + off);
+      g.gain.exponentialRampToValueAtTime(0.06, now + off + 0.005);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + off + 0.09);
+      osc.connect(g); g.connect(ctx.destination);
+      osc.start(now + off); osc.stop(now + off + 0.1);
+    });
+  }
+
+  // Parry Mode: a soft airy whoosh when the keeper dodge-rolls. Local-only
+  // (each client plays its own roll) — no net queue.
+  function playDash() {
+    const ctx = getAudio();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const dur = 0.16;
+    const sz = Math.floor(ctx.sampleRate * dur);
+    const b = ctx.createBuffer(1, sz, ctx.sampleRate);
+    const d = b.getChannelData(0);
+    for (let i = 0; i < sz; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / sz);
+    const src = ctx.createBufferSource(); src.buffer = b;
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(900, now);
+    bp.frequency.exponentialRampToValueAtTime(2600, now + dur);
+    bp.Q.value = 0.8;
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.12, now);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    src.connect(bp); bp.connect(g); g.connect(ctx.destination);
+    src.start(now); src.stop(now + dur);
   }
 
   // A hammer striking twice — the building/placement sound.
@@ -1872,6 +1919,10 @@
       const lk = e.key.toLowerCase();
       if (lk === 'a' || lk === 'd') registerWdSpam(lk);
     }
+    // Parry Mode: SHIFT rolls the keeper forward (a dodge). Queue it here; the
+    // movement step picks the heading and honours the cooldown.
+    if (parryMode && e.key === 'Shift' && !e.repeat
+        && !paused && !upgradeMode && !inMenu && !gameOver) player.dashQueued = true;
     keys[e.key.toLowerCase()] = true;
     if (e.key === ' ') e.preventDefault();
   });
@@ -2431,6 +2482,20 @@
   const RELOAD_SC_CRIT_RANGE = 1.6;  // crit shots also fly farther (pellet lifetime / laser reach ×)
   const CRIT_SPEED_BOOST_MUL = 1.3;  // a critical reload also gives a brief footwork boost…
   const CRIT_SPEED_BOOST_T   = 2.0;  // …for this many seconds (drains in the movement step)
+  // ---- Experimental "Parry Mode" (debug toggle) ----
+  // When on: SHIFT rolls the keeper a short hop forward (a dodge), and wolves
+  // that get close may wind up a special lunge — their eye sparkles, then they
+  // dash straight at the keeper and bite on contact. Dodge the lunge with a roll.
+  let parryMode = false;
+  const PLAYER_DASH_DUR  = 0.18;     // seconds the keeper's dodge-roll lasts
+  const PLAYER_DASH_CD   = 0.7;      // cooldown between rolls
+  const PLAYER_DASH_MUL  = 2.5;      // speed multiplier during the roll (a short hop)
+  const PARRY_TRIGGER_RANGE  = 6.5;  // tiles — a wolf this close may start a lunge
+  const PARRY_SPARKLE_DUR    = 0.5;  // eye-sparkle wind-up before the lunge fires
+  const PARRY_DASH_DUR       = 0.3;  // how long a wolf's lunge lasts
+  const PARRY_DASH_SPEED     = 11;   // tiles/sec during the lunge
+  const PARRY_COOLDOWN       = 2.2;  // min seconds between a wolf's lunges
+  const PARRY_CHANCE_PER_SEC = 1.6;  // per-second chance to start a lunge while in range
   const CRIT_MG_SHOTS        = 3;    // machine-gun: a crit reload primes up to this many continuous shots
   const SPIN_DMG_MUL         = 3.0;  // max-level Quickdraw twirl: the next burst hits triple
   // Cold Shot / Hot Shot (wave 15, mutually exclusive). Each level raises the
@@ -2670,6 +2735,7 @@
   let chickenDeathsThisWave = 0;     // direct counter — every c.alive=false (chicken) increments this
   let bonusUpgradeAvailable = false; // true while the second pick screen is active
   let bonusUpgradeShownThisWave = false; // ensures the roll only fires once per wave
+  let bonusUpgradeForce = false;     // debug "give upgrade" — guarantees the next bonus roll
   let bonusDeathSnapshot = 0;        // chicken deaths captured at the wave-defended moment
   // Secret karma mechanic: a signed scale (good = +, bad = -). A wave cleared
   // without shooting a chicken nudges karma good; a wave with a friendly-fire
@@ -4529,7 +4595,9 @@
     if (!bonusUpgradeShownThisWave && !bonusUpgradeAvailable) {
       const deaths = bonusDeathSnapshot;
       const chance = bonusUpgradeChance(deaths);
-      if (chance > 0 && Math.random() < chance) {
+      const forced = bonusUpgradeForce; // debug "give upgrade" guarantees the roll
+      bonusUpgradeForce = false;
+      if (forced || (chance > 0 && Math.random() < chance)) {
         bonusUpgradeShownThisWave = true;
         bonusUpgradeAvailable = true;
         upgradePicked = false;
@@ -9480,6 +9548,31 @@
     }
   }
 
+  // Parry Mode: a wolf's lunge reaches the keeper — bite like a normal attack
+  // (respecting the shared bite-cooldown and the hidden dodge), then spend the
+  // lunge. The keeper is meant to roll out of the way before this lands.
+  function parryDashHitKeeper(w, k) {
+    w.parryDashT = 0;            // the lunge connects (or whiffs) — it's spent
+    w.parryCd = PARRY_COOLDOWN;
+    if (k.ghost || k.dying) return;
+    if ((k.flightT || 0) > 0 || k.lastStandStealth) return; // airborne / cloaked slips it
+    if ((k.wolfHitT || 0) > 0) return;                      // shared bite-cooldown
+    k.wolfHitT = 2.0;
+    shake = Math.max(shake, 0.3);
+    k.hurtT = 0.22;
+    breakLastStand(k);
+    if (keeperDodgesHatLoss(k)) return; // hidden dodge — kept the hat
+    if (k === player) {
+      if (immortal && playerHats <= 1) { toast('Immortal — last hat held!', 0.9); return; }
+      const lost = hatColors[hatColors.length - 1];
+      playerHats--; hatColors.pop(); onHatLost(lost);
+      if (playerHats <= 0) { if (!tryKarmaResurrect()) killKeeper(player, 'host', 'wolf'); }
+    } else {
+      k.hats--;
+      if (k.hats <= 0) killKeeper(k, 'guest', 'wolf');
+    }
+  }
+
   function updateWolf(w, dt) {
     if (!w.alive) return;
     if (w.boss) return; // the boss is driven by bossTick, not the generic wolf AI
@@ -9610,6 +9703,54 @@
       w.aggroT = 0.4;
     } else if (w.aggroT > 0) {
       w.aggroT = Math.max(0, w.aggroT - dt);
+    }
+    // ---- Experimental Parry Mode: sparkle-lunge special attack ----
+    // Any plain wolf that strays near a keeper may wind up (eye sparkles), lock
+    // on, then dash straight in and bite on contact — even if it was chasing a
+    // chicken. Roll (SHIFT) to dodge it. Special variants returned earlier;
+    // jumpers/carriers skip it.
+    if (parryMode && !w.jumper && !w.carrying) {
+      if ((w.parryCd || 0) > 0) w.parryCd -= dt;
+      if ((w.parryDashT || 0) > 0) {
+        // Lunge: barrel along the locked heading at high speed.
+        w.parryDashT -= dt;
+        w.vx = w.parryDashX * PARRY_DASH_SPEED;
+        w.vy = w.parryDashY * PARRY_DASH_SPEED;
+        moveWithFences(w, dt);
+        const pk = w.parryK; // the keeper locked in at sparkle time
+        if (pk && Math.hypot(pk.x - w.x, pk.y - w.y) < 0.75) parryDashHitKeeper(w, pk);
+        const sv = w.vx - w.vy;
+        if (Math.abs(sv) > 0.05) w.facingLeft = sv < 0;
+        return;
+      }
+      if ((w.sparkleT || 0) > 0) {
+        // Wind-up: the eye twinkles; the wolf braces and keeps re-aiming at the
+        // locked keeper so it can't be dodged before it commits.
+        w.sparkleT -= dt;
+        const pk = w.parryK;
+        if (pk) {
+          const dpx = pk.x - w.x, dpy = pk.y - w.y, pdist = Math.hypot(dpx, dpy) || 1;
+          w.parryDashX = dpx / pdist; w.parryDashY = dpy / pdist;
+        }
+        w.vx *= 0.5; w.vy *= 0.5;
+        moveWithFences(w, dt);
+        if (w.sparkleT <= 0) w.parryDashT = PARRY_DASH_DUR; // launch!
+        return;
+      }
+      // Idle: roll to start a lunge when a keeper is in range and off cooldown.
+      if ((w.parryCd || 0) <= 0) {
+        const pk = nearestKeeper(w.x, w.y);
+        if (pk) {
+          const pdist = Math.hypot(pk.x - w.x, pk.y - w.y);
+          if (pdist > 0.9 && pdist < PARRY_TRIGGER_RANGE
+              && Math.random() < PARRY_CHANCE_PER_SEC * dt) {
+            w.parryK = pk;
+            w.sparkleT = PARRY_SPARKLE_DUR;
+            w.parryCd = PARRY_COOLDOWN;
+            playSparkle();
+          }
+        }
+      }
     }
     // (Size Matters no longer scares wolves — it's now a barrel/range +
     // lifetime + bounce upgrade; see fireBurst / fireLaserShot.)
@@ -10887,6 +11028,36 @@
       player.danceAnimT = (player.danceAnimT || 0) + dt;
       mx = 0; my = 0;
     }
+    // ---- Experimental Parry Mode: SHIFT dodge-roll ----
+    // A queued roll launches the keeper a short hop along the current input
+    // heading (or the aim direction when standing still). The roll overrides
+    // input + the reload/jam slow for its brief duration — it's an escape move.
+    if ((player.dashCd || 0) > 0) player.dashCd -= dt;
+    if (player.dashQueued) {
+      player.dashQueued = false;
+      if ((player.dashT || 0) <= 0 && (player.dashCd || 0) <= 0
+          && !player.ghost && !player.dying && (player.danceT || 0) <= 0) {
+        let hx = mx, hy = my;
+        if (hx === 0 && hy === 0) { const a = aimAngle(); hx = Math.cos(a); hy = Math.sin(a); }
+        const hl = Math.hypot(hx, hy) || 1;
+        player.dashX = hx / hl; player.dashY = hy / hl;
+        player.dashT = PLAYER_DASH_DUR;
+        player.dashCd = PLAYER_DASH_CD;
+        player.dashPartT = 0;
+        playDash();
+      }
+    }
+    let dashing = false;
+    if ((player.dashT || 0) > 0 && !player.dying && (player.danceT || 0) <= 0) {
+      player.dashT -= dt;
+      mx = player.dashX; my = player.dashY;
+      dashing = true;
+      player.dashPartT = (player.dashPartT || 0) - dt;
+      if (player.dashPartT <= 0) {
+        player.dashPartT = 0.025;
+        spawnSmoke(player.x + rand(-0.25, 0.25), player.y + rand(-0.15, 0.15), 1);
+      }
+    }
     // Reloading slows you to half speed; a jam roots you in place. At max
     // Better Springs the stun duration is halved so jams are shorter, but
     // they still stun (you remain rooted while `jamT > 0`).
@@ -10899,6 +11070,7 @@
     if ((player.danceT || 0) > 0) moveMul = 0; // dance stun roots you
     else if (player.jamT > 0)   moveMul = 0;
     else if (myReloadingT > 0)  moveMul = RELOAD_MOVE_SLOW; // fixed half-speed shuffle while reloading
+    if (dashing) moveMul = PLAYER_DASH_MUL; // the dodge-roll overrides the reload/jam slow
     player.moving = !!(mx || my) && moveMul > 0;
     // Run mechanic: walking uninterrupted (no firing, no reload, no jam)
     // builds momentum, ramping move speed up at a full sprint. The Stampede
@@ -13287,6 +13459,18 @@
       ctx.rotate(sway);
       ctx.translate(-cx, -cy);
     }
+    // Parry Mode dodge-roll — the keeper tumbles a full forward roll about its
+    // midriff over the dash, spinning the way it's travelling. A little hop in
+    // the middle of the roll sells the somersault.
+    if ((player.dashT || 0) > 0) {
+      const prog = 1 - clamp((player.dashT || 0) / PLAYER_DASH_DUR, 0, 1);
+      const spinDir = ((player.dashX || 0) - (player.dashY || 0)) >= 0 ? 1 : -1;
+      const hop = Math.sin(prog * Math.PI) * 6; // peaks mid-roll
+      const pivX = cx, pivY = cy - 12;           // tumble about the torso centre
+      ctx.translate(pivX, pivY - hop);
+      ctx.rotate(prog * Math.PI * 2 * spinDir);
+      ctx.translate(-pivX, -pivY);
+    }
     // Death: a downed keeper topples flat onto the ground before becoming a
     // ghost (multiplayer) or the death screen (single-player). Rotate the whole
     // sprite about the feet from upright to ~85°, eased so it drops fast then
@@ -15226,6 +15410,26 @@
       ctx.fill();
       ctx.restore();
     }
+    // Parry Mode: a wolf winding up its lunge gets a bright twinkle in the eye —
+    // a pulsing four-point sparkle over the eye so the tell reads at a glance.
+    if (w.sparkleT > 0) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      const tw = 0.5 + 0.5 * Math.sin(Date.now() * 0.03 + (w.x + w.y));
+      const ex = cx + 11.8 * s, ey = cy - 14.2 * s;
+      const r = (2.2 + tw * 1.6) * s;
+      ctx.strokeStyle = 'rgba(255,255,180,' + (0.65 + 0.35 * tw).toFixed(2) + ')';
+      ctx.lineWidth = 0.8 * s;
+      ctx.beginPath();
+      ctx.moveTo(ex - r, ey); ctx.lineTo(ex + r, ey);
+      ctx.moveTo(ex, ey - r); ctx.lineTo(ex, ey + r);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,225,0.95)';
+      ctx.beginPath();
+      ctx.arc(ex, ey, 1.1 * s, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
     // A sword clenched in the jaws of a (rare) sword wolf.
     if (w.sword) {
       const mx = cx + 17 * s, my = cy - 12 * s; // grip point at the mouth
@@ -16367,6 +16571,7 @@
     player.jamT = 0;
     player.jamFlashT = 0;
     player.critSpeedT = 0;
+    player.dashT = 0; player.dashCd = 0; player.dashQueued = false;
     player.reloadT = 0;
     player.meleeT = 0;
     player.spinT = 0;
@@ -16426,6 +16631,7 @@
     chickenDeathsThisWave = 0;
     bonusUpgradeAvailable = false;
     bonusUpgradeShownThisWave = false;
+    bonusUpgradeForce = false;
     bonusDeathSnapshot = 0;
     weaponOilCharges = 0;
     weaponOilWaves = 0;
@@ -16748,6 +16954,12 @@
     }
     refreshAutoCritButton();
 
+    const parryBtn = document.getElementById('debug-parry-btn');
+    function refreshParryButton() {
+      if (parryBtn) parryBtn.textContent = 'Parry mode: ' + (parryMode ? 'ON' : 'OFF');
+    }
+    refreshParryButton();
+
 
     toggle.addEventListener('click', () => root.classList.toggle('open'));
 
@@ -17069,6 +17281,17 @@
         weaponOilCharges = 1; weaponOilWaves = WEAPON_OIL_WAVES; advancedOilWaves = 1;
         recomputeJamChance();
         toast('Bought all upgrades (all tiers)', 1.4);
+      } else if (action === 'give-upgrade') {
+        // Pop the upgrade screen right now, and guarantee the bonus pick fires
+        // after the first choice (resetting the once-per-wave gate + forcing it).
+        bonusUpgradeShownThisWave = false;
+        bonusUpgradeForce = true;
+        startUpgradePhase();
+        toast('Upgrade screen — bonus pick guaranteed next', 1.4);
+      } else if (action === 'toggle-parry') {
+        parryMode = !parryMode;
+        refreshParryButton();
+        toast('Parry mode ' + (parryMode ? 'ON — SHIFT to roll' : 'OFF'), 1.4);
       } else if (action === 'apply-upgrade') {
         const id = btn.dataset.id;
         // Oils gate their own apply() behind a money check, so granting them
@@ -17455,7 +17678,7 @@
     return out;
   }
   const SNAP_FIELDS = {
-    wolves:   ['x','y','size','fasterLevel','hurtT','facingLeft','alive','fox','bomb','sword','assassin','hatted','aggroT','carrying','fleeing','meleeT','meleeDir','bob','smokeT','defective','turncoat','coldT','burnT','boss','aimDir','walkT','missileWolf','missilePhase','missileChargeT','jumper','jumpT','jumpDur','hunterWolf','muzzleT','maxHp','hp','hatColor','gunColor','pup','ranged','homer','parachuting','parachuteH','parachuteSway','crawler','legPhase'],
+    wolves:   ['x','y','size','fasterLevel','hurtT','facingLeft','alive','fox','bomb','sword','assassin','hatted','aggroT','carrying','fleeing','meleeT','meleeDir','bob','smokeT','defective','turncoat','coldT','burnT','boss','aimDir','walkT','missileWolf','missilePhase','missileChargeT','jumper','jumpT','jumpDur','hunterWolf','muzzleT','maxHp','hp','hatColor','gunColor','pup','ranged','homer','parachuting','parachuteH','parachuteSway','crawler','legPhase','sparkleT'],
     chickens: ['x','y','alive','facingLeft','fat','worker','rich','bob','fleeT'],
     coops:    ['x','y','level','dirtR','builtWave','shakeT','igniteT','launching'],
     fences:   ['x','y','kind','hp','hurtT'],
@@ -17617,6 +17840,9 @@
         sounds: pendingNetSounds.length ? pendingNetSounds.slice() : null,
         // One-shot toasts the guest needs to see (e.g. its own build feedback).
         guestToasts: pendingGuestToasts.length ? pendingGuestToasts.slice() : null,
+        // Experimental Parry Mode flag — host-authoritative so the guest's
+        // SHIFT dodge-roll is enabled in lockstep with the wolves' lunge attack.
+        parryMode: parryMode,
       });
       pendingNetSounds.length = 0; // queue is drained on every send
       pendingGuestToasts.length = 0;
@@ -17778,6 +18004,7 @@
     if (msg.chickenSuckers) replaceArray(chickenSuckers, msg.chickenSuckers);
     if (msg.bossMissiles) replaceArray(bossMissiles, msg.bossMissiles);
     if (typeof msg.huntersLeavePending === 'boolean') huntersLeavePending = msg.huntersLeavePending;
+    if (typeof msg.parryMode === 'boolean') parryMode = msg.parryMode; // host drives the experimental toggle
     // Boss state so the guest renders the health bar + boss-cleared end screen.
     if (typeof msg.bossWaveActive === 'boolean') bossWaveActive = msg.bossWaveActive;
     if (typeof msg.bossPhase === 'string') bossPhase = msg.bossPhase;
