@@ -2477,9 +2477,9 @@
   const RELOAD_MOVE_SLOW      = 0.5;  // fixed move-speed multiplier while reloading (no longer upgrade-driven)
   const RELOAD_SC_BAR_W_BASE = 52;   // base bar width in pixels (larger overall; green band geometry unchanged)
   const RELOAD_SC_HIT_HALF   = 0.18; // half-width of the green success band, in 0..1 bar units
-  const RELOAD_SC_CRIT_HALF  = 0.035; // half-width of the central critical band (thin line in the middle)
+  const RELOAD_SC_CRIT_HALF  = 0.045; // half-width of the central critical band (thin line in the middle)
   const RELOAD_SC_CRIT_DMG   = 2.0;  // damage multiplier on the shot fired after a critical reload
-  const RELOAD_SC_CRIT_RANGE = 1.6;  // crit shots also fly farther (pellet lifetime / laser reach ×)
+  const RELOAD_SC_CRIT_RANGE = 1.0;  // crit shots keep normal range/appearance now — only the damage differs
   const CRIT_SPEED_BOOST_MUL = 1.3;  // a critical reload also gives a brief footwork boost…
   const CRIT_SPEED_BOOST_T   = 2.0;  // …for this many seconds (drains in the movement step)
   // ---- Experimental "Parry Mode" (debug toggle) ----
@@ -2488,14 +2488,16 @@
   // dash straight at the keeper and bite on contact. Dodge the lunge with a roll.
   let parryMode = false;
   const PLAYER_DASH_DUR  = 0.18;     // seconds the keeper's dodge-roll lasts
-  const PLAYER_DASH_CD   = 0.7;      // cooldown between rolls
+  const PLAYER_DASH_CD   = 4.0;      // cooldown between rolls (the recharge "delay")
   const PLAYER_DASH_MUL  = 2.5;      // speed multiplier during the roll (a short hop)
+  const DASH_RECOVER_SLOW = 0.45;    // winded — move this much slower right after a roll, fading over the cooldown
   const PARRY_TRIGGER_RANGE  = 6.5;  // tiles — a wolf this close may start a lunge
   const PARRY_SPARKLE_DUR    = 0.5;  // eye-sparkle wind-up before the lunge fires
-  const PARRY_DASH_DUR       = 0.3;  // how long a wolf's lunge lasts
-  const PARRY_DASH_SPEED     = 11;   // tiles/sec during the lunge
+  const PARRY_DASH_DUR       = 0.42; // how long a wolf's lunge lasts
+  const PARRY_DASH_SPEED     = 16;   // tiles/sec during the lunge
+  const PARRY_DASH_HOMING    = 7;    // how hard the lunge curves to track the keeper (0 = straight)
   const PARRY_COOLDOWN       = 2.2;  // min seconds between a wolf's lunges
-  const PARRY_CHANCE_PER_SEC = 1.6;  // per-second chance to start a lunge while in range
+  const PARRY_CHANCE_PER_SEC = 0.27; // per-second chance to start a lunge while in range
   const CRIT_MG_SHOTS        = 3;    // machine-gun: a crit reload primes up to this many continuous shots
   const SPIN_DMG_MUL         = 3.0;  // max-level Quickdraw twirl: the next burst hits triple
   // Cold Shot / Hot Shot (wave 15, mutually exclusive). Each level raises the
@@ -2561,8 +2563,13 @@
   const RELOAD_SC_MISS_LOCK  = 0.18; // brief lockout after a wrong press so spamming R can't pass
   // Marker position 0..1 along the bar at phase time `t` — triangle wave so
   // the marker moves at a constant rate (easier to read than a sine).
+  // skillCheckT is the ACCUMULATED sweep phase (advanced each frame by the
+  // current pin speed — see the update step), NOT raw elapsed time. Folding it
+  // here means a speed change (e.g. the player starting to run) only affects the
+  // pin from that moment on, so the marker never teleports / desyncs from where
+  // the hit-test reads it.
   function skillCheckPos(t) {
-    const phase = ((t * pinSpeed()) % 1) * 2; // 0..2
+    const phase = (((t % 1) + 1) % 1) * 2; // 0..2 (guard against any negative t)
     return phase < 1 ? phase : (2 - phase);
   }
   // Live geometry for the reload skill-check bar. Aggregates all upgrade
@@ -2594,12 +2601,17 @@
   function reloadRunMul(n) {
     return Math.max(RELOAD_MOVE_RUN_FLOOR, RELOAD_SC_RUN_MUL - (n || 0) * RELOAD_MOVE_PIN_SLOW);
   }
-  function pinSpeed() {
-    const lvl = upgradeLevels.fireRate || 0;
+  // Sweep rate (full sweeps/sec) for a given keeper — reads ITS own fireRate /
+  // Action Reload ladder and ITS own moving state, so each keeper's pin runs at
+  // the right speed. Used to advance skillCheckT incrementally each frame.
+  function pinSpeed(who) {
+    who = who || player;
+    const lvls = lvlsFor(who);
+    const lvl = lvls.fireRate || 0;
     let s = RELOAD_SC_SPEED * Math.max(0.5, 1 - lvl * TRIGGER_WORK_PIN_SLOW);
     // Reloading on the move sweeps the pin faster — but Action Reload shaves
     // that running speed-up away level by level (and past it, slows the pin).
-    if (player.moving) s *= reloadRunMul(upgradeLevels.reloadMove || 0);
+    if (who.moving) s *= reloadRunMul(lvls.reloadMove || 0);
     return s;
   }
   let magDumpLeft = 0;    // rounds left in an unstoppable mag dump (right-click)
@@ -5535,6 +5547,7 @@
 
   function maybeSpawnP2Cameo() {
     if (multiplayer || p2CameoUsed || p2Cameo) return;
+    if (wave < 30) return; // the buddy cameo only shows up from wave 30 on
     if (Math.random() >= P2_CAMEO_CHANCE) return;
     p2CameoUsed = true;
     const s = pickEdgeSpawn();
@@ -6322,7 +6335,11 @@
       }, spawnDelay + rand(600, 2600));
     }
     // Hunter wolf — a rare keeper-reskin cryptid. At most one every 20 waves.
-    if (wave >= HUNTER_WOLF_MIN_WAVE && wave - lastHunterWolfWave >= HUNTER_WOLF_GAP_WAVES
+    // Only ever shows up in a NEW-GAME-PLUS run: the player has to beat the
+    // wave-100 boss and hit restart first (restartBonusTier > 0). It never
+    // appears on a first playthrough.
+    if (restartBonusTier > 0 && wave >= HUNTER_WOLF_MIN_WAVE
+        && wave - lastHunterWolfWave >= HUNTER_WOLF_GAP_WAVES
         && Math.random() < HUNTER_WOLF_RATE) {
       lastHunterWolfWave = wave;
       pendingSpawns++;
@@ -6931,8 +6948,8 @@
           color: pelletColor,
           trail: !isSlug,
           shooter: 1,
-          crit: isCrit, // drives the fiery crit bullet look in drawPellet
-          critCol,      // crit tint based on current bullet (yellow/red/blue/purple)
+          crit: false,  // crit rounds now look like normal bullets (only damage differs)
+          critCol: null,
           bounce: sizeBounce,
           cold: coldChance > 0 && Math.random() < coldChance, coldDur,
           hot: hotChance > 0 && Math.random() < hotChance, hotDur,
@@ -7502,9 +7519,9 @@
       if (upgradeLevels.jockReload > 0) { startJockReload(isMG); return; }
       player.skillCheckActive = true;
       player.skillCheckNeedsRelease = !!mouse.down;
-      // Random starting phase so the marker doesn't always set out from
+      // Random starting phase (0..1) so the marker doesn't always set out from
       // the leftmost edge — keeps the timing fresh each reload attempt.
-      player.skillCheckT = Math.random() / RELOAD_SC_SPEED;
+      player.skillCheckT = Math.random();
       player.skillCheckLockoutT = 0;
       return;
     }
@@ -7521,6 +7538,7 @@
         // Machine gun primes a whole burst of crit shots; everything else one.
         player.critShots = (upgradeLevels.machineGun > 0) ? CRIT_MG_SHOTS : 1;
         player.critSpeedT = CRIT_SPEED_BOOST_T; // nailing the centre also kicks in a footwork burst
+        player.dashCd = 0; // …and instantly recharges the Parry Mode dodge-roll
         // Max Rusty Springs golden gun: every consecutive critical reload pays $1.
         if (upgradeLevels.rust >= 5) {
           critStreak++;
@@ -7633,8 +7651,8 @@
           color: pelletColor,
           trail: !isSlug,
           shooter: 2, // tags this pellet as player2's (drives friendly-fire checks)
-          crit: isCrit2, // drives the fiery crit bullet look in drawPellet
-          critCol: critCol2, // crit tint based on current bullet (yellow/red/blue/purple)
+          crit: false,  // crit rounds now look like normal bullets (only damage differs)
+          critCol: null,
           bounce: sizeBounce2,
           cold: coldChance2 > 0 && Math.random() < coldChance2, coldDur: coldDur2,
           hot: hotChance2 > 0 && Math.random() < hotChance2, hotDur: hotDur2,
@@ -7836,9 +7854,9 @@
       if (Math.random() < tableAtFor(player2, 'spinReload')) { spinTwirlReload(player2, isMG); return; }
       player2.skillCheckActive = true;
       player2.skillCheckNeedsRelease = !!player2.mouseDown;
-      // Random starting phase mirrors player1 — marker doesn't always start
-      // at the leftmost edge.
-      player2.skillCheckT = Math.random() / RELOAD_SC_SPEED;
+      // Random starting phase (0..1) mirrors player1 — marker doesn't always
+      // start at the leftmost edge.
+      player2.skillCheckT = Math.random();
       player2.skillCheckLockoutT = 0;
       return;
     }
@@ -7852,6 +7870,7 @@
       if (distFromCenter2 <= skillCheckCritHalf()) {
         player2.critShots = (lvlsFor(player2).machineGun > 0) ? CRIT_MG_SHOTS : 1;
         player2.critSpeedT = CRIT_SPEED_BOOST_T; // buddy gets the same footwork burst on a crit
+        player2.dashCd = 0; // …and instantly recharges the buddy's Parry Mode dodge-roll
         if ((lvlsFor(player2).rust || 0) >= 5) {
           player2.critStreak = (player2.critStreak || 0) + 1;
           addMoney(player2, GOLD_PER_CRIT);
@@ -8178,25 +8197,8 @@
         uy = 0;
         ux = ux >= 0 ? 1 : -1;
       }
-      // Same trap, but formed by FENCES instead of the map edge: a chicken
-      // fleeing into the inside corner of an L of fences just vibrates there —
-      // the wolf (also blocked by the fence) can never reach it, a permanent
-      // standoff (the bug seen pinned in the pen corner). Slide along the fence
-      // toward open ground so it can work its way out of the pocket.
-      const probe = 0.6;
-      if (fenceBlocks(c.x + ux * probe, c.y + uy * probe)) {
-        const xOpen = !fenceBlocks(c.x + ux * probe, c.y);
-        const yOpen = !fenceBlocks(c.x, c.y + uy * probe);
-        if (xOpen && !yOpen)      { uy = 0; }
-        else if (yOpen && !xOpen) { ux = 0; }
-        else {
-          // True fence corner — peel off perpendicular toward the roomier side.
-          const p1x = -uy, p1y = ux, p2x = uy, p2y = -ux;
-          const clear = (dx, dy) => fenceBlocks(c.x + dx * probe, c.y + dy * probe) ? 0 : 1;
-          if (clear(p1x, p1y) >= clear(p2x, p2y)) { ux = p1x; uy = p1y; }
-          else                                    { ux = p2x; uy = p2y; }
-        }
-      }
+      // (Chickens phase through fences now, so no fence-corner avoidance is
+      // needed — they just flee straight away from the wolf.)
       c.vx = ux * 3.0;
       c.vy = uy * 3.0;
       c.fleeT = 0.3;
@@ -8221,18 +8223,12 @@
     // Update facing direction from screen-space horizontal velocity (iso: screen X ∝ vx - vy)
     const cSvx = c.vx - c.vy;
     if (Math.abs(cSvx) > 0.05) c.facingLeft = cSvx < 0;
-    // Chickens now respect EVERY fence (wood + stone) using the same
-    // diagonal-aware collision as wolves — otherwise they slip through wood
-    // walls into pockets the pack physically can't follow them into.
-    const cInside = fenceBlocks(c.x, c.y);
-    // A fat chicken moves slower the fatter it is.
-    const fatMul = chickenSpeedMul(c);
-    const cStepX = c.x + c.vx * dt * fatMul, cStepY = c.y + c.vy * dt * fatMul;
-    const cxClear = !fenceBlocks(cStepX, c.y);
-    const cyClear = !fenceBlocks(c.x, cStepY);
-    const cDiagClear = !fenceBlocks(cStepX, cStepY);
-    if (cInside || (cxClear && (!cyClear || cDiagClear))) c.x = cStepX;
-    if (cInside || (cyClear && (!cxClear || cDiagClear))) c.y = cStepY;
+    // Chickens ignore fences entirely — they slip freely through wood and stone
+    // walls so a pen never traps or pockets them. (Wolves and the keeper still
+    // collide; only the birds phase through.)
+    const fatMul = chickenSpeedMul(c); // a fat chicken moves slower the fatter it is
+    c.x += c.vx * dt * fatMul;
+    c.y += c.vy * dt * fatMul;
     c.x = clamp(c.x, -HALF_MAP + 1, HALF_MAP - 1);
     c.y = clamp(c.y, -HALF_MAP + 1, HALF_MAP - 1);
     c.bob += dt * (Math.hypot(c.vx, c.vy) > 0.1 ? 12 : 2);
@@ -9712,12 +9708,23 @@
     if (parryMode && !w.jumper && !w.carrying) {
       if ((w.parryCd || 0) > 0) w.parryCd -= dt;
       if ((w.parryDashT || 0) > 0) {
-        // Lunge: barrel along the locked heading at high speed.
+        // Lunge: barrel toward the keeper at high speed. It homes for the FIRST
+        // half of the lunge, then commits — the back half flies dead straight,
+        // so a well-timed dodge-roll once it's locked in slips the attack.
         w.parryDashT -= dt;
+        const pk = w.parryK; // the keeper locked in at sparkle time
+        const homing = w.parryDashT > PARRY_DASH_DUR * 0.5; // track only the first half
+        if (pk && homing) {
+          const dpx = pk.x - w.x, dpy = pk.y - w.y, pd = Math.hypot(dpx, dpy) || 1;
+          const blend = Math.min(1, PARRY_DASH_HOMING * dt);
+          w.parryDashX += (dpx / pd - w.parryDashX) * blend;
+          w.parryDashY += (dpy / pd - w.parryDashY) * blend;
+          const hl = Math.hypot(w.parryDashX, w.parryDashY) || 1;
+          w.parryDashX /= hl; w.parryDashY /= hl;
+        }
         w.vx = w.parryDashX * PARRY_DASH_SPEED;
         w.vy = w.parryDashY * PARRY_DASH_SPEED;
         moveWithFences(w, dt);
-        const pk = w.parryK; // the keeper locked in at sparkle time
         if (pk && Math.hypot(pk.x - w.x, pk.y - w.y) < 0.75) parryDashHitKeeper(w, pk);
         const sv = w.vx - w.vy;
         if (Math.abs(sv) > 0.05) w.facingLeft = sv < 0;
@@ -11071,6 +11078,11 @@
     else if (player.jamT > 0)   moveMul = 0;
     else if (myReloadingT > 0)  moveMul = RELOAD_MOVE_SLOW; // fixed half-speed shuffle while reloading
     if (dashing) moveMul = PLAYER_DASH_MUL; // the dodge-roll overrides the reload/jam slow
+    else if (parryMode && (player.dashCd || 0) > 0) {
+      // Winded after a roll — drag the move speed down, strongest right after
+      // the dash and easing back to normal as the roll recharges.
+      moveMul *= 1 - DASH_RECOVER_SLOW * clamp(player.dashCd / PLAYER_DASH_CD, 0, 1);
+    }
     player.moving = !!(mx || my) && moveMul > 0;
     // Run mechanic: walking uninterrupted (no firing, no reload, no jam)
     // builds momentum, ramping move speed up at a full sprint. The Stampede
@@ -11187,9 +11199,10 @@
     if (player.jamFlashT > 0) player.jamFlashT -= dt; // cosmetic dud-shot flash
     if (player.hurtT > 0) player.hurtT -= dt;
     if (player.meleeT > 0) player.meleeT -= dt;
-    // Reload skill-check sweep — only advances while the bar is up.
+    // Reload skill-check sweep — only advances while the bar is up. Accumulate
+    // the PHASE (rate × dt), so a mid-sweep speed change never jumps the pin.
     if (player.skillCheckActive) {
-      player.skillCheckT += dt;
+      player.skillCheckT += dt * pinSpeed(player);
       if (player.skillCheckLockoutT > 0) player.skillCheckLockoutT -= dt;
     } else {
       player.skillCheckLockoutT = 0;
@@ -11282,7 +11295,7 @@
         if (player2.critSpeedT > 0) player2.critSpeedT -= dt; // drain the crit footwork burst (guest reads it)
         if (player2.meleeT > 0) player2.meleeT -= dt;
         if (player2.skillCheckActive) {
-          player2.skillCheckT += dt;
+          player2.skillCheckT += dt * pinSpeed(player2); // accumulate phase (no teleport)
           if (player2.skillCheckLockoutT > 0) player2.skillCheckLockoutT -= dt;
         } else {
           player2.skillCheckLockoutT = 0;
@@ -13488,6 +13501,11 @@
     }
     // While hurtT is active (just took a hit), the body parts flash red.
     const hurt = player.hurtT > 0;
+    // Parry Mode: while the dodge-roll is recharging (the 2s delay), the keeper
+    // flushes red as a cooldown tell — strongest right after the roll, fading
+    // back to normal as it comes off cooldown.
+    const dashCoolFrac = (parryMode && (player.dashT || 0) <= 0)
+      ? clamp((player.dashCd || 0) / PLAYER_DASH_CD, 0, 1) : 0;
     // On a guest client this function is rendering the guest keeper — the
     // same character the host sees as player2. Both keepers now carry guns,
     // so the stock/barrel/badge are drawn either way; the guest keeper uses
@@ -13510,6 +13528,17 @@
     ctx.beginPath();
     ctx.arc(cx, cy - 30 + crouchYAdd, 6, 0, Math.PI*2);
     ctx.fill();
+    // Dash-cooldown flush — a translucent red wash over the FACE only while the
+    // dodge-roll recharges (skipped when already flashing from a hit).
+    if (dashCoolFrac > 0 && !hurt) {
+      ctx.save();
+      ctx.globalAlpha = 0.4 * dashCoolFrac;
+      ctx.fillStyle = '#ff3030';
+      ctx.beginPath();
+      ctx.arc(cx, cy - 30 + crouchYAdd, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
     // FANGUS-kill trophy mustache — widens with each boss kill. Only the keeper
     // who earned it wears one.
     if ((player.mustache || 0) > 0 && !player.ghost) drawMustache(cx, cy - 30 + crouchYAdd, player.mustache, player.mustacheAge);
@@ -13875,9 +13904,12 @@
     const pos = skillCheckPos(who.skillCheckT || 0);
     const mx = x + pos * W;
     const runningReload = !!who.moving;
-    ctx.fillStyle = (runningReload && (Math.floor(Date.now() / 70) % 2))
-      ? '#ff2a2a'
-      : '#ffe27a';
+    // Dead-centre crit zone — the pin glows red so a critical commit reads at a
+    // glance. Otherwise it flickers red while reloading on the move, else gold.
+    const inCrit = Math.abs(pos - 0.5) <= skillCheckCritHalf();
+    ctx.fillStyle = inCrit
+      ? '#ff2020'
+      : (runningReload && (Math.floor(Date.now() / 70) % 2)) ? '#ff2a2a' : '#ffe27a';
     ctx.fillRect(mx - 1, y - 1, 2, H + 2);
   }
 
