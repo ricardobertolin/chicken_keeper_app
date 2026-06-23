@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Chicken Keeper - Isometric</title>
 <!-- PeerJS: WebRTC wrapper that uses a free public broker for signaling.
      Once peers connect, all gameplay traffic is peer-to-peer. -->
@@ -14,6 +15,7 @@
     height: 100%;
     background: #1a1a1a;
     overflow: hidden;
+    touch-action: none;
     /* Chunky monospace face — matches the low-res pixel canvas. */
     font-family: 'Lucida Console', 'Consolas', 'Courier New', monospace;
     color: #fff;
@@ -393,11 +395,105 @@
   body.in-menu #hud,
   body.in-menu #help,
   body.in-menu #buildhint,
-  body.in-menu #debug { display: none; }
+  body.in-menu #debug,
+  body.in-menu #mob-hud { display: none; }
+
+  /* ── Mobile virtual gamepad ──────────────────────────────────────────────── */
+  #mob-hud {
+    display: none;
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 50;
+  }
+  .mob-pad {
+    position: absolute;
+    width: 120px; height: 120px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.07);
+    border: 2px solid rgba(255,255,255,0.22);
+    pointer-events: all;
+    touch-action: none;
+    box-sizing: border-box;
+  }
+  .mob-knob {
+    position: absolute;
+    width: 48px; height: 48px;
+    top: 50%; left: 50%;
+    transform: translate(-50%,-50%);
+    border-radius: 50%;
+    background: rgba(255,255,255,0.28);
+    border: 2px solid rgba(255,255,255,0.55);
+    pointer-events: none;
+    box-sizing: border-box;
+    transition: left 0.04s, top 0.04s;
+  }
+  #mob-move-pad { bottom: 20px; left: 20px; }
+  #mob-aim-pad  { bottom: 20px; right: 15px; }
+  .mob-btn {
+    position: absolute;
+    pointer-events: all;
+    touch-action: none;
+    border: 2px solid rgba(255,255,255,0.35);
+    font-family: 'Lucida Console','Consolas','Courier New',monospace;
+    font-weight: bold;
+    letter-spacing: 1px;
+    color: #fff;
+    background: rgba(0,0,0,0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    border-radius: 0;
+    font-size: 12px;
+  }
+  #mob-fire {
+    width: 64px; height: 64px;
+    bottom: 30px; right: 148px;
+    background: rgba(180,30,30,0.75);
+    border-color: #ff6b6b;
+    font-size: 14px;
+    border-radius: 50%;
+  }
+  #mob-build-btn {
+    width: 52px; height: 52px;
+    bottom: 108px; right: 148px;
+    background: rgba(30,80,180,0.70);
+    border-color: #8fcaff;
+    font-size: 10px;
+  }
+  #mob-scr-r {
+    width: 44px; height: 44px;
+    bottom: 112px; right: 208px;
+    font-size: 18px;
+  }
+  #mob-scr-l {
+    width: 44px; height: 44px;
+    bottom: 112px; right: 260px;
+    font-size: 18px;
+  }
+  #mob-pause {
+    width: 50px; height: 34px;
+    top: 14px; left: 50%;
+    transform: translateX(-50%);
+  }
 </style>
 </head>
 <body class="in-menu pixelate-all">
 <canvas id="game"></canvas>
+
+<!-- Mobile virtual gamepad — shown only on touch devices (set via JS) -->
+<div id="mob-hud">
+  <div class="mob-pad" id="mob-move-pad"><div class="mob-knob" id="mob-move-knob"></div></div>
+  <div class="mob-pad" id="mob-aim-pad"><div class="mob-knob" id="mob-aim-knob"></div></div>
+  <button class="mob-btn" id="mob-fire">FIRE</button>
+  <button class="mob-btn" id="mob-build-btn">BUILD</button>
+  <button class="mob-btn" id="mob-scr-l">&#9664;</button>
+  <button class="mob-btn" id="mob-scr-r">&#9654;</button>
+  <button class="mob-btn" id="mob-pause">&#9646;&#9646;</button>
+</div>
 
 <!-- SVG pixelation filter — applied to <body> via .pixelate-all so every
      rasterised element (canvas included) is quantised to a 2x2 grid.
@@ -429,7 +525,7 @@
       <button class="menu-btn menu-btn--primary" id="btnSingle">Single Player</button>
       <button class="menu-btn" id="btnMulti">Multiplayer</button>
       <button class="menu-btn" id="btnHowTo">How to Play</button>
-      <p class="menu-version">v0.8.4 <span class="by">·  made by ricardobertolin</span></p>
+      <p class="menu-version">v0.8.6 <span class="by">·  made by ricardobertolin</span></p>
     </section>
 
     <!-- How to play — controls -->
@@ -541,6 +637,7 @@
       <button data-debug="buy-all-upgrades">Buy all upgrades</button>
       <button data-debug="give-upgrade">Give upgrade (+bonus)</button>
       <button data-debug="toggle-parry" id="debug-parry-btn">Parry mode: OFF</button>
+      <button data-debug="toggle-fast-mode" id="debug-fast-mode-btn">Fast mode: OFF</button>
     </div>
     <div class="debug-row" id="debug-tools">
       <span class="debug-label">Spawns &amp; Tools</span>
@@ -649,6 +746,7 @@
       case 'critical':         playCritical(); break;
       case 'critShot':         playCritShot(); break;
       case 'sparkle':          playSparkle(); break;
+      case 'bossSpawn':        playBossSpawn(); break;
     }
   }
 
@@ -1285,6 +1383,26 @@
     } catch (e) { wilhelmFailed = true; playSynthScream(); }
   }
 
+  // FANGUS spawn roar — an external sample played from the CDN when the boss
+  // (re)appears. Fails silently if the file can't load (offline / blocked).
+  let bossSpawnAudio = null;
+  let bossSpawnFailed = false;
+  function playBossSpawn() {
+    queueNetSound('bossSpawn'); // host → guest, so the buddy hears it too
+    if (bossSpawnFailed) return;
+    try {
+      if (!bossSpawnAudio) {
+        bossSpawnAudio = new Audio('https://cdn.freesound.org/previews/858/858826_18150200-hq.mp3');
+        bossSpawnAudio.volume = 0.6;
+        bossSpawnAudio.addEventListener('error', () => { bossSpawnFailed = true; });
+      }
+      const a = bossSpawnAudio.cloneNode();
+      a.volume = 0.6;
+      const pr = a.play();
+      if (pr && pr.catch) pr.catch(() => {});
+    } catch (e) {}
+  }
+
   // A meaty explosion — used by fat-chicken bursts, bomb-wolf detonations and
   // the karma-resurrect map sweep. A low body-thump under a wide noise blast
   // tail so it reads as "boom" rather than "shotgun blast".
@@ -1815,6 +1933,8 @@
       return;
     }
     if (upgradeMode) {
+      // Escape can still unpause if somehow both states are active (e.g. debug panel).
+      if (e.key === 'Escape' && paused) { togglePause(); return; }
       // Guest in individual-upgrade mode picks its own option locally.
       if (multiplayer && !isHost && gameOpts.individualUpgrades) {
         if (e.key === '1') { selectUpgradeP2(0); return; }
@@ -2056,6 +2176,154 @@
     player.buildType = buildType; // keep the mirror current for buildModeToast
     toast(buildModeToast(player));
   }, { passive: false });
+
+  // ── Mobile virtual gamepad ────────────────────────────────────────────────
+  // Detected at runtime: if no touch support, nothing below runs and the HUD
+  // stays display:none. All state is fed into the same keys[], mouse, and game
+  // functions as the keyboard/mouse path — the game loop needs no changes.
+  (function setupMobileHUD() {
+    if (!('ontouchstart' in window) && navigator.maxTouchPoints < 1) return;
+
+    const mobHud   = document.getElementById('mob-hud');
+    const movePad  = document.getElementById('mob-move-pad');
+    const moveKnob = document.getElementById('mob-move-knob');
+    const aimPad   = document.getElementById('mob-aim-pad');
+    const aimKnob  = document.getElementById('mob-aim-knob');
+    const fireBtn  = document.getElementById('mob-fire');
+    const buildBtn = document.getElementById('mob-build-btn');
+    const scrLBtn  = document.getElementById('mob-scr-l');
+    const scrRBtn  = document.getElementById('mob-scr-r');
+    const pauseBtn = document.getElementById('mob-pause');
+
+    mobHud.style.display = 'block';
+
+    const PAD_R  = 60;   // half the 120 px pad diameter
+    const KNOB_R = 36;   // max knob travel from centre
+    const DEAD   = 0.25; // normalised deadzone
+
+    let moveTouchId = -1, moveCx = 0, moveCy = 0;
+    let aimTouchId  = -1, aimCx  = 0, aimCy  = 0;
+
+    function padCenter(el) {
+      const r = el.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    }
+
+    // ── Movement joystick (left) ──────────────────────────────────────────
+    movePad.addEventListener('touchstart', e => {
+      e.preventDefault();
+      if (moveTouchId !== -1) return;
+      const t = e.changedTouches[0];
+      moveTouchId = t.identifier;
+      const c = padCenter(movePad); moveCx = c.x; moveCy = c.y;
+    }, { passive: false });
+
+    movePad.addEventListener('touchmove', e => {
+      e.preventDefault();
+      for (const t of e.changedTouches) {
+        if (t.identifier !== moveTouchId) continue;
+        const dx = t.clientX - moveCx, dy = t.clientY - moveCy;
+        const dist = Math.hypot(dx, dy) || 1;
+        const clamp = Math.min(dist, KNOB_R);
+        const nx = dx / dist, ny = dy / dist;
+        moveKnob.style.left = (50 + nx * clamp / PAD_R * 50) + '%';
+        moveKnob.style.top  = (50 + ny * clamp / PAD_R * 50) + '%';
+        // Screen-space direction maps directly to WASD (iso alignment comment at line 11114)
+        keys['d'] = nx >  DEAD;
+        keys['a'] = nx < -DEAD;
+        keys['s'] = ny >  DEAD;
+        keys['w'] = ny < -DEAD;
+      }
+    }, { passive: false });
+
+    function endMove() {
+      moveTouchId = -1;
+      moveKnob.style.left = '50%'; moveKnob.style.top = '50%';
+      keys['w'] = keys['a'] = keys['s'] = keys['d'] = false;
+    }
+    movePad.addEventListener('touchend', e => {
+      e.preventDefault();
+      for (const t of e.changedTouches) if (t.identifier === moveTouchId) endMove();
+    }, { passive: false });
+    movePad.addEventListener('touchcancel', endMove);
+
+    // ── Aim joystick (right) ─────────────────────────────────────────────
+    // Dragging sets mouse.x/y so aimAngle() sees the right direction.
+    // Since the camera tracks the player, aimAngle ≈ atan2(mouse.y-H/2, mouse.x-W/2).
+    aimPad.addEventListener('touchstart', e => {
+      e.preventDefault();
+      if (aimTouchId !== -1) return;
+      const t = e.changedTouches[0];
+      aimTouchId = t.identifier;
+      const c = padCenter(aimPad); aimCx = c.x; aimCy = c.y;
+    }, { passive: false });
+
+    aimPad.addEventListener('touchmove', e => {
+      e.preventDefault();
+      for (const t of e.changedTouches) {
+        if (t.identifier !== aimTouchId) continue;
+        const dx = t.clientX - aimCx, dy = t.clientY - aimCy;
+        const dist = Math.hypot(dx, dy);
+        if (dist < 6) continue;
+        const clamp = Math.min(dist, KNOB_R);
+        const nx = dx / dist, ny = dy / dist;
+        aimKnob.style.left = (50 + nx * clamp / PAD_R * 50) + '%';
+        aimKnob.style.top  = (50 + ny * clamp / PAD_R * 50) + '%';
+        const reach = Math.max(W, H) * 0.45;
+        mouse.x = W / 2 + nx * reach;
+        mouse.y = H / 2 + ny * reach;
+      }
+    }, { passive: false });
+
+    function endAim() {
+      aimTouchId = -1;
+      aimKnob.style.left = '50%'; aimKnob.style.top = '50%';
+    }
+    aimPad.addEventListener('touchend', e => {
+      e.preventDefault();
+      for (const t of e.changedTouches) if (t.identifier === aimTouchId) endAim();
+    }, { passive: false });
+    aimPad.addEventListener('touchcancel', endAim);
+
+    // ── Fire button ───────────────────────────────────────────────────────
+    // Sets mouse.down so auto-fire weapons (machine gun, sword) keep firing
+    // while the button is held, then calls tryShoot for the initial trigger.
+    fireBtn.addEventListener('touchstart', e => {
+      e.preventDefault();
+      mouse.down = true;
+      tryShoot();
+    }, { passive: false });
+    fireBtn.addEventListener('touchend', e => {
+      e.preventDefault();
+      mouse.down = false;
+      player.skillCheckNeedsRelease = false;
+    }, { passive: false });
+    fireBtn.addEventListener('touchcancel', () => {
+      mouse.down = false;
+      player.skillCheckNeedsRelease = false;
+    });
+
+    // ── Build button (E key) ──────────────────────────────────────────────
+    buildBtn.addEventListener('touchstart', e => {
+      e.preventDefault();
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', bubbles: true }));
+    }, { passive: false });
+    buildBtn.addEventListener('touchend', e => { e.preventDefault(); }, { passive: false });
+
+    // ── Scroll buttons (cycle building type) ─────────────────────────────
+    function dispatchScroll(dir) {
+      canvas.dispatchEvent(new WheelEvent('wheel',
+        { deltaY: dir * 100, bubbles: true, cancelable: true }));
+    }
+    scrLBtn.addEventListener('touchstart', e => { e.preventDefault(); dispatchScroll(-1); }, { passive: false });
+    scrRBtn.addEventListener('touchstart', e => { e.preventDefault(); dispatchScroll(1);  }, { passive: false });
+
+    // ── Pause button ──────────────────────────────────────────────────────
+    pauseBtn.addEventListener('touchstart', e => {
+      e.preventDefault();
+      if (!gameOver) togglePause();
+    }, { passive: false });
+  })();
 
   // ---------- Game state ----------
   // The simulation runs from page load so the title menu can sit on top of a
@@ -2497,7 +2765,7 @@
   const PARRY_DASH_SPEED     = 16;   // tiles/sec during the lunge
   const PARRY_DASH_HOMING    = 7;    // how hard the lunge curves to track the keeper (0 = straight)
   const PARRY_COOLDOWN       = 2.2;  // min seconds between a wolf's lunges
-  const PARRY_CHANCE_PER_SEC = 0.27; // per-second chance to start a lunge while in range
+  const PARRY_CHANCE_PER_SEC = 0.135; // per-second chance to start a lunge while in range
   const CRIT_MG_SHOTS        = 3;    // machine-gun: a crit reload primes up to this many continuous shots
   const SPIN_DMG_MUL         = 3.0;  // max-level Quickdraw twirl: the next burst hits triple
   // Cold Shot / Hot Shot (wave 15, mutually exclusive). Each level raises the
@@ -2654,11 +2922,13 @@
   // Money helpers — in separateMoney mode, money goes to whoever earned it
   // (player vs player2); otherwise everything pools into `money` (legacy).
   function addMoney(who, amount) {
+    if (debugFastMode) amount *= 5; // Fast mode: all earned income pays out 5×
     if (!gameOpts.separateMoney || who === player) money += amount;
     else                                            money2 += amount;
   }
   // Income with no specific earner (wave reward, harvest) — split when separate.
   function addSharedMoney(amount) {
+    if (debugFastMode) amount *= 5; // Fast mode: 5× income
     if (!gameOpts.separateMoney) { money += amount; return; }
     const half = Math.floor(amount / 2);
     money  += amount - half; // P1 keeps the rounding extra
@@ -2821,6 +3091,7 @@
   const BOSS_DASH_TIME = 0.75;    // seconds a charge lasts
   const BOSS_DASH_CD = 2.8;       // cooldown between charges (shortened a touch)
   const BOSS_DASH_CHANCE = 0.1;   // per-second roll to charge (MK-02 onward) — 5x rarer now
+  const BOSS_CLOSE_DASH_R = 3.5;  // a keeper inside this range forces an immediate charge
   // Phase-3 chicken-suck: MK-03 launches orbs that drag a chicken back to heal it.
   const BOSS_SUCK_COOLDOWN = 8;   // seconds between chicken-suck launches (less frequent now)
   const BOSS_SUCK_SPEED = 6.5;    // tiles/s the suck orb travels
@@ -4307,6 +4578,7 @@
 
   function startUpgradePhase() {
     buildMode = false;
+    paused = false; // can't be paused and in upgrade mode simultaneously
     // Apply any deferred map growth now — hidden behind the upgrade overlay.
     if (pendingMapExpansions > 0) {
       while (pendingMapExpansions > 0) { expandMap(); pendingMapExpansions--; }
@@ -4580,6 +4852,18 @@
     };
   }
 
+  // Apply a picked upgrade once — or up to 5 stacked levels in Fast mode,
+  // stopping at the upgrade's cap (available()) or when the wallet runs dry.
+  function applyPickedUpgrade(option) {
+    option.apply();
+    if (!debugFastMode) return;
+    for (let i = 1; i < 5; i++) {
+      if (option.available && !option.available()) break;   // hit the level cap / a lock
+      if (option.affordable && !option.affordable()) break; // out of money
+      option.apply();
+    }
+  }
+
   function selectUpgrade(index) {
     if (multiplayer && !isHost) return; // host picks; guest only watches
     if (player.ghost) return; // ghosts sit out the upgrade phase
@@ -4589,7 +4873,7 @@
     // Money-gated picks (hats, oils) are always shown, even when broke. Clicking
     // one you can't afford just buzzes — it doesn't consume your pick.
     if (option.affordable && !option.affordable()) { playCantBuy(); return; }
-    option.apply();
+    applyPickedUpgrade(option);
     upgradePicked = true;
     toast(option.id === 'cash' ? 'Picked up $10'
         : option.id === 'chicken' ? 'Bock bock bagawk!'
@@ -4647,7 +4931,7 @@
     const option = upgradeOptions2[index];
     if (!option) return;
     if (option.affordable && !option.affordable()) { playCantBuy(); return; }
-    option.apply();
+    applyPickedUpgrade(option); // Fast mode stacks 5 levels here too
     upgradePicked2 = true;
     toast('Buddy picked ' + option.title, 1.4);
     maybeFinishUpgradePhase();
@@ -6134,7 +6418,8 @@
     assignRooftoppers();
     // Farms grow when a wave is defended (see checkWaveDefended); a multi-wave
     // debug skip advances them for the bypassed waves too, paid out silently.
-    if (skipCount > 1) money += growFarms(skipCount - 1);
+    // Routed through addSharedMoney so Fast mode's 5× (and the co-op split) apply.
+    if (skipCount > 1) addSharedMoney(growFarms(skipCount - 1));
     // Night of the Wolf — flip the wave dark + buff wolves. Triggered by:
     //  (a) the debug force flag,
     //  (b) a probabilistic roll within the pre-100 band, capped to 3/run, or
@@ -8782,6 +9067,7 @@
     const mk = bossName();
     toast(bossSidesDone === 0 ? (mk + ' ONLINE!') : (mk + ' boots up!'), 2.4);
     playNightOfWolfStart();
+    playBossSpawn(); // external FANGUS roar on every (re)spawn
     // Every boss entrance rattles the crew — one hunter bolts for the hills,
     // unless they're maxed-out veterans (Hunter Gear tier 5 holds the line).
     if (hunterPowerLvl() < 5) {
@@ -8855,6 +9141,20 @@
 
   // Keep the boss from parking on top of the coops — shove it back out to a
   // safe ring around any coop it strays too close to.
+  // A random open spot, well away from both the boss's current tile and the
+  // coops — where it charges off to when it gets wedged against a building.
+  function bossRandomSpot(b) {
+    for (let i = 0; i < 12; i++) {
+      const x = rand(-HALF_MAP + 4, HALF_MAP - 4);
+      const y = rand(-HALF_MAP + 4, HALF_MAP - 4);
+      if (dist2(x, y, b.x, b.y) < 36) continue; // pick somewhere meaningfully away
+      let nearCoop = false;
+      for (const c of coops) { if (dist2(x, y, c.x, c.y) < 30) { nearCoop = true; break; } }
+      if (!nearCoop) return { x, y };
+    }
+    return { x: rand(-HALF_MAP + 4, HALF_MAP - 4), y: rand(-HALF_MAP + 4, HALF_MAP - 4) };
+  }
+
   function bossAvoidCoops(b) {
     const minD = 4.0;
     for (const c of coops) {
@@ -8971,6 +9271,12 @@
     b.aimDir = Math.atan2(sdy, sdx);
     // Battle damage — smoke once it drops past half HP, billowing harder at a quarter.
     const hpFrac = b.hp / b.maxHp;
+    // "Rage" ramps 0→1 as HP falls from full to a quarter (capped). It speeds up
+    // BOTH the boss's movement (×1→×4) and its laser cadence (×1→×2). HP refills
+    // to full each phase, so every new MK fight starts back at the calm default.
+    const bossRage = clamp((1 - hpFrac) / 0.75, 0, 1);
+    const bossSpeedMul = 1 + bossRage * 3; // walk speed: ×1 full HP → ×4 at a quarter
+    const bossAtkMul   = 1 + bossRage;     // volley cadence: ×1 → ×2 (twice as fast)
     if (hpFrac < 0.5) {
       b.dmgSmokeT = (b.dmgSmokeT || 0) - dt;
       const rate = hpFrac < 0.25 ? 0.08 : 0.22;
@@ -9001,15 +9307,33 @@
     b.dashCdT = (b.dashCdT || 0) - dt;
     if (b.dashT > 0) {
       b.dashT -= dt;
-      b.vx = (dx / d) * BOSS_DASH_SPEED; b.vy = (dy / d) * BOSS_DASH_SPEED;
+      // Normally the charge homes the keeper; a "reposition" charge (set when the
+      // boss is wedged against a coop) instead barrels toward a random open spot.
+      let tx = dx / d, ty = dy / d;
+      if (b.dashGoalX !== undefined) {
+        const gx = b.dashGoalX - b.x, gy = b.dashGoalY - b.y, gd = Math.hypot(gx, gy) || 1;
+        tx = gx / gd; ty = gy / gd;
+        if (gd < 1.5) b.dashT = 0; // reached the spot — end the charge
+      }
+      b.vx = tx * BOSS_DASH_SPEED; b.vy = ty * BOSS_DASH_SPEED;
       b.x = clamp(b.x + b.vx * dt, -HALF_MAP + 2, HALF_MAP - 2);
       b.y = clamp(b.y + b.vy * dt, -HALF_MAP + 2, HALF_MAP - 2);
       bossCrushFences(b);
       bossAvoidCoops(b);
       bossContactDamage(b); // a ram into a keeper always lands
+      if (b.dashT <= 0) { b.dashGoalX = undefined; b.dashGoalY = undefined; } // clear when the charge ends
       return; // no firing mid-charge
     }
+    // Crowd it and it always answers with a charge — you can't just hug FANGUS to
+    // sit inside the laser fan. Off-cooldown only, so it isn't a constant ram.
+    if (b.bornT > 1.2 && b.dashCdT <= 0 && d < BOSS_CLOSE_DASH_R) {
+      b.dashGoalX = undefined; b.dashGoalY = undefined; // home in on the keeper
+      b.dashT = BOSS_DASH_TIME; b.dashCdT = BOSS_DASH_CD;
+      playBossDash(); shake = Math.max(shake, 0.3);
+      return;
+    }
     if (bossSidesDone >= 1 && b.bornT > 1.2 && b.dashCdT <= 0 && Math.random() < BOSS_DASH_CHANCE * dt) {
+      b.dashGoalX = undefined; b.dashGoalY = undefined; // home in on the keeper
       b.dashT = BOSS_DASH_TIME; b.dashCdT = BOSS_DASH_CD;
       playBossDash(); shake = Math.max(shake, 0.3);
       return;
@@ -9018,7 +9342,7 @@
     b.gaitT = (b.gaitT || 0) - dt;
     if (b.gaitT <= 0) { b.walking = !b.walking; b.gaitT = b.walking ? rand(1.3, 2.1) : rand(0.9, 1.5); }
     const standoff = 7;
-    const spd = 0.9; // a touch faster than before
+    const spd = 0.9 * bossSpeedMul; // base walk, scaled by battle damage (see bossRage)
     if (b.walking && d > standoff + 0.5)      { b.vx = (dx / d) * spd;       b.vy = (dy / d) * spd; }
     else if (b.walking && d < standoff - 0.5) { b.vx = -(dx / d) * spd * 0.7; b.vy = -(dy / d) * spd * 0.7; }
     else                                      { b.vx = 0; b.vy = 0; }
@@ -9027,9 +9351,26 @@
     bossCrushFences(b); // it rolls straight through fences and stone walls
     bossAvoidCoops(b);  // but keeps its distance from the coops
     bossContactDamage(b); // standing in its body always costs a hat
+    // Stuck-on-a-coop escape: sample its position once a second; if it was trying
+    // to advance on the keeper but a coop wedged in the way kept shoving it back
+    // so it barely moved, it gives up and charges off to a random open spot.
+    b.stuckRefT = (b.stuckRefT || 0) - dt;
+    if (b.stuckRefX === undefined || b.stuckRefT <= 0) {
+      if (b.stuckRefX !== undefined) {
+        const movedFar = dist2(b.x, b.y, b.stuckRefX, b.stuckRefY) > 1.0; // >1 tile this past second
+        const tryingToMove = b.walking && d > standoff + 0.5;
+        if (!movedFar && tryingToMove && b.dashT <= 0 && b.dashCdT <= 0) {
+          const spot = bossRandomSpot(b);
+          b.dashGoalX = spot.x; b.dashGoalY = spot.y;
+          b.dashT = BOSS_DASH_TIME; b.dashCdT = BOSS_DASH_CD;
+          playBossDash(); shake = Math.max(shake, 0.25);
+        }
+      }
+      b.stuckRefX = b.x; b.stuckRefY = b.y; b.stuckRefT = 1.0;
+    }
     if (b.bornT > 1.0) {            // a short settle so the entrance reads
       b.fireT -= dt;
-      if (b.fireT <= 0) { b.fireT = BOSS_FIRE_COOLDOWN; bossFire(b, Math.atan2(dy, dx)); }
+      if (b.fireT <= 0) { b.fireT = BOSS_FIRE_COOLDOWN / bossAtkMul; bossFire(b, Math.atan2(dy, dx)); } // volleys speed up with rage (heal + missiles keep their pace)
       // MK-03 power — siphon a chicken back to heal (phase 3).
       if (bossSidesDone >= 2) {
         b.suckT = (b.suckT || 0) - dt;
@@ -10629,6 +10970,7 @@
   const hatColors = Array(START_HATS).fill('#5a3825'); // colour of each stacked hat (bottom → top)
   let immortal = false;  // debug toggle — when on, the last hat can never be knocked off
   let debugAutoReloadCrit = false; // debug toggle — gun is always loaded and every shot crits
+  let debugFastMode = false;       // debug toggle — upgrades apply 5x, money 5x, advances 5 waves per clear
   let shake = 0;
 
   // Stone fences stop bullets (wood fences let them fly through).
@@ -11463,7 +11805,9 @@
       // menu demo so the ambient backdrop never spawns wolves.
       if (!inMenu && !waveActive && !waveAutoStartPaused && (wave > 0 || coops.length > 0)) {
         waveTimer -= dt;
-        if (waveTimer <= 0) startWave();
+        // Fast mode jumps 5 waves per clear so the run rockets forward (the wave
+        // you just cleared still paid its normal 5× payout via addSharedMoney).
+        if (waveTimer <= 0) startWave(debugFastMode ? 5 : 1);
       }
       // Safety net: re-check defense after entity cleanup each frame
       checkWaveDefended();
@@ -15734,6 +16078,13 @@
       if (!h.alive) continue;
       lights.push({ x: h.x, y: h.y, r: 36, color: [255, 200, 100] });
     }
+    // Burning enemies cast a flickering firelight — a wolf set ablaze (Hot Shot /
+    // boot exhaust) becomes a little torch wandering the dark.
+    for (const w of wolves) {
+      if (!w.alive || !(w.burnT > 0)) continue;
+      const flick = 1 + Math.sin(Date.now() * 0.02 + (w.x - w.y) * 3) * 0.14;
+      lights.push({ x: w.x, y: w.y, r: 46 * flick, color: [255, 125, 45] });
+    }
     for (const p of pellets) {
       // Each pellet drags a small light pool with it — but plain player
       // pellets stay dark; only MAX Soft/Hard Bullets glow so
@@ -15823,6 +16174,26 @@
         ctx.fillStyle = '#ff2a22';
       }
       ctx.fillRect(ex, ey, 1.6 * s, 1.6 * s);
+      // Parry wind-up sparkle — redrawn over the darkness so the lunge tell still
+      // twinkles in the dark (the world-pass sparkle gets covered by the night).
+      if (w.sparkleT > 0) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
+        const tw = 0.5 + 0.5 * Math.sin(Date.now() * 0.03 + (w.x + w.y));
+        const sx = ex + 0.8 * s, sy = ey + 0.8 * s;
+        const r = (2.4 + tw * 1.6) * s;
+        ctx.strokeStyle = 'rgba(255,255,180,' + (0.7 + 0.3 * tw).toFixed(2) + ')';
+        ctx.lineWidth = 0.9 * s;
+        ctx.beginPath();
+        ctx.moveTo(sx - r, sy); ctx.lineTo(sx + r, sy);
+        ctx.moveTo(sx, sy - r); ctx.lineTo(sx, sy + r);
+        ctx.stroke();
+        ctx.fillStyle = 'rgba(255,255,225,0.95)';
+        ctx.beginPath();
+        ctx.arc(sx, sy, 1.2 * s, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
     }
   }
 
@@ -16992,6 +17363,14 @@
     }
     refreshParryButton();
 
+    const fastModeBtn = document.getElementById('debug-fast-mode-btn');
+    function refreshFastModeButton() {
+      if (fastModeBtn) fastModeBtn.textContent = 'Fast mode: ' + (debugFastMode ? 'ON' : 'OFF');
+      const skipBtn = root.querySelector('button[data-debug="skip-waves-10"]');
+      if (skipBtn) skipBtn.textContent = debugFastMode ? 'Skip 5 waves' : 'Skip 10 waves';
+    }
+    refreshFastModeButton();
+
 
     toggle.addEventListener('click', () => root.classList.toggle('open'));
 
@@ -17115,8 +17494,10 @@
         return;
       }
       if (action === 'money-add') {
-        money += parseInt(btn.dataset.amount, 10);
-        toast('+$' + btn.dataset.amount, 0.6);
+        const baseAmt = parseInt(btn.dataset.amount, 10);
+        const amt = debugFastMode ? baseAmt * 5 : baseAmt;
+        money += amt;
+        toast('+$' + amt, 0.6);
       } else if (action === 'money-set') {
         money = parseInt(btn.dataset.amount, 10);
         toast('Money = $' + money, 0.6);
@@ -17213,7 +17594,7 @@
           toast('Spawned extremely big wolf (lvl ' + w2.resistLevel + ')', 1.2);
         }
       } else if (action === 'skip-waves-10') {
-        startWave(10);
+        startWave(debugFastMode ? 5 : 10);
         toast('Skipped to wave ' + wave, 1.2);
       } else if (action === 'boss-wave') {
         // Clear the field and jump straight into the wave-100 boss fight.
@@ -17367,10 +17748,21 @@
           if (id !== 'dog' && id !== 'range' && lvl !== undefined && lvl >= MAX_LEVEL) {
             toast(opt.title + ' already maxed', 0.8);
           } else {
-            opt.apply();
-            toast(opt.title + ' applied', 0.8);
+            const times = debugFastMode ? 5 : 1;
+            let applied = 0;
+            for (let i = 0; i < times; i++) {
+              const curLvl = upgradeLevels[id];
+              if (id !== 'dog' && id !== 'range' && curLvl !== undefined && curLvl >= MAX_LEVEL) break;
+              opt.apply();
+              applied++;
+            }
+            toast(opt.title + (applied > 1 ? ' applied x' + applied : ' applied'), 0.8);
           }
         }
+      } else if (action === 'toggle-fast-mode') {
+        debugFastMode = !debugFastMode;
+        refreshFastModeButton();
+        toast('Fast mode ' + (debugFastMode ? 'ON — upgrades x5, money x5, +5 waves per clear' : 'OFF'), 1.4);
       }
     });
   })();
