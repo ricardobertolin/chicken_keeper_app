@@ -2123,8 +2123,18 @@
       return; // don't fall through to shoot
     }
     if (paused) {
-      // While paused, the only interactive element is the tab-switch arrow
-      // at the bottom of the pause panel.
+      // Resume / Quit buttons
+      if (pauseBtnRects) {
+        for (const [key, r] of Object.entries(pauseBtnRects)) {
+          if (mouse.x >= r.x && mouse.x <= r.x + r.w &&
+              mouse.y >= r.y && mouse.y <= r.y + r.h) {
+            if (key === 'resume') togglePause();
+            if (key === 'quit')   quitToMenu();
+            return;
+          }
+        }
+      }
+      // Tab-switch arrow
       if (pauseTabRect &&
           mouse.x >= pauseTabRect.x && mouse.x <= pauseTabRect.x + pauseTabRect.w &&
           mouse.y >= pauseTabRect.y && mouse.y <= pauseTabRect.y + pauseTabRect.h) {
@@ -2423,21 +2433,30 @@
       gameHud.style.display = hudVisible ? '' : 'none';
     }, { passive: false });
 
-    // ── Canvas touch: game-over / end-screen button hit-testing ──────────
+    // ── Canvas touch: pause / game-over / end-screen button hit-testing ──
     canvas.addEventListener('touchstart', e => {
-      if (!gameOverBtnRects) return;
       const r = canvas.getBoundingClientRect();
       const t = e.changedTouches[0];
       const cx = (t.clientX - r.left) * W / r.width;
       const cy = (t.clientY - r.top)  * H / r.height;
-      for (const [key, rect] of Object.entries(gameOverBtnRects)) {
-        if (cx >= rect.x && cx <= rect.x + rect.w && cy >= rect.y && cy <= rect.y + rect.h) {
-          e.preventDefault();
-          if (key === 'menu')     quitToMenu();
-          if (key === 'restart')  requestRestart();
-          if (key === 'continue') bossContinue();
-          return;
+      function hitTest(rects, handlers) {
+        for (const [key, rect] of Object.entries(rects)) {
+          if (cx >= rect.x && cx <= rect.x + rect.w && cy >= rect.y && cy <= rect.y + rect.h) {
+            e.preventDefault();
+            handlers[key]?.();
+            return true;
+          }
         }
+        return false;
+      }
+      if (paused && pauseBtnRects) {
+        hitTest(pauseBtnRects, { resume: () => togglePause(), quit: () => quitToMenu() });
+        return;
+      }
+      if (gameOverBtnRects) {
+        hitTest(gameOverBtnRects, {
+          menu: quitToMenu, restart: requestRestart, continue: bossContinue
+        });
       }
     }, { passive: false });
 
@@ -3426,6 +3445,7 @@
   // Hit-rects for the on-canvas game-over / end-screen action buttons.
   // Set each frame by drawGameOverPanel; read by the mousedown handler.
   let gameOverBtnRects = null;
+  let pauseBtnRects    = null;
   // Guest-side mirror of host's pause state — drives the "HOST PAUSED" overlay.
   let hostPaused = false;
   let upgradeDelayT = 0;
@@ -12071,6 +12091,7 @@
     if (endScreen) { drawBossEndScreen(); return; }
     // Clear button rects when we're not on a game-over or end screen.
     if (!gameOver && !endScreen) gameOverBtnRects = null;
+    if (!paused) pauseBtnRects = null;
 
     if (upgradeMode) {
       if (multiplayer && !isHost) {
@@ -13328,7 +13349,7 @@
     const statusRowH = 16;
     const upgradeRowH = 17;
     const navH = 26; // height of the tab-switch button row
-    const hintH = 22;
+    const hintH = 38; // room for the Resume / Quit buttons row
 
     // Pick panel dimensions for whichever tab is showing.
     let panelW, panelH;
@@ -13482,11 +13503,32 @@
     ctx.textAlign = 'center';
     ctx.fillText(navLabel, pauseTabRect.x + pauseTabRect.w / 2, pauseTabRect.y + 16);
 
-    // Hint.
-    ctx.fillStyle = '#9aa0a8';
-    ctx.textAlign = 'center';
-    ctx.font = '12px "Lucida Console", Consolas, monospace';
-    ctx.fillText('Esc to resume  ·  Q to quit to menu', panelX + panelW / 2, panelY + panelH - 8);
+    // ----- Resume / Quit buttons -----
+    const pbH  = 26;
+    const pbY  = panelY + panelH - hintH + 6;
+    const pbGap = 8;
+    ctx.font = 'bold 13px "Lucida Console", Consolas, monospace';
+    const resumeW = Math.round(ctx.measureText('RESUME').width) + 32;
+    const quitW   = Math.round(ctx.measureText('QUIT TO MENU').width) + 32;
+    const pbTotalW = resumeW + pbGap + quitW;
+    const pbStartX = Math.round(panelX + (panelW - pbTotalW) / 2);
+
+    const resumeR = { x: pbStartX,               y: pbY, w: resumeW, h: pbH };
+    const quitR   = { x: pbStartX + resumeW + pbGap, y: pbY, w: quitW,   h: pbH };
+    pauseBtnRects = { resume: resumeR, quit: quitR };
+
+    for (const [key, r] of Object.entries(pauseBtnRects)) {
+      const hovered = mouse.x >= r.x && mouse.x <= r.x + r.w &&
+                      mouse.y >= r.y && mouse.y <= r.y + r.h;
+      ctx.fillStyle = hovered ? 'rgba(255,209,102,0.22)' : 'rgba(255,255,255,0.06)';
+      ctx.fillRect(r.x, r.y, r.w, r.h);
+      ctx.strokeStyle = key === 'resume' ? '#ffd166' : '#ff8a8a';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+      ctx.fillStyle = key === 'resume' ? '#ffd166' : '#ff8a8a';
+      ctx.textAlign = 'center';
+      ctx.fillText(key === 'resume' ? 'RESUME' : 'QUIT TO MENU', r.x + r.w / 2, r.y + 17);
+    }
 
     ctx.restore();
   }
