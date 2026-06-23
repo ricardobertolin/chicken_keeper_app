@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
 <title>Chicken Keeper - Isometric</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1c3e10">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Chicken Keeper">
+<link rel="apple-touch-icon" href="chicken-icon.svg">
 <!-- PeerJS: WebRTC wrapper that uses a free public broker for signaling.
      Once peers connect, all gameplay traffic is peer-to-peer. -->
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"
@@ -455,24 +461,32 @@
     font-size: 12px;
     transition: opacity 0.2s;
   }
-  /* Centre cluster: BUILD + scroll arrows, between the two sticks */
-  #mob-build-btn {
-    width: 52px; height: 44px;
-    bottom: 40px; left: 50%;
+  /* Centre cluster: above the sticks, centered horizontally */
+  #mob-center-cluster {
+    position: absolute;
+    bottom: 155px;
+    left: 50%;
     transform: translateX(-50%);
+    display: flex;
+    flex-direction: row;
+    gap: 4px;
+    align-items: center;
+    pointer-events: none;
+  }
+  /* Buttons inside the cluster use flex layout, not absolute positioning */
+  #mob-center-cluster .mob-btn {
+    position: static;
+    pointer-events: all;
+  }
+  #mob-build-btn {
+    width: 56px; height: 44px;
     background: rgba(30,80,180,0.70);
     border-color: #8fcaff;
     font-size: 10px;
   }
-  #mob-scr-l {
-    width: 44px; height: 44px;
-    bottom: 40px; left: calc(50% - 54px);
-    font-size: 18px;
-  }
-  #mob-scr-r {
-    width: 44px; height: 44px;
-    bottom: 40px; left: calc(50% + 56px);
-    font-size: 18px;
+  #mob-scr-l, #mob-scr-r {
+    width: 40px; height: 40px;
+    font-size: 16px;
   }
   /* Pause: top-right */
   #mob-pause {
@@ -494,9 +508,11 @@
 <div id="mob-hud">
   <div class="mob-pad" id="mob-move-pad"><canvas class="mob-knob" id="mob-move-knob" width="48" height="48"></canvas></div>
   <div class="mob-pad" id="mob-aim-pad"><canvas class="mob-knob" id="mob-aim-knob" width="48" height="48"></canvas></div>
-  <button class="mob-btn" id="mob-build-btn">BUILD</button>
-  <button class="mob-btn" id="mob-scr-l">&#9664;</button>
-  <button class="mob-btn" id="mob-scr-r">&#9654;</button>
+  <div id="mob-center-cluster">
+    <button class="mob-btn" id="mob-scr-l">&#9664;</button>
+    <button class="mob-btn" id="mob-build-btn">BUILD</button>
+    <button class="mob-btn" id="mob-scr-r">&#9654;</button>
+  </div>
   <button class="mob-btn" id="mob-pause">&#9646;&#9646;</button>
   <button class="mob-btn" id="mob-hud-toggle">&#9776;</button>
 </div>
@@ -531,7 +547,7 @@
       <button class="menu-btn menu-btn--primary" id="btnSingle">Single Player</button>
       <button class="menu-btn" id="btnMulti">Multiplayer</button>
       <button class="menu-btn" id="btnHowTo">How to Play</button>
-      <p class="menu-version">v0.8.8 <span class="by">·  made by ricardobertolin</span></p>
+      <p class="menu-version">v0.8.9 <span class="by">·  made by ricardobertolin</span></p>
     </section>
 
     <!-- How to play — controls -->
@@ -2359,7 +2375,7 @@
 
     function endAim() {
       // Fire if the stick was displaced when released; silently cancel if returned to centre.
-      if (aimLastDist > AIM_SHOOT_THRESHOLD) tryShoot();
+      if (aimLastDist > AIM_SHOOT_THRESHOLD && !buildMode) tryShoot();
       aimTouchId = -1;
       aimLastDist = 0;
       aimKnob.style.left = '50%'; aimKnob.style.top = '50%';
@@ -2397,7 +2413,8 @@
     }, { passive: false });
 
     // ── HUD info toggle (top-left) ────────────────────────────────────────
-    let hudVisible = true;
+    let hudVisible = false;
+    if (gameHud) gameHud.style.display = 'none';
     hudToggle.addEventListener('touchstart', e => {
       e.preventDefault();
       hudVisible = !hudVisible;
@@ -2423,7 +2440,8 @@
     }, { passive: false });
 
     // ── Per-frame sync ────────────────────────────────────────────────────
-    const gameplayEls = [movePad, aimPad, buildBtn, scrLBtn, scrRBtn, pauseBtn, hudToggle];
+    const centerCluster = document.getElementById('mob-center-cluster');
+    const gameplayEls = [movePad, aimPad, centerCluster, pauseBtn, hudToggle];
     function syncMobState() {
       const showGameplay = !gameOver && !endScreen && !inMenu;
       for (const el of gameplayEls) el.style.display = showGameplay ? '' : 'none';
@@ -13021,10 +13039,10 @@
     ctx.font = 'bold 28px "Lucida Console", Consolas, monospace';
     ctx.fillText(isBonus ? 'BONUS PICK!' : 'Wave cleared', W / 2, panelY + 40);
     ctx.fillStyle = '#fff';
-    ctx.font = '16px "Lucida Console", Consolas, monospace';
+    ctx.font = '13px "Lucida Console", Consolas, monospace';
     ctx.fillText(isBonus
       ? 'Flock-protection bonus — choose a second upgrade'
-      : 'Choose one upgrade to resume the next wave', W / 2, panelY + 68);
+      : 'Choose one upgrade to resume the next wave', W / 2, panelY + 65, panelW - 16);
 
     // (LOCKS_OUT — the mutually-exclusive pair map — is now hoisted to module
     // scope near pickDistinct so the pick builder shares it.)

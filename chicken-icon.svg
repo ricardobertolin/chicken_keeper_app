@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background: game dark green -->
+  <rect width="512" height="512" fill="#1c3e10"/>
+
+  <!-- Body -->
+  <ellipse cx="211" cy="279" rx="126" ry="90" fill="#fafafa"/>
+
+  <!-- Head -->
+  <circle cx="301" cy="171" r="72" fill="#fafafa"/>
+
+  <!-- Comb -->
+  <circle cx="283" cy="99" r="29" fill="#e74c3c"/>
+  <circle cx="319" cy="81" r="29" fill="#e74c3c"/>
+
+  <!-- Beak -->
+  <polygon points="355,171 409,189 355,207" fill="#f1a23b"/>
+
+  <!-- Eye -->
+  <rect x="319" y="153" width="18" height="18" fill="#111111"/>
+
+  <!-- Legs -->
+  <line x1="193" y1="351" x2="175" y2="423" stroke="#e8a23b" stroke-width="14" stroke-linecap="round"/>
+  <line x1="247" y1="351" x2="265" y2="423" stroke="#e8a23b" stroke-width="14" stroke-linecap="round"/>
+</svg>
