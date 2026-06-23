@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Chicken Keeper">
-<link rel="apple-touch-icon" href="chicken-icon.svg">
+<link rel="apple-touch-icon" href="wolf-icon.png">
 <!-- PeerJS: WebRTC wrapper that uses a free public broker for signaling.
      Once peers connect, all gameplay traffic is peer-to-peer. -->
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"
@@ -461,10 +461,10 @@
     font-size: 12px;
     transition: opacity 0.2s;
   }
-  /* Centre cluster: above the sticks, centered horizontally */
+  /* Centre cluster: centered horizontally, bottom-level with the sticks */
   #mob-center-cluster {
     position: absolute;
-    bottom: 155px;
+    bottom: 28px;
     left: 50%;
     transform: translateX(-50%);
     display: flex;
@@ -2375,7 +2375,9 @@
 
     function endAim() {
       // Fire if the stick was displaced when released; silently cancel if returned to centre.
-      if (aimLastDist > AIM_SHOOT_THRESHOLD && !buildMode) tryShoot();
+      // In build mode, tryShoot() cancels build mode instead of firing — that's
+      // the right behaviour: flick right stick to exit build mode without a shot.
+      if (aimLastDist > AIM_SHOOT_THRESHOLD) tryShoot();
       aimTouchId = -1;
       aimLastDist = 0;
       aimKnob.style.left = '50%'; aimKnob.style.top = '50%';
@@ -5365,10 +5367,15 @@
     toast(buildModeToast(player2));
   }
 
+  function exitBuildModeFor(builder) {
+    if (builder === player2) { player2.buildMode = false; }
+    else { buildMode = false; player.buildMode = false; }
+  }
+
   function placeFarm(builder) {
     builder = builder || player;
     const cost = farmCost();
-    if (moneyOf(builder) < cost) { buildToast(builder, 'Need $' + cost + ' to start a farm'); return; }
+    if (moneyOf(builder) < cost) { exitBuildModeFor(builder); buildToast(builder, 'Need $' + cost + ' to start a farm'); return; }
     const target = getBuildTarget(builder);
     if (!target.valid) { buildToast(builder, target.reason); return; }
     farms.push({ x: target.x, y: target.y, growth: 0, trampleFlash: 0, need: wavesToFinish() });
@@ -5392,7 +5399,7 @@
   function placeDummy(builder) {
     builder = builder || player;
     if (upgradeLevels.dummy < 1) { buildToast(builder, 'Scarecrow upgrade needed'); return; }
-    if (moneyOf(builder) < DUMMY_COST) { buildToast(builder, 'Need $' + DUMMY_COST + ' to build a scarecrow'); return; }
+    if (moneyOf(builder) < DUMMY_COST) { exitBuildModeFor(builder); buildToast(builder, 'Need $' + DUMMY_COST + ' to build a scarecrow'); return; }
     const target = getBuildTarget(builder);
     if (!target.valid) { buildToast(builder, target.reason); return; }
     const hp = DUMMY_HP_TABLE[upgradeLevels.dummy];
@@ -5423,7 +5430,7 @@
   function placeStatue(builder) {
     builder = builder || player;
     if (upgradeLevels.statue < 1) { buildToast(builder, 'Chicken Statue upgrade needed'); return; }
-    if (moneyOf(builder) < STATUE_COST) { buildToast(builder, 'Need $' + STATUE_COST + ' to build a statue'); return; }
+    if (moneyOf(builder) < STATUE_COST) { exitBuildModeFor(builder); buildToast(builder, 'Need $' + STATUE_COST + ' to build a statue'); return; }
     const target = getBuildTarget(builder);
     if (!target.valid) { buildToast(builder, target.reason); return; }
     const hp = STATUE_HP_TABLE[upgradeLevels.statue];
@@ -5436,7 +5443,7 @@
   function placeMine(builder) {
     builder = builder || player;
     if (upgradeLevels.mine < 1) { buildToast(builder, 'Explosive Mine upgrade needed'); return; }
-    if (moneyOf(builder) < MINE_COST) { buildToast(builder, 'Need $' + MINE_COST + ' to bury a mine'); return; }
+    if (moneyOf(builder) < MINE_COST) { exitBuildModeFor(builder); buildToast(builder, 'Need $' + MINE_COST + ' to bury a mine'); return; }
     const target = getBuildTarget(builder);
     if (!target.valid) { buildToast(builder, target.reason); return; }
     // Snapshot the current mine tier — later upgrades won't retroactively
@@ -5533,7 +5540,7 @@
     if (!target.valid) { buildToast(builder, target.reason); return; }
     const cost = kind === 'stone' ? STONE_FENCE_COST : FENCE_COST;
     const name = kind === 'stone' ? 'Stone wall' : 'Fence';
-    if (moneyOf(builder) < cost) { buildToast(builder, 'Need $' + cost + ' to build ' + name.toLowerCase()); return; }
+    if (moneyOf(builder) < cost) { exitBuildModeFor(builder); buildToast(builder, 'Need $' + cost + ' to build ' + name.toLowerCase()); return; }
     const hp = kind === 'stone' ? tableAt('stoneWall') : tableAt('woodFence');
     fences.push({ x: target.x, y: target.y, kind: kind, hp: hp, hurtT: 0 });
     spendMoney(builder, cost);
@@ -5544,7 +5551,7 @@
   function placeCoop(builder) {
     builder = builder || player;
     const cost = coopCost();
-    if (moneyOf(builder) < cost) { buildToast(builder, 'Need $' + cost + ' to build coop'); return; }
+    if (moneyOf(builder) < cost) { exitBuildModeFor(builder); buildToast(builder, 'Need $' + cost + ' to build coop'); return; }
     const target = getBuildTarget(builder);
     if (!target.valid) { buildToast(builder, target.reason); return; }
     coops.push({ x: target.x, y: target.y, spawnT: 3, hp: 3, builtWave: wave, level: 0, dirtR: 0 });

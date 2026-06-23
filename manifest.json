@@ -9,9 +9,9 @@
   "orientation": "landscape",
   "icons": [
     {
-      "src": "chicken-icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "wolf-icon.png",
+      "sizes": "512x512",
+      "type": "image/png",
       "purpose": "any maskable"
     }
   ]
