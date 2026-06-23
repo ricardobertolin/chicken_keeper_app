@@ -679,7 +679,11 @@
   // ---------- Canvas setup ----------
   const canvas = document.getElementById('game');
   const ctx = canvas.getContext('2d');
-  const PIXEL = 2;        // each "art pixel" rendered to this many screen pixels
+  // Detect touch-primary mobile devices (not "Request Desktop Site" — UA changes there).
+  const isMobileMode = ('ontouchstart' in window || navigator.maxTouchPoints > 0) &&
+                       /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  // Mobile uses 1:1 art→CSS pixel ratio so the map viewport matches desktop scale.
+  const PIXEL = isMobileMode ? 1 : 2;
   let W = 0, H = 0;       // internal (low-res) canvas dimensions, in art pixels
   let cssW = 0, cssH = 0; // CSS dimensions
 
@@ -2084,6 +2088,18 @@
     mouse.y = (e.clientY - r.top) * H / r.height;
   });
   canvas.addEventListener('mousedown', e => {
+    // Game-over / end-screen action buttons (drawn by drawGameOverPanel).
+    if ((gameOver || endScreen) && gameOverBtnRects) {
+      for (const [key, r] of Object.entries(gameOverBtnRects)) {
+        if (mouse.x >= r.x && mouse.x <= r.x + r.w && mouse.y >= r.y && mouse.y <= r.y + r.h) {
+          if (key === 'menu')     quitToMenu();
+          if (key === 'restart')  requestRestart();
+          if (key === 'continue') bossContinue();
+          return;
+        }
+      }
+      return; // don't fall through to shoot
+    }
     if (paused) {
       // While paused, the only interactive element is the tab-switch arrow
       // at the bottom of the pause panel.
@@ -2182,7 +2198,7 @@
   // stays display:none. All state is fed into the same keys[], mouse, and game
   // functions as the keyboard/mouse path — the game loop needs no changes.
   (function setupMobileHUD() {
-    if (!('ontouchstart' in window) && navigator.maxTouchPoints < 1) return;
+    if (!isMobileMode) return;
 
     const mobHud   = document.getElementById('mob-hud');
     const movePad  = document.getElementById('mob-move-pad');
@@ -2323,6 +2339,36 @@
       e.preventDefault();
       if (!gameOver) togglePause();
     }, { passive: false });
+
+    // ── Canvas touch: game-over / end-screen button hit-testing ──────────
+    // Synthesised mouse events from touch aren't reliable with touch-action:none,
+    // so we forward single taps directly to the same rects drawGameOverPanel sets.
+    canvas.addEventListener('touchstart', e => {
+      if (!gameOverBtnRects) return;
+      const r = canvas.getBoundingClientRect();
+      const t = e.changedTouches[0];
+      const cx = (t.clientX - r.left) * W / r.width;
+      const cy = (t.clientY - r.top)  * H / r.height;
+      for (const [key, rect] of Object.entries(gameOverBtnRects)) {
+        if (cx >= rect.x && cx <= rect.x + rect.w && cy >= rect.y && cy <= rect.y + rect.h) {
+          e.preventDefault();
+          if (key === 'menu')     quitToMenu();
+          if (key === 'restart')  requestRestart();
+          if (key === 'continue') bossContinue();
+          return;
+        }
+      }
+    }, { passive: false });
+
+    // ── Sync: hide gameplay controls during game-over / end-screen ────────
+    // Uses requestAnimationFrame so it tracks live game state without polling.
+    const gameplayEls = [movePad, aimPad, fireBtn, buildBtn, scrLBtn, scrRBtn, pauseBtn];
+    function syncMobState() {
+      const showGameplay = !gameOver && !endScreen && !inMenu;
+      for (const el of gameplayEls) el.style.display = showGameplay ? '' : 'none';
+      requestAnimationFrame(syncMobState);
+    }
+    requestAnimationFrame(syncMobState);
   })();
 
   // ---------- Game state ----------
@@ -3277,6 +3323,9 @@
   let pauseTab = 'status';
   let pauseTabRect = null;
   let pauseUpgradeScroll = 0; // row offset for the scrollable upgrade list
+  // Hit-rects for the on-canvas game-over / end-screen action buttons.
+  // Set each frame by drawGameOverPanel; read by the mousedown handler.
+  let gameOverBtnRects = null;
   // Guest-side mirror of host's pause state — drives the "HOST PAUSED" overlay.
   let hostPaused = false;
   let upgradeDelayT = 0;
@@ -11913,6 +11962,8 @@
     }
     if (bossWaveActive && boss && boss.alive && bossPhase === 'fight') drawBossHealthBar();
     if (endScreen) { drawBossEndScreen(); return; }
+    // Clear button rects when we're not on a game-over or end screen.
+    if (!gameOver && !endScreen) gameOverBtnRects = null;
 
     if (upgradeMode) {
       if (multiplayer && !isHost) {
@@ -11998,48 +12049,47 @@
     ctx.save();
     ctx.fillStyle = 'rgba(0,0,0,0.78)';
     ctx.fillRect(0, 0, W, H);
+
+    // Proportional header positions so the panel fits any screen size.
+    const titleY    = Math.max(40, Math.round(H * 0.10));
+    const subtitleY = titleY + 28;
+    const extraY    = subtitleY + 18;
+
     ctx.fillStyle = opts.titleColor || '#fff';
     ctx.textAlign = 'center';
     ctx.font = 'bold 36px "Lucida Console", Consolas, monospace';
-    ctx.fillText(opts.title || 'GAME OVER', W / 2, 60);
+    ctx.fillText(opts.title || 'GAME OVER', W / 2, titleY);
     ctx.font = '14px "Lucida Console", Consolas, monospace';
     ctx.fillStyle = '#d7d7d7';
-    let msg = opts.subtitle || gameOverMsg || 'Press Q for menu or F5 to restart.';
+    let msg = opts.subtitle || gameOverMsg || '';
     if (!opts.subtitle && multiplayer && gameOverCause) {
       if (gameOverCause === 'both') {
-        msg = 'Both keepers fell! Press Q for menu or F5 to restart.';
+        msg = 'Both keepers fell!';
       } else {
         const youDied = (gameOverCause === 'host' && isHost) || (gameOverCause === 'guest' && !isHost);
-        msg = youDied
-          ? 'A wolf knocked off your last hat! Press Q for menu or F5 to restart.'
-          : 'Your buddy fell to a wolf! Press Q for menu or F5 to restart.';
+        msg = youDied ? 'A wolf knocked off your last hat!' : 'Your buddy fell to a wolf!';
       }
     }
-    ctx.fillText(msg, W / 2, 88);
+    if (msg) ctx.fillText(msg, W / 2, subtitleY);
     ctx.fillStyle = '#9aa0a8';
     ctx.font = '11px "Lucida Console", Consolas, monospace';
-    ctx.fillText('Final wave: ' + (wave || '—') + '    Coops: ' + coops.length, W / 2, 108);
-    // Post-boss death: flag that a restart carries a bonus (on the death screen
-    // only — the boss endscreen says it in its own footer).
+    ctx.fillText('Final wave: ' + (wave || '—') + '    Coops: ' + coops.length, W / 2, extraY);
+    let panelTopY = extraY + 16;
+    // Post-boss death: flag that a restart carries a bonus.
     if (passedBoss && !opts.subtitle) {
       ctx.fillStyle = '#9fe6a0';
       ctx.font = 'bold 12px "Lucida Console", Consolas, monospace';
-      ctx.fillText('You passed the boss — restarting grants a bonus!', W / 2, 124);
+      ctx.fillText('You passed the boss — restarting grants a bonus!', W / 2, panelTopY);
+      panelTopY += 16;
     }
 
-    // Stats pulled per keeper. `player` is always the LOCAL keeper, `player2`
-    // is the buddy — so column 1 = you, column 2 = buddy regardless of
-    // whether this client is the host or the guest.
+    // Stats grid.
     const showP2 = multiplayer && player2.active;
-    // Wallet mapping differs per side: on the host `money` is P1's pot and on
-    // the guest `money2` is P2's (the local) pot. In shared-money mode both
-    // sides see the same single `money` value.
     const guestSide = multiplayer && !isHost;
     const localWallet  = (gameOpts.separateMoney && guestSide) ? money2 : money;
     const remoteWallet = (gameOpts.separateMoney && guestSide) ? money : money2;
     function statsFor(who, wallet, hats) {
       const lvls = lvlsFor(who);
-      // Longer Barrel reads in metres — each upgrade step adds 0.1 m of reach.
       const barrelM = ((lvls.range || 0) * 0.1).toFixed(1) + ' m';
       return {
         Money:             '$' + wallet,
@@ -12055,20 +12105,21 @@
     const p2 = showP2 ? statsFor(player2, remoteWallet, player2.hats || 0) : null;
     const labels = Object.keys(p1);
 
-    // Layout — title row above, then label | P1 | P2 grid.
-    const rowH = 19;
+    const rowH    = 19;
     const headerH = 30;
-    const panelW = showP2 ? Math.min(560, W - 32) : Math.min(420, W - 32);
-    const panelH = headerH + labels.length * rowH + 24;
-    const panelX = Math.round((W - panelW) / 2);
-    const panelY = 134;
+    const btnH    = 30;
+    const btnGap  = 10;
+    const panelW  = showP2 ? Math.min(560, W - 32) : Math.min(420, W - 32);
+    const panelH  = headerH + labels.length * rowH + 24;
+    const panelX  = Math.round((W - panelW) / 2);
+    // Keep stats panel from overflowing: leave room for the buttons below.
+    const panelY  = Math.min(panelTopY, H - panelH - btnH - 24);
     ctx.fillStyle = 'rgba(15, 18, 24, 0.96)';
     ctx.fillRect(panelX, panelY, panelW, panelH);
     ctx.strokeStyle = '#ffd166';
     ctx.lineWidth = 2;
     ctx.strokeRect(panelX + 1, panelY + 1, panelW - 2, panelH - 2);
 
-    // Column header. P1 / P2 labels reflect this client's POV.
     const labelX = panelX + 16;
     const colP1X = panelX + Math.round(panelW * 0.55);
     const colP2X = panelX + Math.round(panelW * 0.82);
@@ -12077,27 +12128,20 @@
     ctx.font = 'bold 13px "Lucida Console", Consolas, monospace';
     ctx.fillText('SCOREBOARD', labelX, panelY + 18);
     ctx.textAlign = 'right';
-    // Column 1 = local keeper; column 2 = buddy. Label reflects each
-    // client's POV (the guest is "P2" in the lobby's role assignment).
     const col1Tag = (multiplayer && !isHost) ? 'YOU (P2)' : (multiplayer ? 'YOU (P1)' : 'YOU');
     const col2Tag = (multiplayer && !isHost) ? 'PARTNER (P1)' : 'PARTNER (P2)';
     ctx.fillText(col1Tag, colP1X, panelY + 18);
     if (showP2) ctx.fillText(col2Tag, colP2X, panelY + 18);
-
-    // Underline beneath the header row.
     ctx.strokeStyle = 'rgba(255,209,102,0.4)';
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(panelX + 8, panelY + headerH - 2);
     ctx.lineTo(panelX + panelW - 8, panelY + headerH - 2);
     ctx.stroke();
-
-    // Data rows.
     ctx.font = '13px "Lucida Console", Consolas, monospace';
     for (let i = 0; i < labels.length; i++) {
       const key = labels[i];
       const y = panelY + headerH + 14 + i * rowH;
-      // Zebra striping.
       if (i & 1) {
         ctx.fillStyle = 'rgba(255,255,255,0.04)';
         ctx.fillRect(panelX + 4, y - 13, panelW - 8, rowH);
@@ -12105,7 +12149,6 @@
       ctx.fillStyle = '#9aa0a8';
       ctx.textAlign = 'left';
       ctx.fillText(key, labelX, y);
-      // Highlight which column wins for headline numeric stats.
       const p1v = p1[key];
       const p2v = p2 ? p2[key] : null;
       const compareKeys = { Money: 1, 'Wolves killed': 1, Hats: 1, 'Chickens killed': -1, Deaths: -1 };
@@ -12113,36 +12156,62 @@
       if (showP2 && compareKeys[key]) {
         const a = parseFloat(String(p1v).replace(/[^\-0-9.]/g, '')) || 0;
         const b = parseFloat(String(p2v).replace(/[^\-0-9.]/g, '')) || 0;
-        const dir = compareKeys[key]; // +1 = higher wins, -1 = lower wins
+        const dir = compareKeys[key];
         if (a * dir > b * dir)      { p1Color = '#7fdc7f'; p2Color = '#d7d7d7'; }
         else if (b * dir > a * dir) { p1Color = '#d7d7d7'; p2Color = '#7fdc7f'; }
       }
       ctx.textAlign = 'right';
       ctx.fillStyle = p1Color;
       ctx.fillText(String(p1v), colP1X, y);
-      if (showP2) {
-        ctx.fillStyle = p2Color;
-        ctx.fillText(String(p2v), colP2X, y);
-      }
+      if (showP2) { ctx.fillStyle = p2Color; ctx.fillText(String(p2v), colP2X, y); }
     }
 
-    // Footer hint. Only the host can restart a co-op run; a guest's F5 just
-    // pings the host. When a guest has asked, the host's footer says so.
+    // Clickable action buttons — replace the old keyboard-hint text.
+    const isEndScr = !!opts.footer; // boss end screen passes a footer string
+    const btnW   = isEndScr ? 110 : 90;
+    const btn1Label = isEndScr ? 'CONTINUE' : 'MENU';
+    const btn2Label = isEndScr ? 'RESTART'  : 'RESTART';
+    const totalBtnW = btnW * 2 + btnGap;
+    const btnX1  = Math.round((W - totalBtnW) / 2);
+    const btnX2  = btnX1 + btnW + btnGap;
+    const btnY   = Math.min(panelY + panelH + 8, H - btnH - 6);
+
+    // Button 1: MENU (gray) or CONTINUE (gold)
+    const btn1Bg = isEndScr ? 'rgba(40,30,10,0.9)'  : 'rgba(30,30,35,0.9)';
+    const btn1Br = isEndScr ? '#ffd166'              : '#9aa0a8';
+    const btn1Tx = isEndScr ? '#ffd166'              : '#fff';
+    ctx.fillStyle = btn1Bg;
+    ctx.fillRect(btnX1, btnY, btnW, btnH);
+    ctx.strokeStyle = btn1Br; ctx.lineWidth = 2;
+    ctx.strokeRect(btnX1, btnY, btnW, btnH);
+    ctx.fillStyle = btn1Tx;
     ctx.textAlign = 'center';
-    ctx.font = '12px "Lucida Console", Consolas, monospace';
-    if (opts.footer) {
-      ctx.fillStyle = opts.footerColor || '#9fe6a0';
-      ctx.fillText(opts.footer, W / 2, panelY + panelH + 22);
-    } else if (multiplayer && !isHost) {
-      ctx.fillStyle = '#9aa0a8';
-      ctx.fillText('Q — menu     F5 — ask host for a rematch', W / 2, panelY + panelH + 22);
-    } else if (multiplayer && isHost && guestWantsRestart) {
+    ctx.font = 'bold 13px "Lucida Console", Consolas, monospace';
+    ctx.fillText(btn1Label, btnX1 + btnW / 2, btnY + 19);
+
+    // Button 2: RESTART (green)
+    const buddyNote = !isEndScr && multiplayer && !isHost;
+    ctx.fillStyle = 'rgba(10,30,15,0.9)';
+    ctx.fillRect(btnX2, btnY, btnW, btnH);
+    ctx.strokeStyle = '#7fdc7f'; ctx.lineWidth = 2;
+    ctx.strokeRect(btnX2, btnY, btnW, btnH);
+    ctx.fillStyle = '#7fdc7f';
+    ctx.fillText(buddyNote ? 'REMATCH' : btn2Label, btnX2 + btnW / 2, btnY + 19);
+
+    // Multiplayer note (tiny, above buttons)
+    if (!isEndScr && multiplayer && isHost && guestWantsRestart) {
       ctx.fillStyle = '#6fd09a';
-      ctx.fillText('Buddy wants a rematch!     Q — menu     F5 — restart', W / 2, panelY + panelH + 22);
-    } else {
-      ctx.fillStyle = '#9aa0a8';
-      ctx.fillText('Q — menu     F5 — restart', W / 2, panelY + panelH + 22);
+      ctx.font = '11px "Lucida Console", Consolas, monospace';
+      ctx.fillText('Buddy wants a rematch!', W / 2, btnY - 6);
     }
+
+    // Store rects for mouse/touch hit-testing.
+    gameOverBtnRects = isEndScr
+      ? { continue: { x: btnX1, y: btnY, w: btnW, h: btnH },
+          restart:  { x: btnX2, y: btnY, w: btnW, h: btnH } }
+      : { menu:     { x: btnX1, y: btnY, w: btnW, h: btnH },
+          restart:  { x: btnX2, y: btnY, w: btnW, h: btnH } };
+
     ctx.restore();
   }
 
@@ -13176,7 +13245,10 @@
       upgradeVisibleRows = Math.max(1, Math.floor(scrollBoxH / upgradeRowH));
     }
     const panelX = Math.round((W - panelW) / 2);
-    const panelY = Math.max(8, Math.round((H - panelH) / 2));
+    // On mobile, sit the panel near the top so the joystick zone (bottom ~150px) stays clear.
+    const panelY = isMobileMode
+      ? Math.max(8, Math.min(Math.round((H - panelH) / 2), H - panelH - 155))
+      : Math.max(8, Math.round((H - panelH) / 2));
 
     // Background panel.
     ctx.fillStyle = 'rgba(15, 18, 24, 0.96)';
