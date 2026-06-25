@@ -10,10 +10,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Chicken Keeper">
 <link rel="apple-touch-icon" href="wolf-icon.png">
-<!-- PeerJS: WebRTC wrapper that uses a free public broker for signaling.
-     Once peers connect, all gameplay traffic is peer-to-peer. -->
-<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"
-        crossorigin="anonymous" defer></script>
+<!-- PeerJS is loaded lazily the first time the player opens the online lobby. -->
 <style>
   html, body {
     margin: 0;
@@ -499,6 +496,20 @@
     top: 14px; left: 14px;
     font-size: 18px;
   }
+  /* Dash button: top-left corner of move pad */
+  #mob-dash-btn {
+    width: 40px; height: 34px;
+    left: 10px; bottom: 132px;
+    font-size: 11px; letter-spacing: 0;
+  }
+  /* Alt-fire button: top-right corner of aim pad */
+  #mob-alt-btn {
+    width: 40px; height: 34px;
+    right: 10px; bottom: 132px;
+    font-size: 11px; letter-spacing: 0;
+    opacity: 0.15;
+    transition: opacity 0.3s;
+  }
 </style>
 </head>
 <body class="in-menu pixelate-all">
@@ -515,6 +526,8 @@
   </div>
   <button class="mob-btn" id="mob-pause">&#9646;&#9646;</button>
   <button class="mob-btn" id="mob-hud-toggle">&#9776;</button>
+  <button class="mob-btn" id="mob-dash-btn">DASH</button>
+  <button class="mob-btn" id="mob-alt-btn">ALT</button>
 </div>
 
 <!-- SVG pixelation filter — applied to <body> via .pixelate-all so every
@@ -547,7 +560,7 @@
       <button class="menu-btn menu-btn--primary" id="btnSingle">Single Player</button>
       <button class="menu-btn" id="btnMulti">Multiplayer</button>
       <button class="menu-btn" id="btnHowTo">How to Play</button>
-      <p class="menu-version">v0.8.9 <span class="by">·  made by ricardobertolin</span></p>
+      <p class="menu-version">v0.9.0 <span class="by">·  made by ricardobertolin</span></p>
     </section>
 
     <!-- How to play — controls -->
@@ -555,7 +568,7 @@
       <button class="menu-back" data-back="title">&lsaquo; Back</button>
       <h1 class="menu-title" style="font-size:26px">How to Play</h1>
       <p class="menu-sub">Defend your flock from the wolves.</p>
-      <ul class="howto-list">
+      <ul class="howto-list" id="howto-list">
         <li><span class="howto-keys"><kbd>W</kbd> <kbd>A</kbd> <kbd>S</kbd> <kbd>D</kbd></span> Move around the farm</li>
         <li><span class="howto-keys"><kbd>Mouse</kbd></span> Aim your weapon</li>
         <li><span class="howto-keys"><kbd>Click</kbd></span> Fire your weapon</li>
@@ -658,7 +671,7 @@
       <button data-debug="force-night">Force Night of the Wolf</button>
       <button data-debug="buy-all-upgrades">Buy all upgrades</button>
       <button data-debug="give-upgrade">Give upgrade (+bonus)</button>
-      <button data-debug="toggle-parry" id="debug-parry-btn">Parry mode: OFF</button>
+      <button data-debug="toggle-parry" id="debug-parry-btn">Parry mode: ON</button>
       <button data-debug="toggle-fast-mode" id="debug-fast-mode-btn">Fast mode: OFF</button>
     </div>
     <div class="debug-row" id="debug-tools">
@@ -706,8 +719,25 @@
                        /Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
   // Mobile uses 1:1 art→CSS pixel ratio so the map viewport matches desktop scale.
   const PIXEL = isMobileMode ? 1 : 2;
+
+  if (isMobileMode) {
+    const howtoList = document.getElementById('howto-list');
+    if (howtoList) {
+      function mkey(t) { return '<span class="howto-keys"><kbd>' + t + '</kbd></span>'; }
+      howtoList.innerHTML =
+        '<li>' + mkey('Left stick')    + ' Move around the farm</li>' +
+        '<li>' + mkey('Right stick')   + ' Aim your weapon</li>' +
+        '<li>' + mkey('Release stick') + ' Fire your weapon</li>' +
+        '<li>' + mkey('BUILD')         + ' Enter build mode / place a building</li>' +
+        '<li>' + mkey('◄ ►')          + ' Cycle the building to place</li>' +
+        '<li>' + mkey('❚❚')           + ' Pause — status &amp; upgrades</li>';
+    }
+    const buildhintEl = document.getElementById('buildhint');
+    if (buildhintEl) buildhintEl.innerHTML = '<kbd>BUILD</kbd> to build a coop';
+  }
   let W = 0, H = 0;       // internal (low-res) canvas dimensions, in art pixels
   let cssW = 0, cssH = 0; // CSS dimensions
+  let skyGrad = null;     // cached sky background gradient, rebuilt on resize
 
   function resize() {
     cssW = window.innerWidth;
@@ -720,6 +750,7 @@
     canvas.style.height = cssH + 'px';
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.imageSmoothingEnabled = false;
+    skyGrad = null;
   }
   window.addEventListener('resize', resize);
   resize();
@@ -2114,9 +2145,10 @@
     if ((gameOver || endScreen) && gameOverBtnRects) {
       for (const [key, r] of Object.entries(gameOverBtnRects)) {
         if (mouse.x >= r.x && mouse.x <= r.x + r.w && mouse.y >= r.y && mouse.y <= r.y + r.h) {
-          if (key === 'menu')     quitToMenu();
-          if (key === 'restart')  requestRestart();
-          if (key === 'continue') bossContinue();
+          if (key === 'menu')      quitToMenu();
+          if (key === 'restart')   requestRestart();
+          if (key === 'continue')  bossContinue();
+          if (key === 'resurrect') activateResurrect();
           return;
         }
       }
@@ -2241,6 +2273,8 @@
     const scrRBtn     = document.getElementById('mob-scr-r');
     const pauseBtn    = document.getElementById('mob-pause');
     const hudToggle   = document.getElementById('mob-hud-toggle');
+    const dashBtn     = document.getElementById('mob-dash-btn');
+    const altBtn      = document.getElementById('mob-alt-btn');
     const gameHud     = document.getElementById('hud');
 
     mobHud.style.display = 'block';
@@ -2387,7 +2421,7 @@
       // Fire if the stick was displaced when released; silently cancel if returned to centre.
       // In build mode, tryShoot() cancels build mode instead of firing — that's
       // the right behaviour: flick right stick to exit build mode without a shot.
-      if (aimLastDist > AIM_SHOOT_THRESHOLD) tryShoot();
+      if (aimLastDist > AIM_SHOOT_THRESHOLD && !upgradeMode && !paused) tryShoot();
       aimTouchId = -1;
       aimLastDist = 0;
       aimKnob.style.left = '50%'; aimKnob.style.top = '50%';
@@ -2424,6 +2458,22 @@
       if (!gameOver) togglePause();
     }, { passive: false });
 
+    // ── Dash button (top-left of move pad) ───────────────────────────────
+    dashBtn.addEventListener('touchstart', e => {
+      e.preventDefault();
+      if (!parryMode || paused || upgradeMode || inMenu || gameOver) return;
+      player.dashQueued = true;
+    }, { passive: false });
+
+    // ── Alt-fire button (top-right of aim pad) ────────────────────────────
+    altBtn.addEventListener('touchstart', e => {
+      e.preventDefault();
+      if (paused || upgradeMode || inMenu || gameOver) return;
+      if (upgradeLevels.sword >= 1) return;
+      if (upgradeLevels.machineGun > 0)   { magDump();    return; }
+      if (upgradeLevels.doubleBarrel > 0) { doubleShot(); return; }
+    }, { passive: false });
+
     // ── HUD info toggle (top-left) ────────────────────────────────────────
     let hudVisible = false;
     if (gameHud) gameHud.style.display = 'none';
@@ -2455,14 +2505,15 @@
       }
       if (gameOverBtnRects) {
         hitTest(gameOverBtnRects, {
-          menu: quitToMenu, restart: requestRestart, continue: bossContinue
+          menu: quitToMenu, restart: requestRestart,
+          continue: bossContinue, resurrect: activateResurrect
         });
       }
     }, { passive: false });
 
     // ── Per-frame sync ────────────────────────────────────────────────────
     const centerCluster = document.getElementById('mob-center-cluster');
-    const gameplayEls = [movePad, aimPad, centerCluster, pauseBtn, hudToggle];
+    const gameplayEls = [movePad, aimPad, centerCluster, pauseBtn, hudToggle, dashBtn, altBtn];
     function syncMobState() {
       const showGameplay = !gameOver && !endScreen && !inMenu;
       for (const el of gameplayEls) el.style.display = showGameplay ? '' : 'none';
@@ -2471,6 +2522,13 @@
       const inBuild = showGameplay && buildMode;
       scrLBtn.style.opacity = inBuild ? '1' : '0.22';
       scrRBtn.style.opacity = inBuild ? '1' : '0.22';
+
+      // Dash button: dim if parry mode is off (can be toggled via debug)
+      dashBtn.style.opacity = parryMode ? '1' : '0.22';
+
+      // Alt-fire button: transparent until machine gun or double barrel unlocked
+      const altUnlocked = upgradeLevels.machineGun > 0 || upgradeLevels.doubleBarrel > 0;
+      altBtn.style.opacity = altUnlocked ? '1' : '0.15';
 
       // Left stick: red while sprinting OR while touch is on pad and running
       const isSprinting = showGameplay && (player.runT || 0) > RUN_WARMUP;
@@ -2610,7 +2668,7 @@
   };
   // Player2's wallet (used in separateMoney mode) and gun-upgrade ladder
   // (used in individualUpgrades mode). Both are kept in sync with the host.
-  let money2 = 10;
+  let money2 = 20;
   const upgradeLevels2 = { jam: 0, range: 0, speed: 0, fireRate: 0, spreadUp: 0, spreadDown: 0, focusUp: 0, focusDown: 0, woodFence: 0, stoneWall: 0, reloadMove: 0, wolfDelay: 0, hatchRate: 0, spreadUp2: 0, spreadDown2: 0, doubleBarrel: 0, machineGun: 0, counter: 0, sprint: 0, softBullet: 0, hardBullet: 0, rust: 0, spinReload: 0, snatch: 0, fatChicken: 0, farm: 0, dog: 0, sword: 0, dummy: 0, statue: 0, hunterPower: 0, workerChicken: 0, richChicken: 0, rocket: 0, minigun: 0, mine: 0, sabotage: 0, sizeMatters: 0, rocketBoots: 0, lastStand: 0, homing: 0, laser: 0, cryptidRadar: 0, rooftopper: 0, safeTrigger: 0, crazyTrigger: 0, goldenChicken: 0, nerdReload: 0, jockReload: 0, coldShot: 0, hotShot: 0, calmWaves: 0, roughWaves: 0, hunterCaravan: 0, metaverse: 0 };
   // Pick the upgrade ladder that should govern a shooter's stats. With
   // individual upgrades off, both players share the host's tree.
@@ -2919,7 +2977,7 @@
   // When on: SHIFT rolls the keeper a short hop forward (a dodge), and wolves
   // that get close may wind up a special lunge — their eye sparkles, then they
   // dash straight at the keeper and bite on contact. Dodge the lunge with a roll.
-  let parryMode = false;
+  let parryMode = true;
   const PLAYER_DASH_DUR  = 0.18;     // seconds the keeper's dodge-roll lasts
   const PLAYER_DASH_CD   = 4.0;      // cooldown between rolls (the recharge "delay")
   const PLAYER_DASH_MUL  = 2.5;      // speed multiplier during the roll (a short hop)
@@ -3074,7 +3132,7 @@
     player.buildType   = buildType;
     player.karma       = karma;
   }
-  let money = 10;         // $ — earned per chicken alive per wave, spent on coops
+  let money = 20;         // $ — earned per chicken alive per wave, spent on coops
   // New-game-plus: each restart AFTER beating the wave-100 boss doubles the
   // starting money / hats / barrel. The tier persists across restarts; the
   // mustache is kept too. barrelBonusMul is the derived 2^tier factor.
@@ -3160,7 +3218,7 @@
   // Coop price scales with how many coops currently exist — selling one lowers it.
   function coopCost() {
     const n = coops.length;
-    const base = COOP_COST_BASE + Math.max(0, n - 1) * COOP_COST_STEP;
+    const base = COOP_COST_BASE + n * COOP_COST_STEP;
     // Every 20 coops built, each further coop carries an extra surcharge: 20+
     // coops → +$10 each, 40+ → +$15, 60+ → +$20 … (+$5 more per 20-coop bracket).
     const bracket = Math.floor(n / 20);
@@ -3197,7 +3255,7 @@
   const WOLF_TRAIT_START = 10; // waves before trait levels begin appearing
   const ASSASSIN_START = 20;   // waves before 'assassin wolves' can appear
   const SWORD_WOLF_RATE = 0.005; // expected sword wolves per wave (flat — does not scale)
-  const HAT_WOLF_RATE   = 0.08; // expected hatted wolves per wave — killing one drops a hat
+  const HAT_WOLF_RATE   = 0.16; // expected hatted wolves per wave — killing one drops a hat
   const WOLF_SPEED_CAP = 10;    // max faster-level contribution to wolf speed (lowered so wave 80+ packs aren't blistering)
   const WOLF_SIZE_CAP = 14;     // max faster-level contribution to wolf size
   // Bomb wolves — slow wall-sappers that detonate against a wall.
@@ -3425,6 +3483,8 @@
   let waveElapsed = 0; // seconds since the current wave started (reset by startWave)
   let waveAutoStartPaused = false;
   let pendingSpawns = 0; // wolves scheduled but not yet spawned (across all live waves)
+  let resurrectCount = 0;     // times the red resurrect button has been used (max 9)
+  let resurrectLastWave = -99; // wave when last resurrect was used (cooldown: 10 waves)
   // Bumped every time the run is reset (quitToMenu / restartMpGame). Spawn
   // timers capture the gen they were scheduled under and bail if it differs
   // when they fire — otherwise old setTimeouts from the previous run keep
@@ -3839,21 +3899,21 @@
       {
         id: 'hatchRate',
         title: 'Cozy Coops',
-        available() { return wave >= 15 && upgradeLevels.hatchRate < 5; },
+        available() { return wave >= 10 && upgradeLevels.hatchRate < 5; },
         desc() { return 'Chickens respawn ' + Math.round((1 - tableNext('hatchRate')) * 100) + '% faster'; },
         apply() { upgradeLevels.hatchRate++; },
       },
       {
         id: 'wolfDelay',
         title: 'Prep Time',
-        available() { return wave >= 15 && upgradeLevels.wolfDelay < 5; },
+        available() { return wave >= 10 && upgradeLevels.wolfDelay < 5; },
         desc() { return 'Wolves wait ' + tableNext('wolfDelay') + 's after wave start'; },
         apply() { upgradeLevels.wolfDelay++; },
       },
       {
         id: 'doubleBarrel',
         title: 'Double-Barrel',
-        available() { return wave >= 15 && (upgradeLevels.machineGun === 0 || metaverseOn()) && upgradeLevels.doubleBarrel < 5; },
+        available() { return wave >= 10 && (upgradeLevels.machineGun === 0 || metaverseOn()) && upgradeLevels.doubleBarrel < 5; },
         desc() {
           return upgradeLevels.doubleBarrel === 0
             ? 'shotgun becames double-barrel, right-click fires twice'
@@ -3864,7 +3924,7 @@
       {
         id: 'machineGun',
         title: 'Machine-Gun',
-        available() { return wave >= 15 && (upgradeLevels.doubleBarrel === 0 || metaverseOn()) && upgradeLevels.machineGun < 5; },
+        available() { return wave >= 10 && (upgradeLevels.doubleBarrel === 0 || metaverseOn()) && upgradeLevels.machineGun < 5; },
         desc() {
           return upgradeLevels.machineGun === 0
             ? 'Auto-fire (starts slow), ' + MG_MAG + '-round mag'
@@ -3899,7 +3959,7 @@
         // frosty blue and crawls at half speed. Mutually exclusive with Hot Shot.
         id: 'coldShot',
         title: 'Cold Shot',
-        available() { return wave >= 15 && (upgradeLevels.hotShot === 0 || metaverseOn()) && upgradeLevels.coldShot < 5; },
+        available() { return wave >= 10 && (upgradeLevels.hotShot === 0 || metaverseOn()) && upgradeLevels.coldShot < 5; },
         desc() { return Math.round(COLD_HOT_CHANCE[Math.min(5, upgradeLevels.coldShot + 1)] * 100) + '% chance to freeze a hit wolf (slow + blue)'; },
         apply() { upgradeLevels.coldShot++; },
       },
@@ -3908,7 +3968,7 @@
         // fire, taking damage over a few seconds. Mutually exclusive with Cold Shot.
         id: 'hotShot',
         title: 'Hot Shot',
-        available() { return wave >= 15 && (upgradeLevels.coldShot === 0 || metaverseOn()) && upgradeLevels.hotShot < 5; },
+        available() { return wave >= 10 && (upgradeLevels.coldShot === 0 || metaverseOn()) && upgradeLevels.hotShot < 5; },
         desc() { return Math.round(COLD_HOT_CHANCE[Math.min(5, upgradeLevels.hotShot + 1)] * 100) + '% chance to set a hit wolf ablaze (burns over time)'; },
         apply() { upgradeLevels.hotShot++; },
       },
@@ -3966,14 +4026,14 @@
       {
         id: 'reloadMove',
         title: 'Action Reload',
-        available() { return wave >= 15 && upgradeLevels.reloadMove < MAX_LEVEL; },
+        available() { return wave >= 10 && upgradeLevels.reloadMove < MAX_LEVEL; },
         desc() { return 'Moving reload: pin ' + reloadRunMul(upgradeLevels.reloadMove + 1).toFixed(2) + '× speed'; },
         apply() { upgradeLevels.reloadMove++; },
       },
       {
         id: 'counter',
         title: 'Melee Strike',
-        available() { return wave >= 15 && upgradeLevels.counter < 5; },
+        available() { return wave >= 10 && upgradeLevels.counter < 5; },
         desc() {
           return upgradeLevels.counter >= 4
             ? 'MAX: 50% melee + area damage'
@@ -4396,7 +4456,7 @@
         desc() { return 'Spend $' + hatPrice + ' → +1 hat (now ' + playerHats + ')'; },
         apply() {
           money -= hatPrice;
-          hatPrice += 10;
+          hatPrice = Math.max(5, hatPrice - 5);
           // After 5 purchases, each new hat has a ~6% chance to come in
           // leprechaun green — losing one pays a $100 jackpot.
           const green = hatsBought >= 5 && Math.random() < LEPRECHAUN_BUY_CHANCE;
@@ -4595,7 +4655,7 @@
           } else {
             const wallet = survivorWallet();
             wallet.spend(hatPrice);
-            hatPrice += 10; // each paid resurrection makes the next one steeper, mirrors Buy Hat
+            hatPrice = Math.max(5, hatPrice - 5); // gets cheaper each purchase, floor $5
             hatsBought++;
           }
           if (player.ghost) reviveKeeper(player);
@@ -4852,19 +4912,19 @@
         desc: () => 'Narrows bar/green, widens critical line',
         apply: () => { l.crazyTrigger++; } },
       doubleBarrel: { id: 'doubleBarrel', title: 'Double-Barrel',
-        available: () => wave >= 15 && (l.machineGun === 0 || metaverseOn()) && l.doubleBarrel < 5,
+        available: () => wave >= 10 && (l.machineGun === 0 || metaverseOn()) && l.doubleBarrel < 5,
         desc: () => l.doubleBarrel === 0 ? '2-shell mag: left = one barrel, right = both' : 'Damage ×' + SKILL_TABLES.doubleBarrel[Math.min(l.doubleBarrel+1, 5)].toFixed(2),
         apply: () => { l.doubleBarrel++; } },
       machineGun: { id: 'machineGun', title: 'Machine-Gun',
-        available: () => wave >= 15 && (l.doubleBarrel === 0 || metaverseOn()) && l.machineGun < 5,
+        available: () => wave >= 10 && (l.doubleBarrel === 0 || metaverseOn()) && l.machineGun < 5,
         desc: () => l.machineGun === 0 ? 'Auto-fire (starts slow), ' + MG_MAG + '-round mag' : 'Faster fire rate (mag stays ' + MG_MAG + ')',
         apply: () => { l.machineGun++; player2.ammo = mgMagSize(player2); } },
       reloadMove: { id: 'reloadMove', title: 'Action Reload',
-        available: () => wave >= 15 && l.reloadMove < MAX_LEVEL,
+        available: () => wave >= 10 && l.reloadMove < MAX_LEVEL,
         desc: () => 'Moving reload: pin ' + reloadRunMul(l.reloadMove + 1).toFixed(2) + '× speed',
         apply: () => { l.reloadMove++; } },
       counter: { id: 'counter', title: 'Melee Strike',
-        available: () => wave >= 15 && l.counter < 5,
+        available: () => wave >= 10 && l.counter < 5,
         desc: () => l.counter >= 4 ? 'MAX: 50% melee + area damage'
                                    : 'Melee chance → ' + Math.round(SKILL_TABLES.counter[Math.min(l.counter+1, 5)] * 100) + '%',
         apply: () => { l.counter++; } },
@@ -4896,11 +4956,11 @@
         },
         apply: () => { l.rocket++; } },
       coldShot: { id: 'coldShot', title: 'Cold Shot',
-        available: () => wave >= 15 && (l.hotShot === 0 || metaverseOn()) && l.coldShot < 5,
+        available: () => wave >= 10 && (l.hotShot === 0 || metaverseOn()) && l.coldShot < 5,
         desc: () => Math.round(COLD_HOT_CHANCE[Math.min(5, l.coldShot + 1)] * 100) + '% chance to freeze a hit wolf (slow + blue)',
         apply: () => { l.coldShot++; } },
       hotShot: { id: 'hotShot', title: 'Hot Shot',
-        available: () => wave >= 15 && (l.coldShot === 0 || metaverseOn()) && l.hotShot < 5,
+        available: () => wave >= 10 && (l.coldShot === 0 || metaverseOn()) && l.hotShot < 5,
         desc: () => Math.round(COLD_HOT_CHANCE[Math.min(5, l.hotShot + 1)] * 100) + '% chance to set a hit wolf ablaze (burns over time)',
         apply: () => { l.hotShot++; } },
       minigun: { id: 'minigun', title: 'Minigun',
@@ -4976,7 +5036,7 @@
         desc: () => 'Spend $' + hatPrice + ' → +1 hat (now ' + (player2.hats || 0) + ')',
         apply: () => {
           spendMoney(player2, hatPrice);
-          hatPrice += 2;
+          hatPrice = Math.max(5, hatPrice - 5);
           hatsBought++;
           player2.hats = (player2.hats || 0) + 1;
         } },
@@ -5306,7 +5366,10 @@
     builder = builder || player;
     const type = BUILD_TYPES[builder.buildType || 0];
     const prefix = (builder === player2) ? 'Buddy ' : '';
-    if (type === 'remove') return prefix + 'Remove / sell building — scroll to switch, E to remove';
+    const switchHint = isMobileMode ? '◄ ► to switch' : 'scroll to switch';
+    const placeHint  = isMobileMode ? 'tap BUILD to place' : 'E to place';
+    const removeHint = isMobileMode ? 'tap BUILD to remove' : 'E to remove';
+    if (type === 'remove') return prefix + 'Remove / sell building — ' + switchHint + ', ' + removeHint;
     let label;
     if (type === 'coop') label = 'Coop ($' + coopCost() + ')';
     else if (type === 'farm') label = 'Farm ($' + farmCost() + ')' + (upgradeLevels.farm >= 1 ? '' : ' — LOCKED');
@@ -5316,7 +5379,7 @@
     else if (type === 'mine') label = 'Explosive Mine ($' + MINE_COST + ')' + (upgradeLevels.mine > 0 ? '' : ' — LOCKED');
     else if (type === 'dpsdummy') label = 'DPS Dummy (debug, free)';
     else label = 'Wooden Fence ($' + FENCE_COST + ')' + (upgradeLevels.woodFence > 0 ? '' : ' — LOCKED');
-    return prefix + 'Build: ' + label + ' — scroll to switch, E to place';
+    return prefix + 'Build: ' + label + ' — ' + switchHint + ', ' + placeHint;
   }
 
   function placeBuilding(builder) {
@@ -6606,7 +6669,7 @@
     if (!triggerNight && wave !== BOSS_WAVE) {
       if (wave >= NIGHT_OF_WOLF_MIN_WAVE && wave <= NIGHT_OF_WOLF_MAX_WAVE) {
         if (nightOfWolfCount < NIGHT_OF_WOLF_MAX_PER_RUN &&
-            Math.random() < NIGHT_OF_WOLF_PER_WAVE_CHANCE) {
+            Math.random() < Math.min(1, NIGHT_OF_WOLF_PER_WAVE_CHANCE * Math.pow(2, resurrectCount))) {
           triggerNight = true;
         }
       } else if (wave > NIGHT_OF_WOLF_MAX_WAVE) {
@@ -6856,6 +6919,7 @@
       grossReward += 1 + fatTierOf(c) * FAT_GOLD_PER_TIER
                        + (c.rich ? RICH_GOLD_BONUS[Math.min(5, upgradeLevels.richChicken)] : 0);
     }
+    if (resurrectCount > 0) grossReward = Math.floor(grossReward * Math.max(0.1, 1 - resurrectCount * 0.1));
     // Snapshot total chicken deaths NOW (canonical wave-end moment) so the
     // bonus pick screen reads a stable value even if later cleanup splices
     // entities out before the player picks an upgrade. Uses the MAX of:
@@ -10122,6 +10186,7 @@
     if (w.bomb) { updateBombWolf(w, dt); return; }
     if (w.pup) { updatePupWolf(w, dt); return; }
     if (w.ranged || w.homer) { updateRangedWolf(w, dt); return; }
+    if (waveActive && waveElapsed >= 60 && !w.fleeing && Math.random() < 0.15 * dt) w.fleeing = true;
     if (w.fleeing) { updateFleeingWolf(w, dt); return; }
     if (w.defective) { updateDefectiveWolf(w, dt); return; }
     // Stun: a max-level statue's aura can put a wolf to sleep for a short
@@ -10963,7 +11028,7 @@
       gameOver = true;
       gameOverCause = cause || 'host';
       gameOverMsg = (cause === 'host')
-        ? 'A wolf knocked off your last hat! Press Q for menu or F5 to restart.'
+        ? 'A wolf knocked off your last hat! ' + (isMobileMode ? 'Use the buttons below.' : 'Press Q for menu or F5 to restart.')
         : 'A wolf knocked off your last hat!';
       gameOverPanelDelayT = 1.0;
       player.dying = true;
@@ -11022,7 +11087,7 @@
     if (player.ghost && player2.ghost) {
       gameOver = true;
       gameOverCause = 'both';
-      gameOverMsg = 'Both keepers fell! Press Q for menu or F5 to restart.';
+      gameOverMsg = 'Both keepers fell! ' + (isMobileMode ? 'Use the buttons below.' : 'Press Q for menu or F5 to restart.');
     }
   }
   // Used by the resurrect upgrade to bring a ghost back with a fresh stack.
@@ -11096,6 +11161,41 @@
     return true;
   }
 
+  function activateResurrect() {
+    if (resurrectCount >= 9 || multiplayer) return;
+    if (wave - resurrectLastWave < 10 && resurrectLastWave >= 0) return;
+    resurrectCount++;
+    resurrectLastWave = wave;
+
+    // Option 1: kill half the chickens
+    const alive = chickens.filter(c => c.alive);
+    alive.sort(() => Math.random() - 0.5);
+    const half = Math.ceil(alive.length / 2);
+    for (let i = 0; i < half; i++) {
+      killChicken(alive[i]);
+      corpses.push({ x: alive[i].x, y: alive[i].y, kind: 'chicken', t: 4 });
+    }
+
+    // Option 2: lose all money, stripped to 1 hat
+    money = 0;
+    playerHats = 1;
+    hatColors.length = 0;
+    hatColors.push('#5a3825');
+
+    // Reset karma (the deal corrupts whatever good standing you had)
+    karma = 0;
+    player.karma = 0;
+
+    // Revive player (clear game-over state, long iframes so wolves back off)
+    gameOver = false;
+    gameOverPanelDelayT = 0;
+    player.dying = false;
+    player.downT = 0;
+    player.ghost = false;
+    player.hurtT = 2.5;
+    player.wolfHitT = 2.5;
+  }
+
   // The player's shirt is base blue, but karma slowly tints it: good karma
   // lightens it toward white, bad karma darkens it toward navy. Each keeper
   // carries their own karma so buddys read each other's mood at a glance.
@@ -11131,7 +11231,7 @@
 
   const START_HATS = 3;   // hats the player starts with — the stack has no upper cap
   let playerHats = START_HATS;
-  let hatPrice = 20;      // Buy Hat cost — climbs by $2 with every purchase
+  let hatPrice = 5;       // Buy Hat cost — starts at $5, min $5
   let hatsBought = 0;     // lifetime Buy Hat purchases — green hats can appear after 5
   let firstReviveFree = true; // the first Resurrect Buddy of a run is on the house
   let hatPackPrice = 100; // Buy Hat Pack (wave 80+) — 3 hats at once, ratchets up
@@ -11474,8 +11574,10 @@
   }
 
   // ---------- Update ----------
+  const TARGET_FRAME_MS = 16; // cap at ~62fps; skips render on 90/120Hz screens
   let last = performance.now();
   function loop(now) {
+    if (now - last < TARGET_FRAME_MS) { requestAnimationFrame(loop); return; }
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
     update(dt);
@@ -11509,6 +11611,8 @@
   }
 
   function update(dt) {
+    _tileColorInvalidateT -= dt;
+    if (_tileColorInvalidateT <= 0) { _tileColorCache.clear(); _tileColorInvalidateT = 1; }
     if (!gameStarted) return;
     // Frozen while the post-boss rocket cutscene plays or while fading to black
     // before the world swaps in — this keeps the host's snapshot stable so the
@@ -12049,11 +12153,13 @@
   // ---------- Render ----------
   function render() {
     // Sky / background
-    const grad = ctx.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0, '#7ec7ff');
-    grad.addColorStop(0.6, '#bfe6a8');
-    grad.addColorStop(1, '#5fa15a');
-    ctx.fillStyle = grad;
+    if (!skyGrad) {
+      skyGrad = ctx.createLinearGradient(0, 0, 0, H);
+      skyGrad.addColorStop(0, '#7ec7ff');
+      skyGrad.addColorStop(0.6, '#bfe6a8');
+      skyGrad.addColorStop(1, '#5fa15a');
+    }
+    ctx.fillStyle = skyGrad;
     ctx.fillRect(0, 0, W, H);
 
     // Suppress the camera shake once the player has lost — the game-over
@@ -12333,15 +12439,40 @@
       ctx.fillText('Buddy wants a rematch!', W / 2, btnY - 6);
     }
 
+    // RESURRECT button — singleplayer death only, max 9 uses, 10-wave cooldown
+    let resurrBtn = null;
+    const canResurrect = !isEndScr && !multiplayer && resurrectCount < 9
+      && (wave - resurrectLastWave >= 10 || resurrectLastWave < 0);
+    if (canResurrect) {
+      const rBtnW = 160;
+      const rBtnH = 26;
+      const rBtnX = Math.round((W - rBtnW) / 2);
+      const rBtnY = btnY + btnH + 8;
+      ctx.fillStyle = 'rgba(60,8,8,0.92)';
+      ctx.fillRect(rBtnX, rBtnY, rBtnW, rBtnH);
+      ctx.strokeStyle = '#cc2222'; ctx.lineWidth = 2;
+      ctx.strokeRect(rBtnX, rBtnY, rBtnW, rBtnH);
+      ctx.fillStyle = '#ff6060';
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 12px "Lucida Console", Consolas, monospace';
+      ctx.fillText('RESURRECT (' + resurrectCount + '/9)', rBtnX + rBtnW / 2, rBtnY + 17);
+      resurrBtn = { x: rBtnX, y: rBtnY, w: rBtnW, h: rBtnH };
+    }
+
     // Store rects for mouse/touch hit-testing.
-    gameOverBtnRects = isEndScr
+    const baseRects = isEndScr
       ? { continue: { x: btnX1, y: btnY, w: btnW, h: btnH },
           restart:  { x: btnX2, y: btnY, w: btnW, h: btnH } }
       : { menu:     { x: btnX1, y: btnY, w: btnW, h: btnH },
           restart:  { x: btnX2, y: btnY, w: btnW, h: btnH } };
+    if (resurrBtn) baseRects.resurrect = resurrBtn;
+    gameOverBtnRects = baseRects;
 
     ctx.restore();
   }
+
+  const _tileColorCache = new Map();
+  let _tileColorInvalidateT = 0;
 
   function drawGround() {
     // Determine the range of tiles to draw based on screen extents
@@ -12400,11 +12531,15 @@
   }
 
   function tileColor(x, y) {
+    const key = x * 10000 + y;
+    const cached = _tileColorCache.get(key);
+    if (cached !== undefined) return cached;
     // Stable hash-based green variation
     const h = ((x * 928371 + y * 18217) ^ 0x5f3759df) >>> 0;
     const v = (h % 100) / 100;
     // Border darker
     if (Math.abs(x) >= HALF_MAP - 1 || Math.abs(y) >= HALF_MAP - 1) {
+      _tileColorCache.set(key, '#3d6b34');
       return '#3d6b34';
     }
     // Patchy grass
@@ -12421,7 +12556,9 @@
       g = Math.round(g + (dg - g) * dirt);
       b = Math.round(b + (db - b) * dirt);
     }
-    return `rgb(${r},${g},${b})`;
+    const color = `rgb(${r},${g},${b})`;
+    _tileColorCache.set(key, color);
+    return color;
   }
 
   function drawTile(wx, wy) {
@@ -12455,9 +12592,11 @@
     }
   }
 
+  const _entityItems = []; // reused each frame to avoid GC pressure
   function drawEntities() {
     // Build draw list sorted by depth (world x+y)
-    const items = [];
+    _entityItems.length = 0;
+    const items = _entityItems;
     for (const c of corpses) items.push({ depth: c.x + c.y - 0.1, draw: () => drawCorpse(c) });
     for (const t of trees)   items.push({ depth: t.x + t.y, draw: () => drawWithOcclusion(t, () => drawTree(t)) });
     for (const fm of farms) items.push({ depth: fm.x + fm.y - 0.1, draw: () => drawFarm(fm) });
@@ -12982,7 +13121,7 @@
     ctx.fillStyle = '#9aa0a8';
     ctx.textAlign = 'center';
     ctx.font = '12px "Lucida Console", Consolas, monospace';
-    ctx.fillText('Click or press 1/2/3 to pick', W / 2, panelY + panelH - 14);
+    ctx.fillText(isMobileMode ? 'Tap an option to pick' : 'Click or press 1/2/3 to pick', W / 2, panelY + panelH - 14);
     ctx.restore();
   }
 
@@ -13189,7 +13328,7 @@
     ctx.fillStyle = '#ffd166';
     ctx.textAlign = 'center';
     ctx.font = '13px "Lucida Console", Consolas, monospace';
-    ctx.fillText('Press 1-3 or click an option', W / 2, panelY + panelH - 16);
+    ctx.fillText(isMobileMode ? 'Tap an option to pick' : 'Press 1-3 or click an option', W / 2, panelY + panelH - 16);
     ctx.restore();
   }
 
@@ -16430,7 +16569,8 @@
     m.fillRect(0, 0, W, H);
     // Punch out lit pools so the underlying scene shows through.
     m.globalCompositeOperation = 'destination-out';
-    for (const L of collectNightLights()) {
+    const _nightLights = collectNightLights();
+    for (const L of _nightLights) {
       const sp = worldToScreen(L.x, L.y);
       const r = L.r;
       if (sp.x < -r || sp.x > W + r || sp.y < -r || sp.y > H + r) continue;
@@ -16447,7 +16587,7 @@
     // colored rather than just transparent.
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    for (const L of collectNightLights()) {
+    for (const L of _nightLights) {
       const sp = worldToScreen(L.x, L.y);
       const r = L.r;
       if (sp.x < -r || sp.x > W + r || sp.y < -r || sp.y > H + r) continue;
@@ -17246,7 +17386,7 @@
     wdWStamps.length = 0; wdDStamps.length = 0;
     player.deathCause = '';
     player2.deathCause = '';
-    hatPrice = 20;
+    hatPrice = 5;
     hatsBought = 0;
     firstReviveFree = true;
     hatPackPrice = 100;
@@ -17277,6 +17417,8 @@
     nightOfWolf = false;
     nightOfWolfCount = 0;
     nightOfWolfDebugForce = false;
+    resurrectCount = 0;
+    resurrectLastWave = -99;
     bossWaveActive = false; bossPhase = ''; bossPhaseT = 0; bossSidesDone = 0;
     boss = null; bossTint = 0; endScreen = false;
     lateNightBlockStart = 0;
@@ -17293,8 +17435,8 @@
     // Reset upgrade ladders + derived stats so guns match level 0 again.
     for (const k in upgradeLevels) upgradeLevels[k] = 0;
     for (const k in upgradeLevels2) upgradeLevels2[k] = 0;
-    money = 10 * bonusMul;  // both wallets reset on restart (scaled by the boss bonus)
-    money2 = 10 * bonusMul;
+    money = 20 * bonusMul;  // both wallets reset on restart (scaled by the boss bonus)
+    money2 = 20 * bonusMul;
     shotgunLife = 0.30;
     shotgunCooldown = 0.75;
     shotgunSpread = 10 * Math.PI / 180;
@@ -17527,8 +17669,8 @@
     // Keep the new-game-plus doubling (2^tier) — resetRunState set the scaled
     // wallet, but resetWorld runs afterwards, so it must match or it would clobber
     // the bonus back to a flat $10. Fresh games have tier 0, so this stays $10.
-    money = 10 * Math.pow(2, restartBonusTier);
-    money2 = 10 * Math.pow(2, restartBonusTier);
+    money = 20 * Math.pow(2, restartBonusTier);
+    money2 = 20 * Math.pow(2, restartBonusTier);
     kills = 0;
     wave = 0;
     waveTimer = 12;
@@ -18038,7 +18180,7 @@
       player2.deathCause = '';
       // P2 wallet + upgrade ladder start fresh too — but the wallet keeps the
       // post-boss doubling (2^tier) so the new-game-plus reward isn't wiped here.
-      money2 = 10 * Math.pow(2, restartBonusTier);
+      money2 = 20 * Math.pow(2, restartBonusTier);
       for (const k in upgradeLevels2) upgradeLevels2[k] = 0;
       // Send an initial position immediately so the peer can place us right away.
       netSendT = 0;
@@ -18064,6 +18206,27 @@
   }
 
   // ---------- Online lobby (PeerJS) ----------
+  // PeerJS is loaded on demand — not fetched until the player opens the lobby.
+  let _peerJsLoading = false;
+  const _peerJsQueue = [];
+  function requirePeerJS(cb) {
+    if (typeof Peer !== 'undefined') { cb(); return; }
+    _peerJsQueue.push(cb);
+    if (_peerJsLoading) return;
+    _peerJsLoading = true;
+    const s = document.createElement('script');
+    s.src = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js';
+    s.crossOrigin = 'anonymous';
+    s.onload = () => { _peerJsLoading = false; _peerJsQueue.splice(0).forEach(f => f()); };
+    s.onerror = () => {
+      _peerJsLoading = false;
+      _peerJsQueue.length = 0;
+      const targetId = netRole === 'guest' ? 'joinStatus' : 'hostStatus';
+      setStatus(document.getElementById(targetId), 'PeerJS failed to load (offline?).', 'bad');
+      if (netRole === 'guest') document.getElementById('btnJoinConnect').disabled = false;
+    };
+    document.head.appendChild(s);
+  }
   // Same broker/code scheme as the chess app — a short lobby code is hashed
   // into the host's PeerJS id; the guest connects to it. After 'open' fires
   // all gameplay traffic is direct peer-to-peer over a data channel.
@@ -18184,7 +18347,7 @@
       // host can actually restart, so we just flag it + nudge the host.
       if (msg.type === 'restart-request' && isHost) {
         guestWantsRestart = true;
-        toast('Buddy wants a rematch — press F5 to restart', 4);
+        toast('Buddy wants a rematch — ' + (isMobileMode ? 'tap RESTART' : 'press F5 to restart'), 4);
         return;
       }
       // Host → guest: a knockback to apply to the guest's keeper. The guest
@@ -18216,8 +18379,8 @@
       }
       // Guest → host: just the guest's keeper position.
       if (msg.type === 'pos' && player2.active) {
-        player2.x = msg.x;
-        player2.y = msg.y;
+        player2.x = clamp(msg.x, -HALF_MAP + 1, HALF_MAP - 1);
+        player2.y = clamp(msg.y, -HALF_MAP + 1, HALF_MAP - 1);
         player2.dir = msg.dir;
         player2.moving = !!msg.moving;
         player2.mouseDown = !!msg.mouseDown;
@@ -18277,7 +18440,7 @@
       // The host is gone — the guest can't simulate anything, so end the run.
       gameOver = true;
       gameOverCause = '';
-      gameOverMsg = 'The host left the game. Press Q for menu or F5 to restart.';
+      gameOverMsg = 'The host left the game. ' + (isMobileMode ? 'Use the buttons below.' : 'Press Q for menu or F5 to restart.');
       toast('Host left the game', 5);
     } else {
       toast('Disconnected from host', 3);
@@ -18697,63 +18860,69 @@
   }
 
   function hostLobby() {
-    netRole = 'host';
+    netRole = ‘host’;
     isHost = true;
     const code = generateCode();
-    document.getElementById('lobbyCode').textContent = code;
-    setStatus(document.getElementById('hostStatus'), 'Connecting to broker…');
-    showScreen('host-wait');
-    ensurePeer(ID_PREFIX + code);
-    if (!peer) return;
-    peer.on('open', () => {
-      setStatus(document.getElementById('hostStatus'), 'Waiting for the other player…');
-    });
-    peer.on('connection', incoming => {
-      if (conn && conn.open) {
-        // Lobby already full — politely refuse.
-        incoming.on('open', () => {
-          try { incoming.send({ type: 'reject', reason: 'lobby-full' }); } catch (_) {}
-          setTimeout(() => { try { incoming.close(); } catch (_) {} }, 100);
+    document.getElementById(‘lobbyCode’).textContent = code;
+    setStatus(document.getElementById(‘hostStatus’), ‘Loading…’);
+    showScreen(‘host-wait’);
+    requirePeerJS(() => {
+      setStatus(document.getElementById(‘hostStatus’), ‘Connecting to broker…’);
+      ensurePeer(ID_PREFIX + code);
+      if (!peer) return;
+      peer.on(‘open’, () => {
+        setStatus(document.getElementById(‘hostStatus’), ‘Waiting for the other player…’);
+      });
+      peer.on(‘connection’, incoming => {
+        if (conn && conn.open) {
+          // Lobby already full — politely refuse.
+          incoming.on(‘open’, () => {
+            try { incoming.send({ type: ‘reject’, reason: ‘lobby-full’ }); } catch (_) {}
+            setTimeout(() => { try { incoming.close(); } catch (_) {} }, 100);
+          });
+          return;
+        }
+        incoming.on(‘open’, () => {
+          attachConn(incoming);
+          startGame(true);
         });
-        return;
-      }
-      incoming.on('open', () => {
-        attachConn(incoming);
-        startGame(true);
       });
     });
   }
 
   function joinLobby(code) {
-    netRole = 'guest';
+    netRole = ‘guest’;
     isHost = false;
-    setStatus(document.getElementById('joinStatus'), 'Connecting to broker…');
-    document.getElementById('btnJoinConnect').disabled = true;
-    ensurePeer(null);
-    if (!peer) { document.getElementById('btnJoinConnect').disabled = false; return; }
-    peer.on('open', () => {
-      setStatus(document.getElementById('joinStatus'), 'Reaching host…');
-      const c = peer.connect(ID_PREFIX + code, { reliable: true });
-      // If the data channel never opens (relay unreachable, host firewalled),
-      // bail out with a readable error instead of spinning here forever.
-      let settled = false;
-      const failTimer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        setStatus(document.getElementById('joinStatus'),
-          'Couldn’t reach the host (timed out). Double-check the code, or the host may be behind a strict firewall.', 'bad');
-        document.getElementById('btnJoinConnect').disabled = false;
-        teardownConnection();
-      }, CONNECT_TIMEOUT_MS);
-      c.on('open', () => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(failTimer);
-        attachConn(c);
-        setStatus(document.getElementById('joinStatus'), 'Connected!', 'good');
-        startGame(true);
+    setStatus(document.getElementById(‘joinStatus’), ‘Loading…’);
+    document.getElementById(‘btnJoinConnect’).disabled = true;
+    requirePeerJS(() => {
+      setStatus(document.getElementById(‘joinStatus’), ‘Connecting to broker…’);
+      ensurePeer(null);
+      if (!peer) { document.getElementById(‘btnJoinConnect’).disabled = false; return; }
+      peer.on(‘open’, () => {
+        setStatus(document.getElementById(‘joinStatus’), ‘Reaching host…’);
+        const c = peer.connect(ID_PREFIX + code, { reliable: true });
+        // If the data channel never opens (relay unreachable, host firewalled),
+        // bail out with a readable error instead of spinning here forever.
+        let settled = false;
+        const failTimer = setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          setStatus(document.getElementById(‘joinStatus’),
+            ‘Couldn’t reach the host (timed out). Double-check the code, or the host may be behind a strict firewall.’, ‘bad’);
+          document.getElementById(‘btnJoinConnect’).disabled = false;
+          teardownConnection();
+        }, CONNECT_TIMEOUT_MS);
+        c.on(‘open’, () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(failTimer);
+          attachConn(c);
+          setStatus(document.getElementById(‘joinStatus’), ‘Connected!’, ‘good’);
+          startGame(true);
+        });
+        c.on(‘error’, e => console.warn(‘[Guest conn] error’, e));
       });
-      c.on('error', e => console.warn('[Guest conn] error', e));
     });
   }
 
