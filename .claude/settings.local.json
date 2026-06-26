@@ -27,7 +27,8 @@
       "Bash(node *)",
       "Bash(echo *)",
       "Skill(update-config)",
-      "Skill(update-config:*)"
+      "Skill(update-config:*)",
+      "Bash(grep -v \"//.*wolfKill\\\\|//.*awardHat\")"
     ]
   }
 }

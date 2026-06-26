@@ -560,7 +560,7 @@
       <button class="menu-btn menu-btn--primary" id="btnSingle">Single Player</button>
       <button class="menu-btn" id="btnMulti">Multiplayer</button>
       <button class="menu-btn" id="btnHowTo">How to Play</button>
-      <p class="menu-version">v0.9.0 <span class="by">·  made by ricardobertolin</span></p>
+      <p class="menu-version">v0.9.1 <span class="by">·  made by ricardobertolin</span></p>
     </section>
 
     <!-- How to play — controls -->
@@ -723,7 +723,7 @@
   if (isMobileMode) {
     const howtoList = document.getElementById('howto-list');
     if (howtoList) {
-      function mkey(t) { return '<span class="howto-keys"><kbd>' + t + '</kbd></span>'; }
+      const mkey = t => '<span class="howto-keys"><kbd>' + t + '</kbd></span>';
       howtoList.innerHTML =
         '<li>' + mkey('Left stick')    + ' Move around the farm</li>' +
         '<li>' + mkey('Right stick')   + ' Aim your weapon</li>' +
@@ -2915,6 +2915,7 @@
   const rooftoppers = []; // {x,y,coop,fireT,dir,facingLeft,alive} — sniper allies stationed on coop roofs
   const smoke = [];     // {x,y,vx,vy,t,life,r} — drifting gunsmoke puffs
   const blasts = [];    // {x,y,t,life} — expanding fat-chicken explosion rings
+  const flyHats = [];   // {fromWx,fromWy,color,t,life,rot,spin} — hats arcing from wolf to player head
   // FANGUS phase-3 "chicken suckers": homing orbs that grab a chicken and drag
   // it back to the boss to heal it. {x,y,phase,target,life}
   const chickenSuckers = [];
@@ -7551,6 +7552,68 @@
     }
   }
 
+  function spawnFlyHat(wx, wy, color) {
+    flyHats.push({ fromWx: wx, fromWy: wy, color, t: 0, life: 0.55,
+                   spin: (Math.random() > 0.5 ? 1 : -1) * (5 + Math.random() * 8), rot: 0 });
+  }
+
+  function updateFlyHats(dt) {
+    for (let i = flyHats.length - 1; i >= 0; i--) {
+      const fh = flyHats[i];
+      fh.t += dt;
+      fh.rot += fh.spin * dt;
+      if (fh.t >= fh.life) flyHats.splice(i, 1);
+    }
+  }
+
+  function drawFlyHats() {
+    if (!flyHats.length) return;
+    const pp = worldToScreen(player.x, player.y);
+    const px = pp.x, py = pp.y + TILE_H / 2 - 34; // top hat position on player head
+    for (const fh of flyHats) {
+      const prog = clamp(fh.t / fh.life, 0, 1);
+      const fp = worldToScreen(fh.fromWx, fh.fromWy);
+      const sx = fp.x, sy = fp.y + TILE_H / 2;
+      // Quadratic bezier: arc over the scene with a raised control point
+      const cpx = (sx + px) / 2, cpy = Math.min(sy, py) - 40;
+      const bx = (1-prog)*(1-prog)*sx + 2*prog*(1-prog)*cpx + prog*prog*px;
+      const by = (1-prog)*(1-prog)*sy + 2*prog*(1-prog)*cpy + prog*prog*py;
+      ctx.save();
+      ctx.translate(bx, by);
+      ctx.rotate(fh.rot);
+      drawHat(0, 0, fh.color, false, true);
+      ctx.restore();
+    }
+  }
+
+  function drawDashHats() {
+    const dt = player.dashT || 0;
+    if (dt <= 0 || player.ghost || player.dying) return;
+    const prog = 1 - clamp(dt / PLAYER_DASH_DUR, 0, 1); // 0 → 1 over dash
+    const frac = Math.sin(prog * Math.PI);               // peaks at mid-dash
+    const pp = worldToScreen(player.x, player.y);
+    const pcx = pp.x, pcy = pp.y + TILE_H / 2;
+    // Dash direction in screen space (isometric projection)
+    const dxW = player.dashX || 0, dyW = player.dashY || 0;
+    const dxS = dxW * TILE_W / 2 - dyW * TILE_W / 2;
+    const dyS = dxW * TILE_H / 2 + dyW * TILE_H / 2;
+    const dLen = Math.hypot(dxS, dyS) || 1;
+    for (let i = 0; i < playerHats; i++) {
+      const by = pcy - 34 - i * 5;
+      const color = hatColors[i] || '#5a3825';
+      const scatter = frac * (i + 1) * 9;
+      const rise    = frac * (i + 1) * 5;
+      const rot     = frac * (0.7 + i * 0.45) * ((i % 2 === 0) ? 1 : -1);
+      const offX = -dxS / dLen * scatter;
+      const offY = -dyS / dLen * scatter - rise;
+      ctx.save();
+      ctx.translate(pcx + offX, by + offY);
+      ctx.rotate(rot);
+      drawHat(0, 0, color, false, i === playerHats - 1);
+      ctx.restore();
+    }
+  }
+
   function updateSmoke(dt) {
     for (let i = smoke.length - 1; i >= 0; i--) {
       const s = smoke[i];
@@ -10747,7 +10810,7 @@
   // Drop a fresh brown hat onto a specific keeper's stack (respecting the cap).
   // Player 1's count lives in the `playerHats`/`hatColors` globals; player 2
   // carries its own `hats`/`hatColors` on the keeper object.
-  function awardHatTo(keeper) {
+  function awardHatTo(keeper, fromWx, fromWy) {
     if (keeper === player2) {
       if ((player2.hats || 0) < MAX_HATS) {
         player2.hats = (player2.hats || 0) + 1;
@@ -10760,6 +10823,7 @@
         playerHats++;
         hatColors.push('#5a3825');
         toast('A hatted wolf dropped a hat! Now ' + playerHats, 1.6);
+        if (fromWx !== undefined) spawnFlyHat(fromWx, fromWy, '#5a3825');
       }
     }
   }
@@ -10793,12 +10857,12 @@
     // landed the kill, not always player 1.
     if (w.hatted) {
       w.hatted = false;
-      awardHatTo(killer);
+      awardHatTo(killer, w.x, w.y);
     }
     // A hunter wolf drops ALL the hats it spawned wearing onto the killer.
     if (w.hunterWolf) {
       const n = w.spawnHats || 1;
-      for (let i = 0; i < n; i++) awardHatTo(killer);
+      for (let i = 0; i < n; i++) awardHatTo(killer, w.x, w.y);
       toast('Hunter wolf down — +' + n + ' hat' + (n > 1 ? 's' : '') + '!', 1.8);
       // It goes out with a bang — a blast that scorches nearby wolves and can
       // singe a too-close keeper.
@@ -11890,6 +11954,7 @@
     updateSmoke(dt);
     updateBlasts(dt);
     updateScorches(dt);
+    updateFlyHats(dt);
     updateBeams(dt);
     if (!(multiplayer && !isHost)) {
       updateBossMissiles(dt); // boss MK-04 + missile-wolf rockets (any wave)
@@ -12645,6 +12710,9 @@
     for (const b of blasts) drawBlast(b);
     for (const s of smoke) drawSmoke(s);
     for (const lb of beams) drawBeam(lb);
+    // Hat animations: wolf-kill arc and dash scatter — drawn above everything.
+    drawFlyHats();
+    drawDashHats();
   }
 
   // A tile of fence/wall wreckage. Wood debris is splintered planks; stone
@@ -14251,11 +14319,14 @@
     if ((player.mustache || 0) > 0 && !player.ghost) drawMustache(cx, cy - 30 + crouchYAdd, player.mustache, player.mustacheAge);
     // Hats — the player's health. Starts at START_HATS, stacked on the head;
     // each wolf hit knocks the top one off until none remain.
+    // Skipped during dash: drawDashHats() renders them scattered in screen space.
     const HAT_STEP = 5;
-    for (let i = 0; i < playerHats; i++) {
-      const by = cy - 34 + crouchYAdd - i * HAT_STEP;
-      const baseHat = isGuestSelf ? GUEST_HAT_COLOR : (hatColors[i] || '#5a3825');
-      drawHat(cx, by, baseHat, hurt, i === playerHats - 1);
+    if ((player.dashT || 0) <= 0) {
+      for (let i = 0; i < playerHats; i++) {
+        const by = cy - 34 + crouchYAdd - i * HAT_STEP;
+        const baseHat = isGuestSelf ? GUEST_HAT_COLOR : (hatColors[i] || '#5a3825');
+        drawHat(cx, by, baseHat, hurt, i === playerHats - 1);
+      }
     }
     // Legs — alternate lifting while walking. When crouched, swap to a
     // proper one-knee kneeling pose: back knee resting on the ground with
@@ -17641,6 +17712,7 @@
     rooftoppers.length = 0;
     smoke.length = 0;
     blasts.length = 0;
+    flyHats.length = 0;
     p2Cameo = null;
     p2CameoUsed = false;
     radarEmitT = 0;
@@ -17684,13 +17756,9 @@
     for (const k in upgradeLevels2) upgradeLevels2[k] = 0;
   }
 
-  // Lay down a small ambient farm — two coops with chickens wandering —
-  // so the menu sits over a living world instead of an empty meadow.
-  function populateMenuDemo() {
-    coops.push({ x: -3, y: 1,  spawnT: 6, hp: 3, builtWave: 0, level: 0, dirtR: 1.2 });
-    coops.push({ x: 3,  y: -2, spawnT: 9, hp: 3, builtWave: 0, level: 0, dirtR: 1.0 });
-    for (let i = 0; i < 6; i++) spawnChicken(coops[i % coops.length], true);
-  }
+  // Menu backdrop is just grass + player — no coops or chickens,
+  // so the menu→game transition is seamless with nothing to clear.
+  function populateMenuDemo() {}
   populateMenuDemo();
 
   // ---------- DEBUG PANEL — gated by the DEBUG flag at top of the IIFE ----------
@@ -18135,6 +18203,12 @@
 
   // ---------- Title menu ----------
   function startGame(isMultiplayer) {
+    // Hide the menu before resetting the world so the canvas never shows a blank
+    // frame while the menu overlay is still visible.
+    const menu = document.getElementById('menu');
+    if (menu) menu.style.display = 'none';
+    document.body.classList.remove('in-menu');
+    inMenu = false;
     // Tear down the menu's ambient demo before the real run begins.
     resetWorld();
     multiplayer = !!isMultiplayer;
@@ -18187,11 +18261,8 @@
     } else {
       player2.active = false;
     }
-    document.body.classList.remove('in-menu');
-    const menu = document.getElementById('menu');
-    if (menu) menu.style.display = 'none';
-    inMenu = false;
     last = performance.now(); // avoid a huge dt on the first frame after the menu
+    render(); // paint the clean world immediately — avoids a ~16ms flash of the old demo canvas while the frame-rate cap is resetting
     getAudio(); // priming audio off a user gesture so sounds play on first shot
     // Post-boss carryover: add the flat 0.1% from the last run AFTER every reset
     // (so it isn't caught by the new-game-plus doubling), then consume it.
@@ -18860,29 +18931,29 @@
   }
 
   function hostLobby() {
-    netRole = ‘host’;
+    netRole = 'host';
     isHost = true;
     const code = generateCode();
-    document.getElementById(‘lobbyCode’).textContent = code;
-    setStatus(document.getElementById(‘hostStatus’), ‘Loading…’);
-    showScreen(‘host-wait’);
+    document.getElementById('lobbyCode').textContent = code;
+    setStatus(document.getElementById('hostStatus'), 'Loading…');
+    showScreen('host-wait');
     requirePeerJS(() => {
-      setStatus(document.getElementById(‘hostStatus’), ‘Connecting to broker…’);
+      setStatus(document.getElementById('hostStatus'), 'Connecting to broker…');
       ensurePeer(ID_PREFIX + code);
       if (!peer) return;
-      peer.on(‘open’, () => {
-        setStatus(document.getElementById(‘hostStatus’), ‘Waiting for the other player…’);
+      peer.on('open', () => {
+        setStatus(document.getElementById('hostStatus'), 'Waiting for the other player…');
       });
-      peer.on(‘connection’, incoming => {
+      peer.on('connection', incoming => {
         if (conn && conn.open) {
           // Lobby already full — politely refuse.
-          incoming.on(‘open’, () => {
-            try { incoming.send({ type: ‘reject’, reason: ‘lobby-full’ }); } catch (_) {}
+          incoming.on('open', () => {
+            try { incoming.send({ type: 'reject', reason: 'lobby-full' }); } catch (_) {}
             setTimeout(() => { try { incoming.close(); } catch (_) {} }, 100);
           });
           return;
         }
-        incoming.on(‘open’, () => {
+        incoming.on('open', () => {
           attachConn(incoming);
           startGame(true);
         });
@@ -18891,16 +18962,16 @@
   }
 
   function joinLobby(code) {
-    netRole = ‘guest’;
+    netRole = 'guest';
     isHost = false;
-    setStatus(document.getElementById(‘joinStatus’), ‘Loading…’);
-    document.getElementById(‘btnJoinConnect’).disabled = true;
+    setStatus(document.getElementById('joinStatus'), 'Loading…');
+    document.getElementById('btnJoinConnect').disabled = true;
     requirePeerJS(() => {
-      setStatus(document.getElementById(‘joinStatus’), ‘Connecting to broker…’);
+      setStatus(document.getElementById('joinStatus'), 'Connecting to broker…');
       ensurePeer(null);
-      if (!peer) { document.getElementById(‘btnJoinConnect’).disabled = false; return; }
-      peer.on(‘open’, () => {
-        setStatus(document.getElementById(‘joinStatus’), ‘Reaching host…’);
+      if (!peer) { document.getElementById('btnJoinConnect').disabled = false; return; }
+      peer.on('open', () => {
+        setStatus(document.getElementById('joinStatus'), 'Reaching host…');
         const c = peer.connect(ID_PREFIX + code, { reliable: true });
         // If the data channel never opens (relay unreachable, host firewalled),
         // bail out with a readable error instead of spinning here forever.
@@ -18908,20 +18979,20 @@
         const failTimer = setTimeout(() => {
           if (settled) return;
           settled = true;
-          setStatus(document.getElementById(‘joinStatus’),
-            ‘Couldn’t reach the host (timed out). Double-check the code, or the host may be behind a strict firewall.’, ‘bad’);
-          document.getElementById(‘btnJoinConnect’).disabled = false;
+          setStatus(document.getElementById('joinStatus'),
+            "Couldn't reach the host (timed out). Double-check the code, or the host may be behind a strict firewall.", 'bad');
+          document.getElementById('btnJoinConnect').disabled = false;
           teardownConnection();
         }, CONNECT_TIMEOUT_MS);
-        c.on(‘open’, () => {
+        c.on('open', () => {
           if (settled) return;
           settled = true;
           clearTimeout(failTimer);
           attachConn(c);
-          setStatus(document.getElementById(‘joinStatus’), ‘Connected!’, ‘good’);
+          setStatus(document.getElementById('joinStatus'), 'Connected!', 'good');
           startGame(true);
         });
-        c.on(‘error’, e => console.warn(‘[Guest conn] error’, e));
+        c.on('error', e => console.warn('[Guest conn] error', e));
       });
     });
   }
