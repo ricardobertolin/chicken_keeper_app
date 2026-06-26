@@ -28,7 +28,8 @@
       "Bash(echo *)",
       "Skill(update-config)",
       "Skill(update-config:*)",
-      "Bash(grep -v \"//.*wolfKill\\\\|//.*awardHat\")"
+      "Bash(grep -v \"//.*wolfKill\\\\|//.*awardHat\")",
+      "Bash(grep -v \"//\\\\|comment\")"
     ]
   }
 }

@@ -476,10 +476,11 @@
     pointer-events: all;
   }
   #mob-build-btn {
-    width: 56px; height: 44px;
+    width: 52px; height: 52px;
     background: rgba(30,80,180,0.70);
     border-color: #8fcaff;
     font-size: 10px;
+    border-radius: 50%;
   }
   #mob-scr-l, #mob-scr-r {
     width: 40px; height: 40px;
@@ -496,19 +497,21 @@
     top: 14px; left: 14px;
     font-size: 18px;
   }
-  /* Dash button: top-left corner of move pad */
-  #mob-dash-btn {
-    width: 40px; height: 34px;
+  /* Alt-fire button: top-left corner of move pad (swapped from DASH) */
+  #mob-alt-btn {
+    width: 44px; height: 44px;
     left: 10px; bottom: 132px;
     font-size: 11px; letter-spacing: 0;
-  }
-  /* Alt-fire button: top-right corner of aim pad */
-  #mob-alt-btn {
-    width: 40px; height: 34px;
-    right: 10px; bottom: 132px;
-    font-size: 11px; letter-spacing: 0;
+    border-radius: 50%;
     opacity: 0.15;
     transition: opacity 0.3s;
+  }
+  /* Dash button: top-right corner of aim pad (swapped from ALT) */
+  #mob-dash-btn {
+    width: 44px; height: 44px;
+    right: 10px; bottom: 132px;
+    font-size: 11px; letter-spacing: 0;
+    border-radius: 50%;
   }
 </style>
 </head>
@@ -671,6 +674,7 @@
       <button data-debug="force-night">Force Night of the Wolf</button>
       <button data-debug="buy-all-upgrades">Buy all upgrades</button>
       <button data-debug="give-upgrade">Give upgrade (+bonus)</button>
+      <button data-debug="cycle-upgrade-target" id="debug-target-btn">Target: P1</button>
       <button data-debug="toggle-parry" id="debug-parry-btn">Parry mode: ON</button>
       <button data-debug="toggle-fast-mode" id="debug-fast-mode-btn">Fast mode: OFF</button>
     </div>
@@ -804,6 +808,7 @@
       case 'critShot':         playCritShot(); break;
       case 'sparkle':          playSparkle(); break;
       case 'bossSpawn':        playBossSpawn(); break;
+      case 'wilhelm':          playWilhelm(); break;
     }
   }
 
@@ -1426,6 +1431,7 @@
   let wilhelmAudio = null;
   let wilhelmFailed = false;
   function playWilhelm() {
+    queueNetSound('wilhelm');
     if (wilhelmFailed) { playSynthScream(); return; }
     try {
       if (!wilhelmAudio) {
@@ -3068,25 +3074,27 @@
   // contributions: Weapon Oil widens the green band; Safe Trigger grows the
   // bar AND the green; Crazy Trigger shrinks both but widens the crit line;
   // Trigger Work slows the moving pin.
-  function safeLvl()  { return Math.min(5, (upgradeLevels.safeTrigger  || 0)); }
-  function crazyLvl() { return Math.min(5, (upgradeLevels.crazyTrigger || 0)); }
-  function skillCheckBarW() {
+  // Optional `who` param — defaults to player (P1). Pass a keeper to get that
+  // keeper's own safe/crazy trigger levels so the bar draws correctly for P2.
+  function safeLvl(who)  { return Math.min(5, (lvlsFor(who || player).safeTrigger  || 0)); }
+  function crazyLvl(who) { return Math.min(5, (lvlsFor(who || player).crazyTrigger || 0)); }
+  function skillCheckBarW(who) {
     return Math.max(20, RELOAD_SC_BAR_W_BASE
-      + SAFE_TRIGGER_W_BONUS[safeLvl()]
-      - CRAZY_TRIGGER_W_REDUCE[crazyLvl()]);
+      + SAFE_TRIGGER_W_BONUS[safeLvl(who)]
+      - CRAZY_TRIGGER_W_REDUCE[crazyLvl(who)]);
   }
-  function skillCheckHitHalf() {
+  function skillCheckHitHalf(who) {
     const raw = RELOAD_SC_HIT_HALF
       + (weaponOilCharges || 0) * WEAPON_OIL_PER_CHARGE
       + (advancedOilWaves > 0 ? ADVANCED_OIL_BAND : 0) // Advanced Oil floods the band
-      + SAFE_TRIGGER_HIT_BONUS[safeLvl()]
-      - CRAZY_TRIGGER_HIT_REDUCE[crazyLvl()];
+      + SAFE_TRIGGER_HIT_BONUS[safeLvl(who)]
+      - CRAZY_TRIGGER_HIT_REDUCE[crazyLvl(who)];
     // Advanced Oil is allowed to push past the normal oil cap toward a full bar.
     const cap = advancedOilWaves > 0 ? 0.49 : WEAPON_OIL_MAX_BAND;
     return Math.max(0.04, Math.min(cap, raw));
   }
-  function skillCheckCritHalf() {
-    return RELOAD_SC_CRIT_HALF + CRAZY_TRIGGER_CRIT_BONUS[crazyLvl()]
+  function skillCheckCritHalf(who) {
+    return RELOAD_SC_CRIT_HALF + CRAZY_TRIGGER_CRIT_BONUS[crazyLvl(who)]
       + (advancedOilWaves > 0 ? ADVANCED_OIL_CRIT : 0); // Advanced Oil fattens the crit line
   }
   // The running pin multiplier after Action Reload trims it down (level n).
@@ -3199,7 +3207,7 @@
   const FARM_COST_BASE = 5;     // $ for the first farm
   const FARM_COST_STEP = 5;     // extra $ per farm already placed
   function farmCost() { return FARM_COST_BASE + farms.length * FARM_COST_STEP; }
-  const FARM_UNLOCK_WAVE = 15;  // the Farm upgrade is offered from this wave on
+  const FARM_UNLOCK_WAVE = 10;  // the Farm upgrade is offered from this wave on
   // Untrampled waves to ripen, indexed by Farm upgrade level (0 = locked).
   const FARM_WAVES = [10, 10, 9, 8, 7, 5];
   const FARM_REWARD_BASE = 5;   // $ a harvest pays
@@ -6260,9 +6268,10 @@
       pierce: 1,                // hits one wolf and stops — disappears in the target
       hit: null,
       spareChance: 0,
-      r: 2.0,                   // smaller round, visually
+      r: 3.0,                   // slightly larger for visibility
       color: '#ffaa3a',
-      trail: false,
+      trail: true,
+      rooftop: true,            // drawn with a sniper glow
       shooter: 'hunter',        // reuses the hunter friendly-fire rules
     });
   }
@@ -7586,31 +7595,43 @@
     }
   }
 
-  function drawDashHats() {
-    const dt = player.dashT || 0;
-    if (dt <= 0 || player.ghost || player.dying) return;
-    const prog = 1 - clamp(dt / PLAYER_DASH_DUR, 0, 1); // 0 → 1 over dash
-    const frac = Math.sin(prog * Math.PI);               // peaks at mid-dash
-    const pp = worldToScreen(player.x, player.y);
+  function _scatterHatsAt(wx, wy, dashX, dashY, dashT, hatN, getColor) {
+    const prog = 1 - clamp(dashT / PLAYER_DASH_DUR, 0, 1);
+    const frac = Math.sin(prog * Math.PI);
+    const pp = worldToScreen(wx, wy);
     const pcx = pp.x, pcy = pp.y + TILE_H / 2;
-    // Dash direction in screen space (isometric projection)
-    const dxW = player.dashX || 0, dyW = player.dashY || 0;
-    const dxS = dxW * TILE_W / 2 - dyW * TILE_W / 2;
-    const dyS = dxW * TILE_H / 2 + dyW * TILE_H / 2;
+    const dxS = dashX * TILE_W / 2 - dashY * TILE_W / 2;
+    const dyS = dashX * TILE_H / 2 + dashY * TILE_H / 2;
     const dLen = Math.hypot(dxS, dyS) || 1;
-    for (let i = 0; i < playerHats; i++) {
+    for (let i = 0; i < hatN; i++) {
       const by = pcy - 34 - i * 5;
-      const color = hatColors[i] || '#5a3825';
       const scatter = frac * (i + 1) * 9;
       const rise    = frac * (i + 1) * 5;
       const rot     = frac * (0.7 + i * 0.45) * ((i % 2 === 0) ? 1 : -1);
-      const offX = -dxS / dLen * scatter;
-      const offY = -dyS / dLen * scatter - rise;
       ctx.save();
-      ctx.translate(pcx + offX, by + offY);
+      ctx.translate(pcx - dxS / dLen * scatter, by - dyS / dLen * scatter - rise);
       ctx.rotate(rot);
-      drawHat(0, 0, color, false, i === playerHats - 1);
+      drawHat(0, 0, getColor(i), false, i === hatN - 1);
       ctx.restore();
+    }
+  }
+
+  function drawDashHats() {
+    // Player 1's own dash scatter.
+    const dt1 = player.dashT || 0;
+    if (dt1 > 0 && !player.ghost && !player.dying) {
+      const isGuestSelf = multiplayer && !isHost;
+      _scatterHatsAt(player.x, player.y, player.dashX || 0, player.dashY || 0, dt1,
+        playerHats, i => isGuestSelf ? GUEST_HAT_COLOR : (hatColors[i] || '#5a3825'));
+    }
+    // Player 2's dash scatter (buddy visible on both screens via synced dashT).
+    const dt2 = player2.dashT || 0;
+    if (dt2 > 0 && player2.active && !player2.ghost && !player2.dying) {
+      const hatCount = Math.max(0, player2.hats || 0);
+      const haveColors = Array.isArray(player2.hatColors) && player2.hatColors.length > 0;
+      const fallbackHat = isHost ? GUEST_HAT_COLOR : '#5a3825';
+      _scatterHatsAt(player2.x, player2.y, player2.dashX || 0, player2.dashY || 0, dt2,
+        hatCount, i => haveColors ? (player2.hatColors[i] || fallbackHat) : fallbackHat);
     }
   }
 
@@ -8452,10 +8473,10 @@
     if (player2.skillCheckLockoutT > 0) return;
     const pos = skillCheckPos(player2.skillCheckT);
     const distFromCenter2 = Math.abs(pos - 0.5);
-    if (distFromCenter2 <= skillCheckHitHalf()) {
+    if (distFromCenter2 <= skillCheckHitHalf(player2)) {
       player2.skillCheckActive = false;
       player2.skillCheckNeedsRelease = false;
-      if (distFromCenter2 <= skillCheckCritHalf()) {
+      if (distFromCenter2 <= skillCheckCritHalf(player2)) {
         player2.critShots = (lvlsFor(player2).machineGun > 0) ? CRIT_MG_SHOTS : 1;
         player2.critSpeedT = CRIT_SPEED_BOOST_T; // buddy gets the same footwork burst on a crit
         player2.dashCd = 0; // …and instantly recharges the buddy's Parry Mode dodge-roll
@@ -10817,6 +10838,7 @@
         if (!Array.isArray(player2.hatColors)) player2.hatColors = [];
         player2.hatColors.push('#5a3825');
         toast('Buddy grabbed a hat! Now ' + player2.hats, 1.6);
+        toastGuest('You grabbed a hat! Now ' + player2.hats, 1.6);
       }
     } else {
       if (playerHats < MAX_HATS) {
@@ -11311,6 +11333,7 @@
   let immortal = false;  // debug toggle — when on, the last hat can never be knocked off
   let debugAutoReloadCrit = false; // debug toggle — gun is always loaded and every shot crits
   let debugFastMode = false;       // debug toggle — upgrades apply 5x, money 5x, advances 5 waves per clear
+  let debugUpgradeTarget = 'p1';  // debug toggle — which player receives upgrade buttons: p1, p2, both
   let shake = 0;
 
   // Stone fences stop bullets (wood fences let them fly through).
@@ -11515,6 +11538,8 @@
           // stopped by it instead of being shoved clean through.
           const km = Math.hypot(p.vx, p.vy) || 1;
           knockbackWolf(w, (p.vx / km) * PELLET_KNOCKBACK, (p.vy / km) * PELLET_KNOCKBACK);
+          // Hunter wolf lost a hat but survived: trigger retreat + full invulnerability.
+          if (w.hunterWolf) hunterWolfRetreat(w);
         }
         if (p.hit) p.hit.add(w);
         p.didHit = true; // rocket pellets only detonate on a wolf/hunter hit
@@ -12291,6 +12316,23 @@
 
     if (gameOver && gameOverPanelDelayT <= 0 && !rocketLaunch) drawGameOverPanel();
 
+    // Aim contrast ring — drawn on top of everything so the crosshair cursor
+    // is readable against any background (dark shadow ring + bright inner ring).
+    if (!isMobileMode && !inMenu) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(mouse.x, mouse.y, 7, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(0,0,0,0.65)';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(mouse.x, mouse.y, 7, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255,255,255,0.88)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.restore();
+    }
+
     drawFade(); // black screen wipe sits on top of everything
   }
 
@@ -12504,24 +12546,39 @@
       ctx.fillText('Buddy wants a rematch!', W / 2, btnY - 6);
     }
 
-    // RESURRECT button — singleplayer death only, max 9 uses, 10-wave cooldown
+    // RESPAWN button — singleplayer death only, max 9 uses, 10-wave cooldown.
+    // Always visible when singleplayer; grayed out when on cooldown or uses exhausted.
     let resurrBtn = null;
     const canResurrect = !isEndScr && !multiplayer && resurrectCount < 9
       && (wave - resurrectLastWave >= 10 || resurrectLastWave < 0);
-    if (canResurrect) {
+    if (!isEndScr && !multiplayer) {
       const rBtnW = 160;
       const rBtnH = 26;
       const rBtnX = Math.round((W - rBtnW) / 2);
       const rBtnY = btnY + btnH + 8;
-      ctx.fillStyle = 'rgba(60,8,8,0.92)';
-      ctx.fillRect(rBtnX, rBtnY, rBtnW, rBtnH);
-      ctx.strokeStyle = '#cc2222'; ctx.lineWidth = 2;
-      ctx.strokeRect(rBtnX, rBtnY, rBtnW, rBtnH);
-      ctx.fillStyle = '#ff6060';
+      if (canResurrect) {
+        ctx.fillStyle = 'rgba(60,8,8,0.92)';
+        ctx.fillRect(rBtnX, rBtnY, rBtnW, rBtnH);
+        ctx.strokeStyle = '#cc2222'; ctx.lineWidth = 2;
+        ctx.strokeRect(rBtnX, rBtnY, rBtnW, rBtnH);
+        ctx.fillStyle = '#ff6060';
+      } else {
+        ctx.fillStyle = 'rgba(30,30,30,0.75)';
+        ctx.fillRect(rBtnX, rBtnY, rBtnW, rBtnH);
+        ctx.strokeStyle = '#555'; ctx.lineWidth = 2;
+        ctx.strokeRect(rBtnX, rBtnY, rBtnW, rBtnH);
+        ctx.fillStyle = '#666';
+      }
       ctx.textAlign = 'center';
       ctx.font = 'bold 12px "Lucida Console", Consolas, monospace';
-      ctx.fillText('RESURRECT (' + resurrectCount + '/9)', rBtnX + rBtnW / 2, rBtnY + 17);
-      resurrBtn = { x: rBtnX, y: rBtnY, w: rBtnW, h: rBtnH };
+      const usesLeft = Math.max(0, 9 - resurrectCount);
+      const cooldown = !canResurrect && resurrectLastWave >= 0 && resurrectCount < 9
+        ? (10 - (wave - resurrectLastWave)) : 0;
+      let label = 'RESPAWN (' + usesLeft + ' left)';
+      if (resurrectCount >= 9) label = 'RESPAWN (used up)';
+      else if (cooldown > 0) label = 'RESPAWN (wave -' + cooldown + ')';
+      ctx.fillText(label, rBtnX + rBtnW / 2, rBtnY + 17);
+      if (canResurrect) resurrBtn = { x: rBtnX, y: rBtnY, w: rBtnW, h: rBtnH };
     }
 
     // Store rects for mouse/touch hit-testing.
@@ -14513,6 +14570,15 @@
       ctx.rotate(sway);
       ctx.translate(-cx, -cy);
     }
+    // Parry dash roll — same tumble as player1, synced via dashT from network.
+    if ((player2.dashT || 0) > 0) {
+      const prog2 = 1 - clamp((player2.dashT || 0) / PLAYER_DASH_DUR, 0, 1);
+      const spinDir2 = ((player2.dashX || 0) - (player2.dashY || 0)) >= 0 ? 1 : -1;
+      const hop2 = Math.sin(prog2 * Math.PI) * 6;
+      ctx.translate(cx, cy - 12 - hop2);
+      ctx.rotate(prog2 * Math.PI * 2 * spinDir2);
+      ctx.translate(-cx, -(cy - 12));
+    }
     // Death fall — same topple as player1, before the buddy turns to a ghost.
     const downed2 = !!player2.dying;
     if (downed2) {
@@ -14553,10 +14619,13 @@
     const hatCount = Math.max(0, player2.hats || 0);
     const haveColors = Array.isArray(player2.hatColors) && player2.hatColors.length > 0;
     const fallbackHat = isHost ? GUEST_HAT_COLOR : '#5a3825';
-    for (let i = 0; i < hatCount; i++) {
-      const by = cy - 34 + crouchYAdd2 - i * HAT_STEP;
-      const baseHat = haveColors ? (player2.hatColors[i] || fallbackHat) : fallbackHat;
-      drawHat(cx, by, baseHat, hurt, i === hatCount - 1);
+    // Skipped during buddy's dash — drawDashHats() renders them in screen space.
+    if ((player2.dashT || 0) <= 0) {
+      for (let i = 0; i < hatCount; i++) {
+        const by = cy - 34 + crouchYAdd2 - i * HAT_STEP;
+        const baseHat = haveColors ? (player2.hatColors[i] || fallbackHat) : fallbackHat;
+        drawHat(cx, by, baseHat, hurt, i === hatCount - 1);
+      }
     }
     // Legs — crouched pose mirrors player1's bent-knee stance; otherwise
     // alternate the normal walking peg legs.
@@ -14640,7 +14709,7 @@
   function drawReloadSkillCheck(cx, cy, who) {
     // Bar width pulls from the live upgrade contribution so Safe / Crazy
     // Trigger picks change the visible size as soon as they're taken.
-    const W = skillCheckBarW();
+    const W = skillCheckBarW(who);
     const H = 4;
     const x = cx - W / 2;
     const y = cy - H;
@@ -14660,8 +14729,8 @@
     // Weapon Oil halo — extends the accept zone outside the green core in
     // amber. Drawn first so the green ribbon paints over the overlapping
     // middle section.
-    const fullHalfW = skillCheckHitHalf() * W;
-    const coreHalfFrac = Math.min(skillCheckHitHalf(), RELOAD_SC_HIT_HALF + SAFE_TRIGGER_HIT_BONUS[safeLvl()] - CRAZY_TRIGGER_HIT_REDUCE[crazyLvl()]);
+    const fullHalfW = skillCheckHitHalf(who) * W;
+    const coreHalfFrac = Math.min(skillCheckHitHalf(who), RELOAD_SC_HIT_HALF + SAFE_TRIGGER_HIT_BONUS[safeLvl(who)] - CRAZY_TRIGGER_HIT_REDUCE[crazyLvl(who)]);
     const coreHalfW = Math.max(0, coreHalfFrac) * W;
     if (fullHalfW > coreHalfW + 0.5) {
       ctx.fillStyle = lockoutFlash ? '#8a5a1a' : '#e0a83a';
@@ -14672,7 +14741,7 @@
     ctx.fillRect(cx - coreHalfW, y, coreHalfW * 2, H);
     // Critical line — a thin pink/red ribbon dead-centre. Hitting it on
     // commit boosts the next shot's damage. Crazy Trigger thickens it.
-    const critHalfW = skillCheckCritHalf() * W;
+    const critHalfW = skillCheckCritHalf(who) * W;
     if (critHalfW > 0.5) {
       ctx.fillStyle = lockoutFlash ? '#a01a4a' : '#ff3a8a';
       ctx.fillRect(cx - critHalfW, y, critHalfW * 2, H);
@@ -14684,7 +14753,7 @@
     const runningReload = !!who.moving;
     // Dead-centre crit zone — the pin glows red so a critical commit reads at a
     // glance. Otherwise it flickers red while reloading on the move, else gold.
-    const inCrit = Math.abs(pos - 0.5) <= skillCheckCritHalf();
+    const inCrit = Math.abs(pos - 0.5) <= skillCheckCritHalf(who);
     ctx.fillStyle = inCrit
       ? '#ff2020'
       : (runningReload && (Math.floor(Date.now() / 70) % 2)) ? '#ff2a2a' : '#ffe27a';
@@ -16440,6 +16509,32 @@
       }
       return;
     }
+    // Rooftop sniper round — fat orange tracer with a pulsing glow so it's
+    // legible against the field even when arriving from the edge of the map.
+    if (p.rooftop) {
+      const pulse = 0.5 + 0.5 * Math.sin(Date.now() * 0.018 + p.x * 4 + p.y * 4);
+      const rr = (p.r || 3);
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 0.3 + 0.25 * pulse;
+      ctx.fillStyle = col;
+      ctx.beginPath(); ctx.arc(sp.x, y, rr + 4 + pulse * 2, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = col;
+      ctx.beginPath(); ctx.arc(sp.x, y, rr, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#fff8e0';
+      ctx.beginPath(); ctx.arc(sp.x, y, rr * 0.38, 0, Math.PI * 2); ctx.fill();
+      // Trailing streak — long enough to read as a fast-moving projectile.
+      ctx.globalAlpha = 0.55;
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(sp.x, y);
+      ctx.lineTo(sp.x - p.vx * 2.2, y - p.vy * 2.2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      return;
+    }
     ctx.fillStyle = col;
     ctx.beginPath();
     ctx.arc(sp.x, y, p.r || 2, 0, Math.PI*2);
@@ -17805,6 +17900,17 @@
     }
     refreshFastModeButton();
 
+    const targetBtn = document.getElementById('debug-target-btn');
+    function refreshTargetButton() {
+      if (!targetBtn) return;
+      const labels = { p1: 'P1', p2: 'P2', both: 'BOTH' };
+      targetBtn.textContent = 'Target: ' + labels[debugUpgradeTarget];
+      // Tint so it's obviously a mode toggle.
+      targetBtn.style.background = debugUpgradeTarget === 'p2' ? 'rgba(60,90,200,0.7)'
+        : debugUpgradeTarget === 'both' ? 'rgba(100,60,160,0.7)' : '';
+    }
+    refreshTargetButton();
+
 
     toggle.addEventListener('click', () => root.classList.toggle('open'));
 
@@ -18100,6 +18206,11 @@
         } else {
           toast('Nobody to resurrect — nobody is down', 1.2);
         }
+      } else if (action === 'cycle-upgrade-target') {
+        const seq = ['p1', 'p2', 'both'];
+        debugUpgradeTarget = seq[(seq.indexOf(debugUpgradeTarget) + 1) % seq.length];
+        refreshTargetButton();
+        toast('Debug upgrade target: ' + debugUpgradeTarget.toUpperCase(), 0.9);
       } else if (action === 'buy-all-upgrades') {
         // Grant every LEVELED upgrade across ALL tiers (starter, wave 15, wave
         // 30, …) up to its cap. Temporarily jump `wave` past every gate so the
@@ -18109,25 +18220,29 @@
         const savedWave = wave;
         wave = 100000; // unlock every wave-gated tier for the bulk grant
         try {
-          let applied, passes = 0;
-          do {
-            applied = 0;
-            for (const opt of getUpgradePool()) {
-              if (opt.id === 'buyHat' || opt.id === 'weaponOil' || opt.id === 'advancedOil') continue;
-              const lvl = upgradeLevels[opt.id];
-              if (lvl === undefined || lvl >= MAX_LEVEL) continue; // not leveled, or already maxed
-              if (opt.available && !opt.available()) continue;     // respects exclusivity gates
-              opt.apply();
-              if (upgradeLevels[opt.id] !== lvl) applied++;
-            }
-          } while (applied > 0 && ++passes < 40);
+          const _bulkGrantPool = (pool, lvlObj) => {
+            let applied, passes = 0;
+            do {
+              applied = 0;
+              for (const opt of pool) {
+                if (opt.id === 'buyHat' || opt.id === 'weaponOil' || opt.id === 'advancedOil') continue;
+                const lvl = lvlObj[opt.id];
+                if (lvl === undefined || lvl >= MAX_LEVEL) continue;
+                if (opt.available && !opt.available()) continue;
+                opt.apply();
+                if (lvlObj[opt.id] !== lvl) applied++;
+              }
+            } while (applied > 0 && ++passes < 40);
+          };
+          if (debugUpgradeTarget !== 'p2') _bulkGrantPool(getUpgradePool(), upgradeLevels);
+          if (debugUpgradeTarget !== 'p1') _bulkGrantPool(getP2UpgradePool(), upgradeLevels2);
         } finally {
-          wave = savedWave; // restore — never actually advance the run
+          wave = savedWave;
         }
         // Charge-based oils aren't leveled — grant them like the single-apply path.
         weaponOilCharges = 1; weaponOilWaves = WEAPON_OIL_WAVES; advancedOilWaves = 1;
         recomputeJamChance();
-        toast('Bought all upgrades (all tiers)', 1.4);
+        toast('Bought all upgrades → ' + debugUpgradeTarget.toUpperCase(), 1.4);
       } else if (action === 'give-upgrade') {
         // Pop the upgrade screen right now, and guarantee the bonus pick fires
         // after the first choice (resetting the once-per-wave gate + forcing it).
@@ -18174,23 +18289,30 @@
           }
           return;
         }
+        // Helper: apply an upgrade from a given pool to the given level object.
+        function _debugApplyOpt(pool, lvlObj) {
+          const o = pool.find(op => op.id === id);
+          if (!o) return 0;
+          const lvl = lvlObj[id];
+          if (id !== 'dog' && id !== 'range' && lvl !== undefined && lvl >= MAX_LEVEL) return -1; // maxed
+          const times = debugFastMode ? 5 : 1;
+          let n = 0;
+          for (let i = 0; i < times; i++) {
+            if (id !== 'dog' && id !== 'range' && lvlObj[id] !== undefined && lvlObj[id] >= MAX_LEVEL) break;
+            o.apply(); n++;
+          }
+          return n;
+        }
         const opt = getUpgradePool().find(o => o.id === id);
         if (opt) {
-          // Debug: stop at each upgrade's level cap. The dog (repeatable) and
-          // Buy Hat (no level) are endless, so they're never blocked.
-          const lvl = upgradeLevels[id];
-          if (id !== 'dog' && id !== 'range' && lvl !== undefined && lvl >= MAX_LEVEL) {
-            toast(opt.title + ' already maxed', 0.8);
-          } else {
-            const times = debugFastMode ? 5 : 1;
-            let applied = 0;
-            for (let i = 0; i < times; i++) {
-              const curLvl = upgradeLevels[id];
-              if (id !== 'dog' && id !== 'range' && curLvl !== undefined && curLvl >= MAX_LEVEL) break;
-              opt.apply();
-              applied++;
-            }
-            toast(opt.title + (applied > 1 ? ' applied x' + applied : ' applied'), 0.8);
+          const r1 = (debugUpgradeTarget !== 'p2') ? _debugApplyOpt(getUpgradePool(), upgradeLevels) : null;
+          const r2 = (debugUpgradeTarget !== 'p1') ? _debugApplyOpt(getP2UpgradePool(), upgradeLevels2) : null;
+          const anyMaxed = r1 === -1 || r2 === -1;
+          const anyApplied = (r1 > 0 ? r1 : 0) + (r2 > 0 ? r2 : 0);
+          if (anyApplied > 0) {
+            toast(opt.title + (anyApplied > 1 ? ' x' + anyApplied : '') + ' → ' + debugUpgradeTarget.toUpperCase(), 0.8);
+          } else if (anyMaxed) {
+            toast(opt.title + ' already maxed (for target)', 0.8);
           }
         }
       } else if (action === 'toggle-fast-mode') {
@@ -18463,6 +18585,8 @@
         // Guest's dance jig — render the buddy dancing (and rooted) on the host.
         if (typeof msg.danceT === 'number') player2.danceT = msg.danceT;
         if (typeof msg.danceAnimT === 'number') player2.danceAnimT = msg.danceAnimT;
+        // Guest's dash — host mirrors it so the buddy's roll + hat-scatter play.
+        if (typeof msg.dashT === 'number') { player2.dashT = msg.dashT; player2.dashX = msg.dashX || 0; player2.dashY = msg.dashY || 0; }
         return;
       }
       // Guest → host: a one-shot action (shoot, reload, magDump, doubleShot,
@@ -18537,6 +18661,10 @@
         // renders the buddy busting a move (and sees them rooted in place).
         danceT: player.danceT || 0,
         danceAnimT: player.danceAnimT || 0,
+        // Guest's dash so the host can render the roll + hat-scatter on the buddy.
+        dashT: player.dashT || 0,
+        dashX: player.dashX || 0,
+        dashY: player.dashY || 0,
       });
     } catch (e) { /* channel may be mid-teardown */ }
   }
@@ -18567,7 +18695,7 @@
     farms:    ['x','y','growth','need','trampleFlash'],
     dogs:     ['x','y','facingLeft','bob','variant'],
     corpses:  ['x','y','kind','t','frost','fried'],
-    pellets:  ['x','y','vx','vy','r','color','trail','pierce','crit','critCol','homing','wolfHoming'],
+    pellets:  ['x','y','vx','vy','r','color','trail','pierce','crit','critCol','homing','wolfHoming','rooftop'],
     smoke:    ['x','y','t','life','r'],
     blasts:   ['x','y','t','life','col'],
     dummies:  ['x','y','hp','maxHp','hurtT','_decoy'],
@@ -18725,6 +18853,11 @@
         // Experimental Parry Mode flag — host-authoritative so the guest's
         // SHIFT dodge-roll is enabled in lockstep with the wolves' lunge attack.
         parryMode: parryMode,
+        nightOfWolf: nightOfWolf,
+        // Host's own dash so the guest can render the hat-scatter animation.
+        hostDashT: player.dashT || 0,
+        hostDashX: player.dashX || 0,
+        hostDashY: player.dashY || 0,
       });
       pendingNetSounds.length = 0; // queue is drained on every send
       pendingGuestToasts.length = 0;
@@ -18887,6 +19020,9 @@
     if (msg.bossMissiles) replaceArray(bossMissiles, msg.bossMissiles);
     if (typeof msg.huntersLeavePending === 'boolean') huntersLeavePending = msg.huntersLeavePending;
     if (typeof msg.parryMode === 'boolean') parryMode = msg.parryMode; // host drives the experimental toggle
+    if (typeof msg.nightOfWolf === 'boolean') nightOfWolf = msg.nightOfWolf;
+    // Host's dash state so the guest renders the hat-scatter on the host's keeper.
+    if (typeof msg.hostDashT === 'number') { player2.dashT = msg.hostDashT; player2.dashX = msg.hostDashX || 0; player2.dashY = msg.hostDashY || 0; }
     // Boss state so the guest renders the health bar + boss-cleared end screen.
     if (typeof msg.bossWaveActive === 'boolean') bossWaveActive = msg.bossWaveActive;
     if (typeof msg.bossPhase === 'string') bossPhase = msg.bossPhase;
