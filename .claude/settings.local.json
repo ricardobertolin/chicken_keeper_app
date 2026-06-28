@@ -29,7 +29,14 @@
       "Skill(update-config)",
       "Skill(update-config:*)",
       "Bash(grep -v \"//.*wolfKill\\\\|//.*awardHat\")",
-      "Bash(grep -v \"//\\\\|comment\")"
+      "Bash(grep -v \"//\\\\|comment\")",
+      "Bash(grep -n \"hatPrice\\\\|hatsBought\\\\|HAT_PRICE\\\\|Bought a hat\\\\|Spent.*hat\\\\|hat.*\\\\$\" \"c:/Users/ricar/Documentos/_PROJETOS/_GitPages/chicken_keeper_app/index.html\")",
+      "Bash(grep -i \"toast\\\\|text\\\\|msg\\\\|log\\\\|Bought\\\\|spent\\\\|-\\\\$\")",
+      "Bash(grep -v \"//\\\\|fleece\\\\|relief\\\\|fleet\\\\b\\\\|fleeting\\\\b\")",
+      "Bash(grep -n \"\\\\$20\\\\|\\\\$25\\\\|'\\\\-\\\\$\\\\|\\\\\"\\\\\\\\-\\\\$\\\\|hatPrice.*20\\\\|20.*hatPrice\\\\|spent.*20\\\\|20.*spent\" \"c:/Users/ricar/Documentos/_PROJETOS/_GitPages/chicken_keeper_app/index.html\")",
+      "Bash(grep -n \"Bought a hat\\\\|hat.*cost.*desc\\\\|buyHat.*desc\\\\|desc.*buyHat\\\\|hat.*\\\\$.*desc\\\\|hatsBought\\\\|hatPrice\" \"c:/Users/ricar/Documentos/_PROJETOS/_GitPages/chicken_keeper_app/index.html\")",
+      "Bash(awk -F: '$2 > 16196 && $2 < 16250 {print}')",
+      "Bash(awk -F: '$2 > 16358 && $2 < 16800 {print}')"
     ]
   }
 }

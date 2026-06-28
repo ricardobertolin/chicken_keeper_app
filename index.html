@@ -563,7 +563,7 @@
       <button class="menu-btn menu-btn--primary" id="btnSingle">Single Player</button>
       <button class="menu-btn" id="btnMulti">Multiplayer</button>
       <button class="menu-btn" id="btnHowTo">How to Play</button>
-      <p class="menu-version">v0.9.2 <span class="by">·  made by ricardobertolin</span></p>
+      <p class="menu-version">v0.9.3 <span class="by">·  made by ricardobertolin</span></p>
     </section>
 
     <!-- How to play — controls -->
@@ -1154,6 +1154,22 @@
   }
 
   // A bright two-note coin "ka-ching" — played on a golden-gun jackpot.
+  // Quiet single-note coin clink — played whenever the player earns money.
+  function playMoneySmall() {
+    const ctx = getAudio();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.value = 1397; // F6 — bright little coin chime
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.001, now);
+    g.gain.exponentialRampToValueAtTime(0.18, now + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.13);
+    osc.connect(g); g.connect(ctx.destination);
+    osc.start(now); osc.stop(now + 0.15);
+  }
+
   function playMoney() {
     queueNetSound('money');
     const ctx = getAudio();
@@ -2562,6 +2578,7 @@
   // (chickens and coops keep ticking for the ambient backdrop).
   let inMenu = true;
   let multiplayer = false;
+  let lastSnapshotReceivedT = 0; // seconds since last snapshot (guest only; drives lag warning)
 
   const player = {
     x: 0, y: 0,
@@ -2909,6 +2926,8 @@
   const pellets = [];   // {x,y,vx,vy,life,dmg,pierce,hit}
   const corpses = [];   // {x,y,kind,t}
   const trees = [];     // {x,y,size,shade} — static decoration on the dark border
+  const stumps = [];    // {x,y,size,ang} — tiny cut stumps on old borders after map expansion
+  const twigs  = [];    // {x,y,ang,len} — scattered fallen twigs on expanded grass
   const fences = [];    // {x,y} — barriers wolves must walk around
   const farms = [];     // {x,y,growth,trampleFlash} — crop plots that ripen over waves
   const dogs = [];      // {x,y,vx,vy,attackT,facingLeft,bob} — friendly guard dogs
@@ -2921,7 +2940,8 @@
   const rooftoppers = []; // {x,y,coop,fireT,dir,facingLeft,alive} — sniper allies stationed on coop roofs
   const smoke = [];     // {x,y,vx,vy,t,life,r} — drifting gunsmoke puffs
   const blasts = [];    // {x,y,t,life} — expanding fat-chicken explosion rings
-  const flyHats = [];   // {fromWx,fromWy,color,t,life,rot,spin} — hats arcing from wolf to player head
+  const flyHats = [];        // {fromWx,fromWy,color,t,life,rot,spin} — hats arcing from wolf to player head
+  const pendingHatLandings = []; // {delayT, color} — hats waiting to land before incrementing playerHats
   // FANGUS phase-3 "chicken suckers": homing orbs that grab a chicken and drag
   // it back to the boss to heal it. {x,y,phase,target,life}
   const chickenSuckers = [];
@@ -3155,12 +3175,14 @@
   // (player vs player2); otherwise everything pools into `money` (legacy).
   function addMoney(who, amount) {
     if (debugFastMode) amount *= 5; // Fast mode: all earned income pays out 5×
+    if (amount >= 5) playMoneySmall(); // coin chime for meaningful amounts only
     if (!gameOpts.separateMoney || who === player) money += amount;
     else                                            money2 += amount;
   }
   // Income with no specific earner (wave reward, harvest) — split when separate.
   function addSharedMoney(amount) {
     if (debugFastMode) amount *= 5; // Fast mode: 5× income
+    if (amount > 0) playMoneySmall();
     if (!gameOpts.separateMoney) { money += amount; return; }
     const half = Math.floor(amount / 2);
     money  += amount - half; // P1 keeps the rounding extra
@@ -3319,11 +3341,11 @@
   const BOSS_PACK_DURATION = 30;  // seconds wolves keep pouring in between sides
   const BOSS_PACK_INTERVAL = 0.9; // seconds between pack spawns (dense)
   const BOSS_PACK_CAP = 26;       // max concurrent pack wolves
-  const BOSS_DASH_SPEED = 9;      // tiles/s while charging
-  const BOSS_DASH_TIME = 0.75;    // seconds a charge lasts
-  const BOSS_DASH_CD = 2.8;       // cooldown between charges (shortened a touch)
-  const BOSS_DASH_CHANCE = 0.1;   // per-second roll to charge (MK-02 onward) — 5x rarer now
-  const BOSS_CLOSE_DASH_R = 3.5;  // a keeper inside this range forces an immediate charge
+  const BOSS_DASH_SPEED = 18;     // tiles/s while charging (doubled — aggressive wolf-like rush)
+  const BOSS_DASH_TIME = 0.5;     // seconds a charge lasts (shorter = snappier burst)
+  const BOSS_DASH_CD = 2.0;       // cooldown between charges
+  const BOSS_DASH_CHANCE = 0.18;  // per-second roll to charge (MK-02 onward)
+  const BOSS_CLOSE_DASH_R = 4.5;  // a keeper inside this range forces an immediate charge
   // Phase-3 chicken-suck: MK-03 launches orbs that drag a chicken back to heal it.
   const BOSS_SUCK_COOLDOWN = 8;   // seconds between chicken-suck launches (less frequent now)
   const BOSS_SUCK_SPEED = 6.5;    // tiles/s the suck orb travels
@@ -3406,6 +3428,7 @@
   const HUNTER_WOLF_GAP_WAVES = 20;  // can appear at most once every this many waves
   const HUNTER_WOLF_MIN_WAVE = 20;   // earliest wave it can show up (then any wave 20+, incl. 101+)
   let lastHunterWolfWave = -100;     // wave the last hunter wolf appeared
+  let ghostWolfChance = 0;           // probability [0,1] of a ghost wolf spawning; +2% per player death
   // Parachute wolf — an ordinary wolf that drops in from the sky onto a random
   // spot inside the field (instead of walking in from a border), descending
   // under a parachute. Untouchable until it lands, then behaves normally.
@@ -3494,6 +3517,9 @@
   let pendingSpawns = 0; // wolves scheduled but not yet spawned (across all live waves)
   let resurrectCount = 0;     // times the red resurrect button has been used (max 9)
   let resurrectLastWave = -99; // wave when last resurrect was used (cooldown: 10 waves)
+  let comboKills = 0;          // wolves killed in the current combo window
+  let comboT = 0;              // seconds remaining in the combo window (resets on each kill)
+  let comboFloat = null;       // active floating "x5" combo label; null when no combo
   // Bumped every time the run is reset (quitToMenu / restartMpGame). Spawn
   // timers capture the gen they were scheduled under and bail if it differs
   // when they fire — otherwise old setTimeouts from the previous run keep
@@ -3603,6 +3629,12 @@
 
   player.x = 0;
   player.y = 0;
+
+  // Seeded deterministic RNG (mulberry32). Useful for stable random decoration.
+  function mulberry32(seed) {
+    let s = seed >>> 0;
+    return () => { s += 0x6D2B79F5; let t = Math.imul(s ^ s >>> 15, 1 | s); t ^= t + Math.imul(t ^ t >>> 7, 61 | t); return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  }
 
   // Pack the dark border band with trees — primary tree per tile + frequent secondary.
   // Re-run whenever the map expands so the forest border tracks the new edge.
@@ -4465,7 +4497,7 @@
         desc() { return 'Spend $' + hatPrice + ' → +1 hat (now ' + playerHats + ')'; },
         apply() {
           money -= hatPrice;
-          hatPrice = Math.max(5, hatPrice - 5);
+          hatPrice += 5;
           // After 5 purchases, each new hat has a ~6% chance to come in
           // leprechaun green — losing one pays a $100 jackpot.
           const green = hatsBought >= 5 && Math.random() < LEPRECHAUN_BUY_CHANCE;
@@ -4654,7 +4686,14 @@
           const who = player.ghost ? 'You' : 'Buddy';
           return firstReviveFree
             ? 'FREE (first one) → ' + who + ' rises with 3 hats'
-            : 'Spend $' + hatPrice + ' → ' + who + ' rises with 3 hats';
+            : 'Spend $' + revivePrice + ' → ' + who + ' rises with 3 hats';
+        },
+        affordable() {
+          if (!multiplayer || !player2.active) return false;
+          const onlyOne = (player.ghost && !player2.ghost) || (!player.ghost && player2.ghost);
+          if (!onlyOne) return false;
+          if (firstReviveFree) return true;
+          return survivorWallet().balance() >= revivePrice;
         },
         apply() {
           // The first resurrection of the run is free — it doesn't touch the
@@ -4663,9 +4702,8 @@
             firstReviveFree = false;
           } else {
             const wallet = survivorWallet();
-            wallet.spend(hatPrice);
-            hatPrice = Math.max(5, hatPrice - 5); // gets cheaper each purchase, floor $5
-            hatsBought++;
+            wallet.spend(revivePrice);
+            revivePrice += 10; // $10 more expensive each resurrection
           }
           if (player.ghost) reviveKeeper(player);
           else              reviveKeeper(player2);
@@ -5045,7 +5083,7 @@
         desc: () => 'Spend $' + hatPrice + ' → +1 hat (now ' + (player2.hats || 0) + ')',
         apply: () => {
           spendMoney(player2, hatPrice);
-          hatPrice = Math.max(5, hatPrice - 5);
+          hatPrice += 5;
           hatsBought++;
           player2.hats = (player2.hats || 0) + 1;
         } },
@@ -5111,11 +5149,12 @@
     // Money-gated picks (hats, oils) are always shown, even when broke. Clicking
     // one you can't afford just buzzes — it doesn't consume your pick.
     if (option.affordable && !option.affordable()) { playCantBuy(); return; }
+    const _hatPricePaid = option.id === 'buyHat' ? hatPrice : 0; // capture before apply() changes it
     applyPickedUpgrade(option);
     upgradePicked = true;
     toast(option.id === 'cash' ? 'Picked up $10'
         : option.id === 'chicken' ? 'Bock bock bagawk!'
-        : option.id === 'buyHat' ? 'Bought a hat!  -$20'
+        : option.id === 'buyHat' ? ('Bought a hat!  -$' + _hatPricePaid)
         : option.id === 'dog' ? (
             upgradeLevels.dog === 0 ? 'The dogs retire — they head home'
             : upgradeLevels.dog === 1 ? (dogGen + (dogGen === 1 ? ' dog joins you!' : ' dogs join you!'))
@@ -5365,9 +5404,31 @@
 
   // Every 10 coops placed, the world grows by one tile in every direction.
   function expandMap() {
-    HALF_MAP += 1;
+    const oldBorder = HALF_MAP - 1; // the inner ring that was forest before expansion
+    HALF_MAP += 2;
     MAP_SIZE = HALF_MAP * 2;
     generateTrees(); // rebuild the forest border at the new edge
+    // Scatter tiny cut stumps along the old forest ring and fallen twigs inside it.
+    const rng = mulberry32(HALF_MAP * 7919 + 13);
+    for (let x = -oldBorder; x <= oldBorder; x++) {
+      for (let y = -oldBorder; y <= oldBorder; y++) {
+        const onBorder = Math.abs(x) === oldBorder || Math.abs(y) === oldBorder;
+        const inner = !onBorder && (Math.abs(x) >= oldBorder - 2 || Math.abs(y) >= oldBorder - 2);
+        if (!onBorder && !inner) continue;
+        if (onBorder && rng() < 0.5) {
+          const ox = (rng() - 0.5) * 0.5;
+          const oy = (rng() - 0.5) * 0.5;
+          // depth +0.5 pushes them to the inner face of the old tree row (close to trees)
+          stumps.push({ x: x + ox, y: y + oy, size: 0.18 + rng() * 0.14,
+                        ang: rng() * Math.PI, bornWave: wave, decayWaves: 10 + Math.floor(rng() * 8) });
+        }
+        if (inner && rng() < 0.18) {
+          twigs.push({ x: x + (rng() - 0.5) * 0.8, y: y + (rng() - 0.5) * 0.8,
+                       ang: rng() * Math.PI, len: 0.25 + rng() * 0.35,
+                       bornWave: wave, decayWaves: 6 + Math.floor(rng() * 6) });
+        }
+      }
+    }
   }
 
   // Toast describing the currently selected building.
@@ -6012,6 +6073,25 @@
     toastEnemyIntroOnce('hunterwolf', 'A HUNTER WOLF prowls the field — it shoots back!', 2.4);
   }
 
+  // Ghost wolf — looks like a hunter wolf but vanishes silently when hit.
+  // Spawn chance starts at 0% and grows +2% per player death.
+  function spawnGhostWolf() {
+    const sp = pickEdgeSpawn();
+    wolves.push({
+      x: sp.x, y: sp.y, vx: 0, vy: 0,
+      target: null, attackT: 0, aggroT: 0, playerFocusT: 0,
+      alive: true, hp: 1, maxHp: 1, hurtT: 0, detourT: 0, siegeT: 0,
+      facingLeft: false,
+      fasterLevel: 0, resistLevel: 0,
+      speedMul: 2, size: 0.9,
+      assassin: true,  // hunts the player relentlessly (same AI branch)
+      ghostWolf: true, // vanishes when shot instead of dying
+      ghostFleeing: false, ghostAlpha: 1.0,
+      wanderDir: Math.random() * Math.PI * 2, wanderT: 0,
+    });
+    // No toast — ghost wolves slip in silently.
+  }
+
   // Thing wolf — a rare cryptid. Plays like an ordinary wolf (hunts chickens,
   // attacks the keeper), but on death its body bursts and the head skitters
   // off on spider legs (see onWolfKilled → spawnThingCrawler).
@@ -6640,6 +6720,15 @@
 
   function startWave(skipCount = 1) {
     wave += skipCount;
+    // Prune stumps and twigs that have decayed (existed for their allotted wave count).
+    for (let i = stumps.length - 1; i >= 0; i--) {
+      const s = stumps[i];
+      if (s.bornWave !== undefined && wave - s.bornWave >= s.decayWaves) stumps.splice(i, 1);
+    }
+    for (let i = twigs.length - 1; i >= 0; i--) {
+      const t = twigs[i];
+      if (t.bornWave !== undefined && wave - t.bornWave >= t.decayWaves) twigs.splice(i, 1);
+    }
     // Snapshot the chicken roster so the bonus-screen roll can compute total
     // deaths at wave end. Births during the wave are added in spawnChicken.
     chickensAtWaveStart = 0;
@@ -6884,6 +6973,16 @@
         spawnHunterWolf();
       }, spawnDelay + rand(800, 3200));
     }
+    // Ghost wolf — chance grows +2% per player death; appears from wave 5+ onward.
+    if (wave >= 5 && ghostWolfChance > 0 && Math.random() < ghostWolfChance) {
+      pendingSpawns++;
+      setTimeout(() => {
+        if (gen !== runGen) return;
+        pendingSpawns--;
+        if (gameOver) return;
+        spawnGhostWolf();
+      }, spawnDelay + rand(1200, 4000));
+    }
     // Player-2 cameo — a vanishingly rare solo-run easter egg (see the helper).
     maybeSpawnP2Cameo();
     toast('Wave ' + wave + ': ' + nextWolves + ' wolves!');
@@ -6949,9 +7048,10 @@
     // own flock and it can wipe the whole payout. Only a MINIMUM floor remains,
     // and that floor is doubled (was max($20, 20% income) → now max($40, 40%
     // income)): any friendly fire at all costs at least that much.
+    // Penalty: exactly $1 per chicken killed (scaled by wave tier); no floor so
+    // it never wipes the full payout for shooting just one bird.
     const roundIncome = grossReward + farmGold;
-    const penaltyFloor = Math.max(40, Math.floor(roundIncome * 0.4));
-    const penalty = totalShot > 0 ? Math.max(totalShot * penaltyMul * 2, penaltyFloor) : 0;
+    const penalty = totalShot * penaltyMul;
     const reward = Math.max(0, grossReward - penalty);
     const farmNote = farmGold > 0 ? '  +$' + farmGold + ' farms' : '';
     // Flag the hunter fee that'll be drawn from the player's pot next wave,
@@ -7572,6 +7672,15 @@
       fh.t += dt;
       fh.rot += fh.spin * dt;
       if (fh.t >= fh.life) flyHats.splice(i, 1);
+    }
+    for (let i = pendingHatLandings.length - 1; i >= 0; i--) {
+      const ph = pendingHatLandings[i];
+      ph.delayT -= dt;
+      if (ph.delayT <= 0 && playerHats < MAX_HATS) {
+        playerHats++;
+        hatColors.push(ph.color);
+        pendingHatLandings.splice(i, 1);
+      }
     }
   }
 
@@ -8775,7 +8884,14 @@
         // Fall through to the regular movement step (collision + clamp).
       }
     }
-    if (wolfClose) {
+    // Flutter overrides wolf-flee: chicken ignores the wolf and flies toward coop.
+    if (wolfClose && (c.flutterT || 0) > 0) {
+      const hx = c.home ? c.home.x : 0, hy = c.home ? c.home.y : 0;
+      const dx = hx - c.x, dy = hy - c.y;
+      const m = Math.hypot(dx, dy) || 1;
+      c.vx = (dx / m) * 4.5;
+      c.vy = (dy / m) * 4.5;
+    } else if (wolfClose) {
       // Unit-vector flee direction away from the wolf
       const m = Math.hypot(c.x - nearestWolf.x, c.y - nearestWolf.y) || 1;
       let ux = (c.x - nearestWolf.x) / m;
@@ -8815,18 +8931,31 @@
       c.fleeT -= dt;
     } else {
       // Wander near home
+      if ((c.flutterT || 0) > 0) c.flutterT -= dt;
       c.wanderT -= dt;
       if (c.wanderT <= 0) {
         c.wanderT = rand(0.8, 2.5);
-        // Bias toward home coop
         const hx = c.home ? c.home.x : 0;
         const hy = c.home ? c.home.y : 0;
-        const tx = hx + rand(-2, 2);
-        const ty = hy + rand(-2, 2);
-        const dx = tx - c.x, dy = ty - c.y;
-        const m = Math.hypot(dx, dy) || 1;
-        c.vx = (dx / m) * 1.2;
-        c.vy = (dy / m) * 1.2;
+        // If too close to the border, trigger a panic-flutter back toward the coop.
+        const wallDist = (HALF_MAP - 1) - Math.max(Math.abs(c.x), Math.abs(c.y));
+        const nearWall = wallDist < 1.6;
+        if (nearWall && Math.random() < 0.14) { // ~55%/4 — less frequent but more dramatic
+          // Flutter: strong wing-flap dash toward the home coop
+          c.flutterT = 1.4 + rand(0, 0.6);
+          const dx = hx - c.x, dy = hy - c.y;
+          const m = Math.hypot(dx, dy) || 1;
+          c.vx = (dx / m) * 4.5;
+          c.vy = (dy / m) * 4.5;
+        } else {
+          // Normal wander — bias toward home coop
+          const tx = hx + rand(-2, 2);
+          const ty = hy + rand(-2, 2);
+          const dx = tx - c.x, dy = ty - c.y;
+          const m = Math.hypot(dx, dy) || 1;
+          c.vx = (dx / m) * 1.2;
+          c.vy = (dy / m) * 1.2;
+        }
       }
     }
     // Update facing direction from screen-space horizontal velocity (iso: screen X ∝ vx - vy)
@@ -8840,7 +8969,7 @@
     c.y += c.vy * dt * fatMul;
     c.x = clamp(c.x, -HALF_MAP + 1, HALF_MAP - 1);
     c.y = clamp(c.y, -HALF_MAP + 1, HALF_MAP - 1);
-    c.bob += dt * (Math.hypot(c.vx, c.vy) > 0.1 ? 12 : 2);
+    c.bob += dt * ((c.flutterT || 0) > 0 ? 22 : Math.hypot(c.vx, c.vy) > 0.1 ? 12 : 2);
   }
 
   // Fat Chickens at max tier: a slain chicken may burst, blasting nearby
@@ -9666,7 +9795,7 @@
     b.gaitT = (b.gaitT || 0) - dt;
     if (b.gaitT <= 0) { b.walking = !b.walking; b.gaitT = b.walking ? rand(1.3, 2.1) : rand(0.9, 1.5); }
     const standoff = 7;
-    const spd = 0.9 * bossSpeedMul; // base walk, scaled by battle damage (see bossRage)
+    const spd = 1.8 * bossSpeedMul; // base walk doubled — FANGUS moves with purpose
     if (b.walking && d > standoff + 0.5)      { b.vx = (dx / d) * spd;       b.vy = (dy / d) * spd; }
     else if (b.walking && d < standoff - 0.5) { b.vx = -(dx / d) * spd * 0.7; b.vy = -(dy / d) * spd * 0.7; }
     else                                      { b.vx = 0; b.vy = 0; }
@@ -10262,6 +10391,23 @@
       }
     }
     if (w.coldT > 0) w.coldT -= dt;
+    // Ghost wolf: when hit it fades and silently drifts off the map.
+    if (w.ghostWolf && w.ghostFleeing) {
+      w.ghostAlpha = Math.max(0, (w.ghostAlpha || 1) - dt * 0.8);
+      const spd = 3.5;
+      const ex = w.x < 0 ? -(HALF_MAP + 2) : (HALF_MAP + 2);
+      const ey = w.y < 0 ? -(HALF_MAP + 2) : (HALF_MAP + 2);
+      const tgtEdge = Math.abs(w.x) > Math.abs(w.y)
+        ? { x: ex, y: w.y } : { x: w.x, y: ey };
+      const dx = tgtEdge.x - w.x, dy = tgtEdge.y - w.y;
+      const dm = Math.hypot(dx, dy) || 1;
+      w.x += (dx / dm) * spd * dt;
+      w.y += (dy / dm) * spd * dt;
+      if (w.ghostAlpha <= 0 || Math.abs(w.x) > HALF_MAP + 1 || Math.abs(w.y) > HALF_MAP + 1) {
+        w.alive = false;
+      }
+      return;
+    }
     if (w.hunterWolf) { updateHunterWolf(w, dt); return; }
     if (w.missileWolf) { updateMissileWolf(w, dt); return; }
     if (w.parachuting) { updateParachuteWolf(w, dt); return; }
@@ -10270,7 +10416,10 @@
     if (w.bomb) { updateBombWolf(w, dt); return; }
     if (w.pup) { updatePupWolf(w, dt); return; }
     if (w.ranged || w.homer) { updateRangedWolf(w, dt); return; }
-    if (waveActive && waveElapsed >= 60 && !w.fleeing && Math.random() < 0.15 * dt) w.fleeing = true;
+    if (waveActive && waveElapsed >= 60 && !bossWaveActive && !w.fleeing && Math.random() < 0.15 * dt) {
+      w.fleeing = true;
+      w.fleeEscapeT = 10; // must reach the map edge within 10s or it explodes
+    }
     if (w.fleeing) { updateFleeingWolf(w, dt); return; }
     if (w.defective) { updateDefectiveWolf(w, dt); return; }
     // Stun: a max-level statue's aura can put a wolf to sleep for a short
@@ -10795,6 +10944,19 @@
     if (!w.alive) return;
     if (w.hurtT > 0) w.hurtT -= dt;
     if (w.meleeT > 0) w.meleeT -= dt;
+    // Countdown: if it fails to reach the edge in 10s, it explodes in panic.
+    if (w.fleeEscapeT !== undefined) {
+      w.fleeEscapeT -= dt;
+      if (w.fleeEscapeT <= 0) {
+        spawnBlast(w.x, w.y, '#ff6020', 1.2);
+        spawnSmoke(w.x, w.y, 3);
+        if (w.carriedChicken) { killChicken(w.carriedChicken); w.carriedChicken = null; }
+        w.alive = false;
+        playExplosion();
+        checkWaveDefended();
+        return;
+      }
+    }
     const speed = 2.6 * (w.speedMul || 1) * SNATCH_SPEED_MUL;
     // Head for whichever map edge is closest.
     const r = HALF_MAP;
@@ -10841,11 +11003,18 @@
         toastGuest('You grabbed a hat! Now ' + player2.hats, 1.6);
       }
     } else {
-      if (playerHats < MAX_HATS) {
-        playerHats++;
-        hatColors.push('#5a3825');
-        toast('A hatted wolf dropped a hat! Now ' + playerHats, 1.6);
-        if (fromWx !== undefined) spawnFlyHat(fromWx, fromWy, '#5a3825');
+      if (playerHats + pendingHatLandings.length < MAX_HATS) {
+        const color = '#5a3825';
+        if (fromWx !== undefined) {
+          // Defer the increment until the hat arc animation lands.
+          spawnFlyHat(fromWx, fromWy, color);
+          pendingHatLandings.push({ delayT: 0.55, color });
+          toast('A hatted wolf dropped a hat! Now ' + (playerHats + pendingHatLandings.length), 1.6);
+        } else {
+          playerHats++;
+          hatColors.push(color);
+          toast('A hatted wolf dropped a hat! Now ' + playerHats, 1.6);
+        }
       }
     }
   }
@@ -10929,6 +11098,22 @@
       for (let i = 0; i < pupCount; i++) {
         const a = (i / pupCount) * Math.PI * 2 + rand(-0.2, 0.2);
         spawnPupWolf(w.x + Math.cos(a) * 0.5, w.y + Math.sin(a) * 0.5);
+      }
+    }
+    // Combo counter — tally fast kills; at 5+ spawn/refresh the floating x-label.
+    if (!w.boss) {
+      comboKills++;
+      comboT = 2.0; // reset 2-second window
+      if (comboKills >= 5) {
+        if (comboFloat) {
+          // Refresh existing label at the new kill position.
+          comboFloat.wx = w.x; comboFloat.wy = w.y;
+          comboFloat.alpha = 1.5; // reset fade timer
+          comboFloat.screenYOff = Math.min(comboFloat.screenYOff, -12); // keep float upward
+          comboFloat.text = 'x' + comboKills;
+        } else {
+          comboFloat = { wx: w.x, wy: w.y, screenYOff: 0, alpha: 1.5, text: 'x' + comboKills };
+        }
       }
     }
     // Thing wolf — the body bursts and the head skitters off on spider legs.
@@ -11018,6 +11203,15 @@
     if (w.dpsDummy) { w.dpsAccum = (w.dpsAccum || 0) + dmg; w.hurtT = 0.08; return; }
     if (w.invulnT > 0 || w.parachuting) return; // crawler grace / airborne parachuter
     attacker = attacker || player;
+    // Ghost wolf: first hit triggers invisible flee — it never "dies" normally.
+    if (w.ghostWolf) {
+      if (w.ghostFleeing) return; // already vanishing
+      if ((w.hitDebounceT || 0) > 0) return;
+      w.ghostFleeing = true;
+      w.ghostAlpha = 1.0;
+      spawnSmoke(w.x, w.y, 2); // just a tiny puff — no sound
+      return;
+    }
     // Hunter wolf: any hit knocks off exactly ONE hat (never one-shot), with
     // i-frames so a single shotgun blast can't strip several at once.
     if (w.hunterWolf) {
@@ -11138,6 +11332,7 @@
   // play first (see tickKeeperDeaths).
   function becomeGhost(who) {
     who.dying = false;
+    ghostWolfChance = Math.min(1, ghostWolfChance + 0.02); // each death raises ghost wolf chance by 2%
     if (who === player) {
       player.ghost = true;
       player.deaths = (player.deaths || 0) + 1;
@@ -11195,9 +11390,9 @@
   // Whose wallet pays for cross-keeper purchases (e.g. resurrect) — the
   // surviving keeper, since the ghost's money has already been transferred.
   function survivorWallet() {
-    if (!gameOpts.separateMoney) return { read: () => money, spend: n => { money -= n; } };
-    if (player.ghost) return { read: () => money2, spend: n => { money2 -= n; } };
-    return { read: () => money, spend: n => { money -= n; } };
+    if (!gameOpts.separateMoney) return { read: () => money, spend: n => { money -= n; }, balance: () => money };
+    if (player.ghost) return { read: () => money2, spend: n => { money2 -= n; }, balance: () => money2 };
+    return { read: () => money, spend: n => { money -= n; }, balance: () => money };
   }
 
   function tryKarmaResurrect() {
@@ -11317,8 +11512,9 @@
 
   const START_HATS = 3;   // hats the player starts with — the stack has no upper cap
   let playerHats = START_HATS;
-  let hatPrice = 5;       // Buy Hat cost — starts at $5, min $5
+  let hatPrice = 5;       // Buy Hat cost — starts at $5, grows $5 per purchase
   let hatsBought = 0;     // lifetime Buy Hat purchases — green hats can appear after 5
+  let revivePrice = 10;   // Resurrect Buddy cost — starts at $10, grows $10 per use
   let firstReviveFree = true; // the first Resurrect Buddy of a run is on the house
   let hatPackPrice = 100; // Buy Hat Pack (wave 80+) — 3 hats at once, ratchets up
   // Weapon Oil is single-tier. While active it widens the reload skill-check
@@ -11498,6 +11694,18 @@
         // Debug DPS dummy — tally damage, never dies, doesn't stop the pellet.
         if (w.dpsDummy) {
           w.dpsAccum = (w.dpsAccum || 0) + p.dmg; w.hurtT = 0.08;
+          p.didHit = true;
+          if (p.hit) p.hit.add(w);
+          if (--p.pierce <= 0) return false;
+          continue;
+        }
+        // Ghost wolf: any hit triggers the invisible flee — it never truly dies.
+        if (w.ghostWolf) {
+          if (!w.ghostFleeing) {
+            w.ghostFleeing = true;
+            w.ghostAlpha = 1.0;
+            spawnSmoke(w.x, w.y, 2);
+          }
           p.didHit = true;
           if (p.hit) p.hit.add(w);
           if (--p.pierce <= 0) return false;
@@ -11689,6 +11897,7 @@
         if (isHost) netSendSnapshot();
         else        netSendPosition();
       }
+      if (!isHost) lastSnapshotReceivedT += dt;
       // Silence-timeout fallback: if no message has arrived for a while the
       // buddy is presumed gone (tab close often skips conn.close).
       if (!netDisconnected && performance.now() - netLastRecv > NET_TIMEOUT_MS) {
@@ -12068,6 +12277,13 @@
     const isGuest = multiplayer && !isHost;
     if (!isGuest) {
       if (waveActive) waveElapsed += dt;
+      // Combo timer — expires 2s after the last kill and resets the counter.
+      if (comboT > 0) { comboT -= dt; if (comboT <= 0) { comboKills = 0; comboFloat = null; } }
+      if (comboFloat) {
+        comboFloat.screenYOff -= 28 * dt;
+        comboFloat.alpha      -= 0.55 * dt;
+        if (comboFloat.alpha <= 0) comboFloat = null;
+      }
       // Coops only lay during the first CHICKEN_SPAWN_WINDOW seconds of an
       // active wave. Outside that window (pre-game grace, late wave, between
       // waves) they hold off — keeps each round's flock to what the player
@@ -12309,6 +12525,10 @@
       // Surface the host's pause state so the guest knows why everything stopped.
       drawHostPausedOverlay();
     }
+    // Lag warning: if the guest hasn't received a snapshot in >0.8s, blink a banner.
+    if (multiplayer && !isHost && !netDisconnected && lastSnapshotReceivedT > 0.8) {
+      drawLagWarning();
+    }
 
     if (paused) {
       drawPauseWindow();
@@ -12316,9 +12536,23 @@
 
     if (gameOver && gameOverPanelDelayT <= 0 && !rocketLaunch) drawGameOverPanel();
 
+    // Kill-combo floating label — "x5", "x6", etc. in red, floats up from kill position.
+    if (comboFloat && gameStarted && !inMenu) {
+      const sp = worldToScreen(comboFloat.wx, comboFloat.wy);
+      const ty = sp.y + TILE_H / 2 + comboFloat.screenYOff;
+      const alpha = Math.min(1, comboFloat.alpha);
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.font = 'bold 14px "Lucida Console", Consolas, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#c04030';
+      ctx.fillText(comboFloat.text, sp.x, ty);
+      ctx.restore();
+    }
     // Aim contrast ring — drawn on top of everything so the crosshair cursor
     // is readable against any background (dark shadow ring + bright inner ring).
-    if (!isMobileMode && !inMenu) {
+    const SHOW_AIM_RING = false; // set true to re-enable
+    if (SHOW_AIM_RING && !isMobileMode && !inMenu) {
       ctx.save();
       ctx.beginPath();
       ctx.arc(mouse.x, mouse.y, 7, 0, Math.PI * 2);
@@ -12720,6 +12954,8 @@
     _entityItems.length = 0;
     const items = _entityItems;
     for (const c of corpses) items.push({ depth: c.x + c.y - 0.1, draw: () => drawCorpse(c) });
+    for (const s of stumps)  items.push({ depth: s.x + s.y + 1.6, draw: () => drawStump(s) });
+    for (const t of twigs)   items.push({ depth: t.x + t.y + 1.5, draw: () => drawTwig(t) });
     for (const t of trees)   items.push({ depth: t.x + t.y, draw: () => drawWithOcclusion(t, () => drawTree(t)) });
     for (const fm of farms) items.push({ depth: fm.x + fm.y - 0.1, draw: () => drawFarm(fm) });
     for (const c of coops) items.push({ depth: c.x + c.y, draw: () => drawCoop(c) });
@@ -13278,6 +13514,24 @@
   // Shown on the guest while the host has paused — the world is frozen on
   // the host's side, so this surfaces the reason instead of just appearing
   // unresponsive.
+  // Guest-side warning strip: shown when no snapshot has arrived for >0.8s.
+  function drawLagWarning() {
+    const blink = Math.floor(Date.now() / 400) % 2 === 0;
+    if (!blink) return;
+    ctx.save();
+    const bw = Math.min(280, W - 16);
+    const bh = 22;
+    const bx = (W - bw) / 2;
+    const by = 6;
+    ctx.fillStyle = 'rgba(180,60,0,0.88)';
+    ctx.fillRect(bx, by, bw, bh);
+    ctx.fillStyle = '#ffe080';
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 11px "Lucida Console", Consolas, monospace';
+    ctx.fillText('⚠ weak connection — waiting for host…', bx + bw / 2, by + 15);
+    ctx.restore();
+  }
+
   function drawHostPausedOverlay() {
     ctx.save();
     if (PIXELATE && document.body.classList.contains('pixelate-all')) {
@@ -15411,6 +15665,62 @@
     }
   }
 
+  function _decayAlpha(item) {
+    if (item.bornWave === undefined) return 1;
+    const age = wave - item.bornWave;
+    const fadeStart = item.decayWaves - 3; // start fading 3 waves before removal
+    if (age < fadeStart) return 1;
+    return Math.max(0, 1 - (age - fadeStart) / 3);
+  }
+
+  function drawStump(s) {
+    const alpha = _decayAlpha(s);
+    if (alpha <= 0) return;
+    const p = worldToScreen(s.x, s.y);
+    const cx = p.x, cy = p.y + TILE_H * 0.35;
+    const r  = Math.max(2, Math.round((3 + s.size * 3) * PIXEL * 0.5));
+    const rr = Math.max(1, Math.round(r * 0.4));
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#7a5030';
+    ctx.beginPath(); ctx.ellipse(cx, cy + 1, r, rr, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#c09060';
+    ctx.beginPath(); ctx.ellipse(cx, cy, r, rr, 0, 0, Math.PI * 2); ctx.fill();
+    if (r >= 4) {
+      ctx.strokeStyle = '#9a6840';
+      ctx.lineWidth = 0.6;
+      ctx.beginPath(); ctx.ellipse(cx, cy, r * 0.5, rr * 0.5, 0, 0, Math.PI * 2); ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawTwig(t) {
+    const alpha = _decayAlpha(t);
+    if (alpha <= 0) return;
+    const p = worldToScreen(t.x, t.y);
+    const cx = p.x, cy = p.y + TILE_H * 0.35;
+    const len = Math.round((t.len * TILE_W * 0.6) * 0.5) * 2;
+    const ca = Math.cos(t.ang), sa = Math.sin(t.ang);
+    const sx = (ca - sa) * len * 0.5;
+    const sy = (ca + sa) * len * 0.25;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = '#6a4020';
+    ctx.lineWidth = 1;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(cx - sx, cy - sy);
+    ctx.lineTo(cx + sx, cy + sy);
+    ctx.stroke();
+    const nx = sx * 0.4 + sy * 0.3;
+    const ny = sy * 0.4 - sx * 0.15;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + nx, cy + ny);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   function drawTree(t) {
     drawShadow(t.x, t.y, 0.55 * t.size);
     const p = worldToScreen(t.x, t.y);
@@ -15528,6 +15838,18 @@
     // Eye
     ctx.fillStyle = '#111';
     ctx.fillRect(cx + 6, cy - 13, 1, 1);
+    // Wings (shown while fluttering away from wall)
+    if ((c.flutterT || 0) > 0) {
+      const wBeat = Math.sin(c.bob * 3.5) * 5; // fast wing-beat
+      ctx.strokeStyle = 'rgba(220,220,200,0.9)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(cx - 5, cy - 5);
+      ctx.lineTo(cx - 12, cy - 9 - Math.abs(wBeat));
+      ctx.moveTo(cx + 5, cy - 5);
+      ctx.lineTo(cx + 12, cy - 9 - Math.abs(wBeat));
+      ctx.stroke();
+    }
     // Legs
     ctx.strokeStyle = '#e8a23b';
     ctx.lineWidth = 1.4;
@@ -15836,14 +16158,19 @@
     ctx.moveTo(cx + 8 * s, cy - 25 * s); ctx.lineTo(cx + 10 * s, cy - 31 * s); ctx.lineTo(cx + 12 * s, cy - 24 * s); ctx.closePath(); ctx.fill();
     ctx.beginPath();
     ctx.moveTo(cx + 13 * s, cy - 24 * s); ctx.lineTo(cx + 15 * s, cy - 30 * s); ctx.lineTo(cx + 16 * s, cy - 23 * s); ctx.closePath(); ctx.fill();
-    // Single glowing eye (the Tarkus look).
+    // Single glowing eye — pulses red rapidly during a charge dash.
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    const glow = 0.7 + 0.3 * Math.sin(Date.now() / 130);
-    ctx.fillStyle = 'rgba(255,90,40,' + glow.toFixed(2) + ')';
-    ctx.beginPath(); ctx.ellipse(cx + 12 * s, cy - 20 * s, 2.4 * s, 1.5 * s, 0, 0, Math.PI * 2); ctx.fill();
+    const dashing = (w.dashT || 0) > 0;
+    const glow = dashing
+      ? (0.6 + 0.4 * Math.sin(Date.now() / 40))   // fast angry red blink
+      : (0.7 + 0.3 * Math.sin(Date.now() / 130));  // slow idle orange pulse
+    const eyeColor = dashing ? ('rgba(255,0,0,' + glow.toFixed(2) + ')') : ('rgba(255,90,40,' + glow.toFixed(2) + ')');
+    ctx.fillStyle = eyeColor;
+    const eyeR = dashing ? 3.2 * s : 2.4 * s; // eye widens on charge
+    ctx.beginPath(); ctx.ellipse(cx + 12 * s, cy - 20 * s, eyeR, 1.5 * s, 0, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
-    ctx.fillStyle = '#111';
+    ctx.fillStyle = dashing ? '#330000' : '#111';
     ctx.fillRect(cx + 11.4 * s, cy - 20.6 * s, 1.2 * s, 1.2 * s);
 
     // --- MK-04 only: twin missile rack on the rear deck (SA-2 style). Hidden
@@ -16083,6 +16410,13 @@
     if (w.hunterWolf) { drawHunterWolf(w); return; }
     if (w.missileWolf) { drawMissileWolf(w); return; }
     if (w.crawler) { drawThingCrawler(w); return; }
+    // Ghost wolf: apply fade-out alpha while fleeing; skip draw when fully gone.
+    if (w.ghostWolf) {
+      const a = w.ghostFleeing ? (w.ghostAlpha || 0) : 1;
+      if (a <= 0) return;
+      ctx.save();
+      ctx.globalAlpha = a;
+    }
     const s = w.size || 1;
     drawShadow(w.x, w.y, 0.45 * s);
     const p = worldToScreen(w.x, w.y);
@@ -16446,6 +16780,7 @@
       ctx.moveTo(cx - cw, topY); ctx.lineTo(cx + cw, topY);
       ctx.stroke();
     }
+    if (w.ghostWolf) ctx.restore();
   }
 
   function drawPellet(p) {
@@ -16570,6 +16905,11 @@
     const lights = [];
     for (const c of coops) {
       lights.push({ x: c.x, y: c.y, r: 78, color: [255, 196, 96] });
+      // Missile fire — coop ablaze casts a strong flickering firelight.
+      if ((c.igniteT || 0) > 0) {
+        const flick = 1 + Math.sin(Date.now() * 0.019 + c.x * 3 - c.y * 2) * 0.18;
+        lights.push({ x: c.x, y: c.y, r: 110 * flick, color: [255, 115, 35] });
+      }
     }
     // Max-level Scarecrows glow with a low orange ember at night —
     // the "primed to explode" tell becomes a small lantern in the dark.
@@ -17492,10 +17832,11 @@
     player2.ghost = false;
     player.dying = false; player.downT = 0;
     player2.dying = false; player2.downT = 0;
-    // New-game-plus doubling from beating the boss (2^tier). Hats, money and
-    // barrel all scale; the mustache is kept (not reset here).
+    // New-game-plus doubling from beating the boss (2^tier). Hats and money
+    // double each loop; barrel uses a milder +30% per tier so the gun doesn't
+    // become absurdly huge on high-tier runs.
     const bonusMul = Math.pow(2, restartBonusTier);
-    barrelBonusMul = bonusMul;
+    barrelBonusMul = 1 + 0.3 * restartBonusTier;
     passedBoss = false; // fresh run hasn't passed the boss yet
     playerHats = START_HATS * bonusMul;
     hatColors.length = 0;
@@ -17554,6 +17895,8 @@
     player2.deathCause = '';
     hatPrice = 5;
     hatsBought = 0;
+    hatPrice = 5;
+    revivePrice = 10;
     firstReviveFree = true;
     hatPackPrice = 100;
     swordWolfSlain = false;
@@ -17792,11 +18135,15 @@
   // Wipe every entity array + run-progress scalar so a fresh game starts
   // clean after the menu demo (or after a previous session in MP).
   function resetWorld() {
+    comboKills = 0; comboT = 0; comboFloat = null;
+    ghostWolfChance = 0;
     coops.length = 0;
     chickens.length = 0;
     wolves.length = 0;
     pellets.length = 0;
     corpses.length = 0;
+    stumps.length = 0;
+    twigs.length = 0;
     fences.length = 0;
     farms.length = 0;
     dogs.length = 0;
@@ -17808,6 +18155,7 @@
     smoke.length = 0;
     blasts.length = 0;
     flyHats.length = 0;
+    pendingHatLandings.length = 0;
     p2Cameo = null;
     p2CameoUsed = false;
     radarEmitT = 0;
@@ -17998,6 +18346,7 @@
       ['spawn-thing',     'Spawn thing wolf',      'Spawn a single thing wolf (its head scuttles off on death)'],
       ['spawn-missilewolf','Spawn missile wolf',   'Spawn a stationary missile wolf that bombards coops (wave 101+ enemy)'],
       ['spawn-hunterwolf', 'Spawn hunter wolf',    'Spawn the hunter-wolf cryptid (keeper reskin that shoots back)'],
+      ['spawn-ghostwolf',  'Spawn ghost wolf',     'Spawn a ghost wolf (vanishes silently when shot; chance grows with player deaths)'],
       ['spawn-parachute', 'Spawn parachute wolf',  'Drop a single wolf in by parachute'],
       ['spawn-p2cameo',   'Spawn buddy cameo',        'Trigger the rare Player-2 cameo walk-through'],
       ['karma-max',       'Max karma',             'Slam karma to +' + (typeof KARMA_MAX !== 'undefined' ? KARMA_MAX : 'MAX')],
@@ -18096,6 +18445,9 @@
         spawnMissileWolf();
       } else if (action === 'spawn-hunterwolf') {
         spawnHunterWolf();
+      } else if (action === 'spawn-ghostwolf') {
+        ghostWolfChance = Math.max(ghostWolfChance, 0.01); // ensure at least 1 death worth
+        spawnGhostWolf();
       } else if (action === 'spawn-parachute') {
         spawnParachuteWolf();
       } else if (action === 'spawn-p2cameo') {
@@ -18603,6 +18955,7 @@
       }
       // Host → guest: full world snapshot. Guest replaces local state wholesale.
       if (msg.type === 'snapshot' && multiplayer && !isHost) {
+        lastSnapshotReceivedT = 0; // reset lag timer on each successful snapshot
         applySnapshot(msg);
         return;
       }
