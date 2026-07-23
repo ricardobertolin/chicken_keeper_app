@@ -610,7 +610,7 @@
         </button>
         <button type="button" class="lobby-opt" data-opt="individualUpgrades" data-on="0">
           <span class="lobby-opt-label">Upgrades</span>
-          <span class="lobby-opt-val">HOST PICKS</span>
+          <span class="lobby-opt-val">INDIVIDUAL</span>
         </button>
       </div>
       <p class="status" id="hostStatus">Connecting to broker…</p>
@@ -663,6 +663,7 @@
       <span class="debug-label">Combat</span>
       <button data-debug="kill-wolves">Kill all wolves</button>
       <button data-debug="toggle-wave-autostart" id="debug-wave-autostart-btn">Pause wave start</button>
+      <button data-debug="force-wave-start" title="Start the next wave right now (ignores the coop/timer gate)">Force wave start</button>
       <button data-debug="add-hat">Add hat</button>
       <button data-debug="add-hat-leprechaun">Leprechaun hat</button>
       <button data-debug="add-hat-witch">Witch hat</button>
@@ -674,6 +675,7 @@
       <button data-debug="force-night">Force Night of the Wolf</button>
       <button data-debug="buy-all-upgrades">Buy all upgrades</button>
       <button data-debug="give-upgrade">Give upgrade (+bonus)</button>
+      <button data-debug="normal-reload" title="Clear Nerd/Jock Reload — back to the normal reload">Normal Reload</button>
       <button data-debug="cycle-upgrade-target" id="debug-target-btn">Target: P1</button>
       <button data-debug="toggle-parry" id="debug-parry-btn">Parry mode: ON</button>
       <button data-debug="toggle-fast-mode" id="debug-fast-mode-btn">Fast mode: OFF</button>
@@ -2687,7 +2689,7 @@
   const gameOpts = {
     friendlyFire: false,    // can players damage each other's hats?
     separateMoney: false,   // each player has their own pot vs sharing one
-    individualUpgrades: false, // each player picks their own gun upgrades
+    individualUpgrades: true, // each player picks their own gun upgrades (default; lobby can flip to host-picks)
   };
   // Player2's wallet (used in separateMoney mode) and gun-upgrade ladder
   // (used in individualUpgrades mode). Both are kept in sync with the host.
@@ -11877,34 +11879,43 @@
     if (now - last < TARGET_FRAME_MS) { requestAnimationFrame(loop); return; }
     const dt = Math.min(0.05, (now - last) / 1000);
     last = now;
-    update(dt);
-    // The cutscene + wipe are host-authoritative in co-op: the guest mirrors
-    // them from the snapshot (rocketLaunch / fade), so it must NOT advance them
-    // locally or it would double-drive the animation.
-    if (!(multiplayer && !isHost)) {
-      updateRocketLaunch(dt); // post-boss restart cutscene (ticks even when frozen)
-      updateFade(dt);         // black screen wipe — ticks even when frozen
-    }
-    // Refresh player1's weapon-mirror on the player object so the keeper-draw
-    // helpers can read everything from one place.
-    syncP1Weapon();
-    // Net sync runs even when update() bails out (paused / upgrade / gameOver)
-    // so the guest keeps receiving fresh state and game-over propagates.
-    if (gameStarted && multiplayer && conn && conn.open) {
-      netSendT -= dt;
-      if (netSendT <= 0) {
-        netSendT = 0.05;
-        if (isHost) netSendSnapshot();
-        else        netSendPosition();
+    // A single bad frame must never permanently freeze the game. Any uncaught
+    // exception here would stop the rAF chain dead (the reschedule is the last
+    // line), hard-locking the client — this bit the guest occasionally right
+    // after it was killed. Catch, log, and keep the loop alive so at worst one
+    // frame is skipped instead of the whole game hanging.
+    try {
+      update(dt);
+      // The cutscene + wipe are host-authoritative in co-op: the guest mirrors
+      // them from the snapshot (rocketLaunch / fade), so it must NOT advance them
+      // locally or it would double-drive the animation.
+      if (!(multiplayer && !isHost)) {
+        updateRocketLaunch(dt); // post-boss restart cutscene (ticks even when frozen)
+        updateFade(dt);         // black screen wipe — ticks even when frozen
       }
-      if (!isHost) lastSnapshotReceivedT += dt;
-      // Silence-timeout fallback: if no message has arrived for a while the
-      // buddy is presumed gone (tab close often skips conn.close).
-      if (!netDisconnected && performance.now() - netLastRecv > NET_TIMEOUT_MS) {
-        handlePeerGone('timeout');
+      // Refresh player1's weapon-mirror on the player object so the keeper-draw
+      // helpers can read everything from one place.
+      syncP1Weapon();
+      // Net sync runs even when update() bails out (paused / upgrade / gameOver)
+      // so the guest keeps receiving fresh state and game-over propagates.
+      if (gameStarted && multiplayer && conn && conn.open) {
+        netSendT -= dt;
+        if (netSendT <= 0) {
+          netSendT = 0.05;
+          if (isHost) netSendSnapshot();
+          else        netSendPosition();
+        }
+        if (!isHost) lastSnapshotReceivedT += dt;
+        // Silence-timeout fallback: if no message has arrived for a while the
+        // buddy is presumed gone (tab close often skips conn.close).
+        if (!netDisconnected && performance.now() - netLastRecv > NET_TIMEOUT_MS) {
+          handlePeerGone('timeout');
+        }
       }
+      render();
+    } catch (err) {
+      console.error('[loop] frame error — skipped, loop kept alive:', err);
     }
-    render();
     requestAnimationFrame(loop);
   }
 
@@ -17813,6 +17824,13 @@
     // Invalidate any in-flight spawn timeouts from the previous run.
     runGen++;
     pendingSpawns = 0;
+    // Wave scheduling is reset here too (belt-and-suspenders with resetWorld):
+    // a fresh run must always let waves auto-start again. In particular
+    // waveAutoStartPaused is a debug toggle that otherwise persists across every
+    // restart — leaving it on would silently block waves after a boss restart.
+    waveAutoStartPaused = false;
+    waveActive = false;
+    waveTimer = 12;
     paused = false;
     upgradeMode = false;
     upgradeOptions = [];
@@ -18190,6 +18208,9 @@
     wave = 0;
     waveTimer = 12;
     waveActive = false;
+    // Debug wave-pause never carries into a fresh world — otherwise a toggle
+    // left on would block every wave for the rest of the session.
+    waveAutoStartPaused = false;
     waveElapsed = 0;
     pendingSpawns = 0;
     coopsPlaced = 0;
@@ -18259,6 +18280,27 @@
     }
     refreshTargetButton();
 
+    // "Buy all upgrades" is a big, irreversible bulk-grant — require 3 presses
+    // in a row to fire, with the button counting down the presses left. A few
+    // seconds of inactivity disarms it so a stray click never leaves it primed.
+    const buyAllBtn = root.querySelector('button[data-debug="buy-all-upgrades"]');
+    const BUY_ALL_LABEL = buyAllBtn ? buyAllBtn.textContent : 'Buy all upgrades';
+    let buyAllPresses = 0, buyAllResetTimer = null;
+    function refreshBuyAllButton() {
+      if (!buyAllBtn) return;
+      if (buyAllPresses <= 0) {
+        buyAllBtn.textContent = BUY_ALL_LABEL;
+        buyAllBtn.style.background = '';
+      } else {
+        buyAllBtn.textContent = 'Press ' + (3 - buyAllPresses) + '× more…';
+        buyAllBtn.style.background = 'rgba(200,120,40,0.8)';
+      }
+    }
+    function disarmBuyAll() {
+      buyAllPresses = 0;
+      if (buyAllResetTimer) { clearTimeout(buyAllResetTimer); buyAllResetTimer = null; }
+      refreshBuyAllButton();
+    }
 
     toggle.addEventListener('click', () => root.classList.toggle('open'));
 
@@ -18372,15 +18414,23 @@
       // guest we forward the click to the host and let them apply it; the
       // next snapshot will reflect the change on the guest's screen.
       if (multiplayer && !isHost && conn && conn.open) {
-        try {
-          conn.send({
-            type: 'debug-action',
-            action: action,
-            amount: btn.dataset.amount,
-            id: btn.dataset.id,
-          });
-        } catch (_) {}
-        return;
+        // The target selector (P1/P2/BOTH) is pure local UI state — run it on
+        // the guest so its own button reflects the choice, then fall through
+        // WITHOUT forwarding. Every other action is forwarded to the host, and
+        // carries the guest's chosen target so the host applies it to the right
+        // keeper instead of defaulting to its own (P1) selection.
+        if (action !== 'cycle-upgrade-target') {
+          try {
+            conn.send({
+              type: 'debug-action',
+              action: action,
+              amount: btn.dataset.amount,
+              id: btn.dataset.id,
+              target: debugUpgradeTarget,
+            });
+          } catch (_) {}
+          return;
+        }
       }
       if (action === 'money-add') {
         const baseAmt = parseInt(btn.dataset.amount, 10);
@@ -18500,6 +18550,15 @@
         waveAutoStartPaused = !waveAutoStartPaused;
         refreshWaveAutoStartButton();
         toast(waveAutoStartPaused ? 'Wave auto-start paused' : 'Wave auto-start resumed', 1.0);
+      } else if (action === 'force-wave-start') {
+        // Kick off the next wave immediately, bypassing the coop/timer gate.
+        // Handy when a restart leaves the auto-start unexpectedly stuck.
+        if (waveActive) {
+          toast('A wave is already active', 1.0);
+        } else {
+          startWave(debugFastMode ? 5 : 1);
+          toast('Force-started wave ' + wave, 1.0);
+        }
       } else if (action === 'toggle-immortal') {
         immortal = !immortal;
         refreshImmortalButton();
@@ -18564,6 +18623,18 @@
         refreshTargetButton();
         toast('Debug upgrade target: ' + debugUpgradeTarget.toUpperCase(), 0.9);
       } else if (action === 'buy-all-upgrades') {
+        // Confirm-by-repetition: the first two presses just arm the button and
+        // update the countdown; only the third actually grants everything.
+        buyAllPresses++;
+        if (buyAllResetTimer) clearTimeout(buyAllResetTimer);
+        if (buyAllPresses < 3) {
+          refreshBuyAllButton();
+          buyAllResetTimer = setTimeout(disarmBuyAll, 3000);
+          const left = 3 - buyAllPresses;
+          toast('Buy all — press ' + left + ' more time' + (left > 1 ? 's' : '') + ' to confirm', 0.9);
+          return;
+        }
+        disarmBuyAll();
         // Grant every LEVELED upgrade across ALL tiers (starter, wave 15, wave
         // 30, …) up to its cap. Temporarily jump `wave` past every gate so the
         // wave-locked tiers unlock, while each upgrade's own available() still
@@ -18595,6 +18666,14 @@
         weaponOilCharges = 1; weaponOilWaves = WEAPON_OIL_WAVES; advancedOilWaves = 1;
         recomputeJamChance();
         toast('Bought all upgrades → ' + debugUpgradeTarget.toUpperCase(), 1.4);
+      } else if (action === 'normal-reload') {
+        // Undo Nerd/Jock Reload — both are P1/local-only joke reloads with no
+        // in-game way back once picked. Clear the levels and abort any active
+        // mini-game so the plain reload returns.
+        upgradeLevels.nerdReload = 0;
+        upgradeLevels.jockReload = 0;
+        cancelReloadMinigame();
+        toast('Reload back to normal', 1.0);
       } else if (action === 'give-upgrade') {
         // Pop the upgrade screen right now, and guarantee the bonus pick fires
         // after the first choice (resetting the once-per-wave gate + forcing it).
@@ -18917,9 +18996,17 @@
         if (msg.amount != null) btn.dataset.amount = msg.amount;
         if (msg.id != null)     btn.dataset.id = msg.id;
         btn.style.display = 'none';
+        // Apply the action against the guest's chosen target, not the host's
+        // local selection. Temporarily swap in the forwarded target for the
+        // synthetic click, then restore the host's own choice.
+        const savedTarget = debugUpgradeTarget;
+        if (msg.target === 'p1' || msg.target === 'p2' || msg.target === 'both') {
+          debugUpgradeTarget = msg.target;
+        }
         root.appendChild(btn);
         btn.click();
         root.removeChild(btn);
+        debugUpgradeTarget = savedTarget;
         return;
       }
       // Guest → host: just the guest's keeper position.
@@ -19503,11 +19590,13 @@
       const on = btn.dataset.on === '1';
       const next = !on;
       btn.dataset.on = next ? '1' : '0';
-      gameOpts[opt] = next;
+      // Upgrades is inverted vs the highlight: default (unlit) is INDIVIDUAL,
+      // and lighting it up (yellow) switches to HOST PICKS.
+      gameOpts[opt] = opt === 'individualUpgrades' ? !next : next;
       const labels = {
         friendlyFire:       next ? 'ON' : 'OFF',
         separateMoney:      next ? 'SEPARATE' : 'SHARED',
-        individualUpgrades: next ? 'INDIVIDUAL' : 'HOST PICKS',
+        individualUpgrades: next ? 'HOST PICKS' : 'INDIVIDUAL',
       };
       btn.querySelector('.lobby-opt-val').textContent = labels[opt];
     });
