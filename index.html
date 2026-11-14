@@ -513,6 +513,222 @@
     font-size: 11px; letter-spacing: 0;
     border-radius: 50%;
   }
+
+  /* ---------- Upgrade tree overlay ----------
+     A full-screen scrolling map of every upgrade, top (wave 1) to bottom
+     (wave 51). Opened from the title menu and from the pause panel, so it
+     deliberately sits above both (#menu is z-index 20). */
+  /* Dimmed backdrop; the tree itself is a window centred inside it, not a
+     full-screen takeover — the game stays visible around the edges. */
+  #skilltree {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.68);
+    color: #fff;
+    font-family: "Lucida Console", Consolas, monospace;
+  }
+  #skilltree.is-open { display: flex; }
+  #skilltree .st-window {
+    display: flex;
+    flex-direction: column;
+    width: 560px;
+    max-width: calc(100vw - 32px);
+    /* Capped so the tier rows wrap onto more lines and the body scrolls,
+       rather than the window growing to fit everything. */
+    height: 460px;
+    max-height: calc(100vh - 32px);
+    background: rgba(15, 18, 24, 0.98);
+    border: 3px solid #ffd166;
+    outline: 3px solid #1a1a1a;
+  }
+  #skilltree .st-head {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 10px 14px;
+    border-bottom: 2px solid #ffd166;
+  }
+  #skilltree .st-title {
+    font-size: 16px;
+    font-weight: bold;
+    color: #ffd166;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+  #skilltree .st-count {
+    font-size: 14px;
+    color: #fff;
+    letter-spacing: 1px;
+    padding: 2px 9px;
+    border: 2px solid rgba(255, 209, 102, 0.5);
+  }
+  #skilltree .st-count b { color: #ffd166; }
+  #skilltree .st-close {
+    margin-left: auto;
+    padding: 5px 13px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffd166;
+    border: 2px solid #ffd166;
+    font-family: inherit;
+    font-size: 13px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+  #skilltree .st-close:hover { background: rgba(255, 209, 102, 0.24); }
+
+  /* Scroll container — the tree starts at the top and runs downward. */
+  #skilltree .st-body {
+    flex: 1 1 auto;
+    position: relative;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 14px 14px 28px 14px;
+  }
+  /* Blocky scrollbar to match the pixel art — hard edges, no rounding.
+     Deliberately NO `scrollbar-width` / `scrollbar-color` here: Chrome 121+
+     honours those standard properties INSTEAD of the ::-webkit-scrollbar
+     rules below and paints its own rounded thumb, which is what made this
+     look round. Leaving them out keeps the square custom scrollbar. */
+  #skilltree .st-body::-webkit-scrollbar {
+    width: 14px;
+    background: #0e1116;
+  }
+  #skilltree .st-body::-webkit-scrollbar-track {
+    background: #0e1116;
+    border-left: 2px solid #2a2f38;
+    border-radius: 0;
+  }
+  #skilltree .st-body::-webkit-scrollbar-thumb {
+    background: #ffd166;
+    /* Dark inset ring reads as a chunky pixel block rather than a bar. */
+    border: 2px solid #1a1a1a;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  #skilltree .st-body::-webkit-scrollbar-thumb:hover { background: #ffdd8a; }
+  #skilltree .st-body::-webkit-scrollbar-thumb:active { background: #e8b94a; }
+  /* Square off the leftovers so nothing rounds at the ends. */
+  #skilltree .st-body::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+  #skilltree .st-body::-webkit-scrollbar-corner { background: #0e1116; }
+  #skilltree .st-links {
+    position: absolute;
+    top: 0; left: 0;
+    pointer-events: none;
+    overflow: visible;
+  }
+  #skilltree .st-tiers { position: relative; }
+  #skilltree .st-tier { margin: 0 0 26px 0; }
+  #skilltree .st-tier-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 10px 0;
+    font-size: 14px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #ffd166;
+  }
+  #skilltree .st-tier-label span.st-tier-sub {
+    font-size: 12px;
+    letter-spacing: 1px;
+    text-transform: none;
+    color: #9aa0a8;
+  }
+  #skilltree .st-tier-label::after {
+    content: '';
+    flex: 1 1 auto;
+    height: 2px;
+    background: rgba(255, 209, 102, 0.28);
+  }
+  #skilltree .st-tier.is-locked .st-tier-label { color: #6a7078; }
+  #skilltree .st-tier.is-locked .st-tier-label::after { background: rgba(255, 255, 255, 0.10); }
+  #skilltree .st-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  /* Cards are OPAQUE on purpose: the connector lines are painted underneath
+     them, and a translucent card would let those lines show through its face
+     and read as if they were cutting across the card. */
+  #skilltree .st-node {
+    position: relative;
+    width: 136px;
+    padding: 6px 8px 7px 8px;
+    background: #14181f;
+    border: 2px solid #6a7078;
+    color: #6a7078;
+  }
+  #skilltree .st-node-name {
+    font-size: 13px;
+    font-weight: bold;
+    color: #fff;
+    line-height: 1.2;
+  }
+  /* Sealed tier placeholder — spans the row, names nothing. */
+  #skilltree .st-sealed {
+    width: 100%;
+    border-style: dashed;
+    border-color: #4a5058;
+    text-align: center;
+    color: #6a7078;
+    font-size: 12px;
+    letter-spacing: 3px;
+    padding: 7px 8px;
+  }
+  #skilltree .st-node-foot {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 5px;
+    font-size: 10px;
+    letter-spacing: 1px;
+    min-height: 10px;
+  }
+  #skilltree .st-pips { display: flex; gap: 3px; }
+  #skilltree .st-pip {
+    width: 10px; height: 10px;
+    border: 2px solid currentColor;
+    opacity: 0.35;
+  }
+  #skilltree .st-pip.is-on { background: currentColor; opacity: 1; }
+  #skilltree .st-node-state { margin-left: auto; text-transform: uppercase; }
+  /* State colouring — the border, pips and status text all share it. Kept
+     opaque (pre-blended over the card background) so the connector lines
+     underneath stay hidden behind the card. */
+  #skilltree .st-node.is-maxed   { border-color: #5fd0ff; color: #5fd0ff; background: #1b2a35; }
+  #skilltree .st-node.is-owned   { border-color: #6fd09a; color: #6fd09a; background: #1c292a; }
+  #skilltree .st-node.is-open    { border-color: #ffd166; color: #ffd166; background: #292925; }
+  /* Past the cap — matches the purple the upgrade card uses for a maxed
+     Longer Barrel, so the two screens agree. */
+  #skilltree .st-node.is-over    { border-color: #b06fff; color: #b06fff; background: #241b33; }
+  #skilltree .st-node.is-over .st-node-name { color: #d9bcff; }
+  /* The either/or half that was given up: greyed out, still readable. */
+  #skilltree .st-node.is-pairlocked { border-color: #3f444c; color: #5c6068; background: #101319; }
+  #skilltree .st-node.is-pairlocked .st-node-name { color: #767c85; }
+  #skilltree .st-node.is-pairlocked .st-pip { opacity: 0.25; }
+  #skilltree .st-node.is-blocked { border-color: #ff9d4d; color: #ff9d4d; }
+  #skilltree .st-node.is-locked  { border-color: #4a5058; color: #5c6068; }
+  #skilltree .st-node.is-locked .st-node-name,
+  #skilltree .st-node.is-blocked .st-node-name { color: #c8ccd2; }
+  #skilltree .st-node.is-supply { border-style: dashed; }
+  #skilltree .st-empty {
+    padding: 40px 0;
+    text-align: center;
+    color: #9aa0a8;
+    font-size: 13px;
+  }
+  @media (max-width: 560px) {
+    #skilltree .st-node { width: calc(50% - 5px); }
+    #skilltree .st-title { font-size: 14px; }
+    #skilltree .st-body { padding: 10px 10px 24px 10px; }
+  }
 </style>
 </head>
 <body class="in-menu pixelate-all">
@@ -648,6 +864,22 @@
 
 <div id="toast"></div>
 <div id="buildhint"><kbd>E</kbd> to build a coop</div>
+
+<!-- Upgrade tree — the full progression map, top (wave 1) to bottom (wave 51).
+     Built by buildSkillTree() from the SKILL_TREE table. -->
+<div id="skilltree">
+  <div class="st-window">
+    <div class="st-head">
+      <span class="st-title">Upgrade Tree</span>
+      <span class="st-count" id="st-count">&mdash;</span>
+      <button type="button" class="st-close" id="st-close">Close</button>
+    </div>
+    <div class="st-body" id="st-body">
+      <svg class="st-links" id="st-links" aria-hidden="true"></svg>
+      <div class="st-tiers" id="st-tiers"></div>
+    </div>
+  </div>
+</div>
 
 <!-- DEBUG PANEL — remove for production -->
 <div id="debug">
@@ -1631,13 +1863,13 @@
     horn(now + beat * 2, 196, 0.22); // G3
     horn(now + beat * 3, 233, 0.4);  // A#3 — the call resolves up a minor third
     // Late-game intensity: the march gains extra brass as the waves climb.
-    // Wave 50+ extends the call one note higher; wave 100+ piles on a blaring
+    // Wave 25+ extends the call one note higher; wave 50+ piles on a blaring
     // climax over a low war-drone so each tier feels more menacing.
-    if (wave >= 50) {
+    if (wave >= 25) {
       stomp(now + beat * 4, 110);      // A2 — an extra marching beat
       horn(now + beat * 4, 277, 0.32); // C#4 — pushes the call higher
     }
-    if (wave >= 100) {
+    if (wave >= 50) {
       stomp(now + beat * 5, 123);        // B2
       horn(now + beat * 4.5, 330, 0.30); // E4
       horn(now + beat * 5,   392, 0.52); // G4 — a blaring climax
@@ -1839,6 +2071,26 @@
     o.start(now); o.stop(now + 0.18);
   }
 
+  // Short rising bell for the "new upgrades unlocked" banner — deliberately
+  // lighter than the Metaverse fanfare so it doesn't steal the wave-start cue.
+  function playUnlockChime() {
+    const ctx = getAudio();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    [659, 880, 1175].forEach((f, i) => {
+      const t = now + i * 0.09;
+      const o = ctx.createOscillator();
+      o.type = 'triangle';
+      o.frequency.value = f;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.13, t + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
+      o.connect(g); g.connect(ctx.destination);
+      o.start(t); o.stop(t + 0.36);
+    });
+  }
+
   function playMetaverse() {
     const ctx = getAudio();
     if (!ctx) return;
@@ -1997,7 +2249,7 @@
     // Title/lobby menu is up — let inputs (join code) work, but no game keys.
     if (inMenu) return;
     trackDebugPhrase(e.key);
-    // Boss endscreen — Continue into wave 101+, or Restart. Host-driven in co-op.
+    // Boss endscreen — Continue into wave 51+, or Restart. Host-driven in co-op.
     if (endScreen) {
       const k = e.key.toLowerCase();
       if (multiplayer && !isHost) {
@@ -2185,6 +2437,7 @@
           if (mouse.x >= r.x && mouse.x <= r.x + r.w &&
               mouse.y >= r.y && mouse.y <= r.y + r.h) {
             if (key === 'resume') togglePause();
+            if (key === 'tree')   openSkillTree(); // stays paused behind the overlay
             if (key === 'quit')   quitToMenu();
             return;
           }
@@ -2524,7 +2777,22 @@
         return false;
       }
       if (paused && pauseBtnRects) {
-        hitTest(pauseBtnRects, { resume: () => togglePause(), quit: () => quitToMenu() });
+        if (hitTest(pauseBtnRects, {
+          resume: () => togglePause(),
+          tree:   () => openSkillTree(),
+          quit:   () => quitToMenu(),
+        })) return;
+        // Tab-switch button — touch had no handler for it, so mobile players
+        // could never reach the UPGRADES tab from the pause panel.
+        if (pauseTabRect && hitTest({ tab: pauseTabRect }, {
+          tab: () => { pauseTab = pauseTab === 'status' ? 'upgrades' : 'status'; pauseUpgradeScroll = 0; },
+        })) return;
+        // Anywhere else inside the upgrade list scrolls it: tapping the lower
+        // half pages down, the upper half pages up (no wheel on touch).
+        if (pauseTab === 'upgrades') {
+          e.preventDefault();
+          pauseUpgradeScroll = Math.max(0, (pauseUpgradeScroll || 0) + (cy > H / 2 ? 1 : -1));
+        }
         return;
       }
       if (gameOverBtnRects) {
@@ -2807,10 +3075,10 @@
   const MELEE_ANIM_DUR = 0.28; // duration of the white melee-swing arc
   // Wolf Heist upgrade — a fed wolf may carry its kill off the map.
   const SNATCH_SPEED_MUL = 0.7; // a chicken-laden wolf flees this much slower
-  // Fat Chickens upgrade (wave 30) — once taken, chickens fatten every few
+  // Fat Chickens upgrade (wave 15) — once taken, chickens fatten every few
   // waves: each tier pays more gold but slows them; at max fatness a slain
   // chicken may burst, blasting nearby wolves.
-  const FAT_UNLOCK_WAVE = 30;
+  const FAT_UNLOCK_WAVE = 15;
   const FAT_MAX = 5;               // number of fatness tiers (= max upgrade level)
   const FAT_GOLD_PER_TIER = 1;     // extra $ per surviving chicken per fat tier
   const FAT_SPEED_PER_TIER = 0.05; // chicken move-speed lost per fat tier
@@ -2826,16 +3094,16 @@
   const ROCKET_SMOKE_INTERVAL = 0.025; // seconds between smoke puffs on a rocket's trail
   const ROCKET_MIDAIR_BOOM    = 0.7;   // per-second chance a rocket just cooks off mid-flight
   const ROCKET_MIN_FLIGHT     = 0.35;  // it must fly at least this long before a mid-air cook-off can roll, so it never detonates right on top of the keeper
-  // Explosive Mine upgrade (wave 101+): a stealthy tile-bound bomb that
+  // Explosive Mine upgrade (wave 40+): a stealthy tile-bound bomb that
   // detonates on anyone walking on it. Per-level tables give blast radius
   // and per-wolf damage; max level paints a faint warning ring so the
   // player can find their own mines.
   const MINE_COST = 25;
-  const MINE_UNLOCK_WAVE = 80;
+  const MINE_UNLOCK_WAVE = 40;
   const MINE_TRIGGER_R = 0.55;     // distance at which an entity sets off the mine
   const MINE_RADIUS = [0, 1.6, 1.9, 2.2, 2.5, 3.0]; // blast radius (tiles) by level
   const MINE_DMG    = [0, 4, 6, 9, 12, 16];          // damage per wolf inside the blast
-  // Sabotage upgrade (wave 101+): per-level chance a fresh wolf hatches with
+  // Sabotage upgrade (wave 40+): per-level chance a fresh wolf hatches with
   // a glitching "defective" core — it wanders aimlessly with a flickering
   // eye instead of hunting. At max level a defective wolf has a small extra
   // roll to turn turncoat (blue eye, attacks other wolves).
@@ -2858,7 +3126,7 @@
   const SIZE_MATTERS_LIFE_STEP   = 1.8;  // +seconds of pellet lifetime per level (1s → 10s over 5)
   const SIZE_MATTERS_LASER_RANGE = 7;    // +tiles of laser reach per level (lasers don't use lifetime)
   const SIZE_MATTERS_BOUNCE_PAD  = 1.0;  // how far past the map edge the invisible bounce wall sits
-  // Rocket Boots (wave 101+) — per-second roll to kick into flight while at
+  // Rocket Boots (wave 40+) — per-second roll to kick into flight while at
   // a full sprint. Flying = no fence collision, mine immunity, melee bites
   // miss. Each upgrade level lifts the trigger chance + duration.
   const ROCKET_BOOTS_CHANCE     = [0, 0.018, 0.034, 0.055, 0.080, 0.12]; // per-second roll while sprinting (nerfed)
@@ -2867,7 +3135,7 @@
   const ROCKET_BOOTS_TRAMPLE    = [0, 0.6, 0.9, 1.3, 1.8, 2.5]; // damage/sec dealt to wolves under the flames
   const ROCKET_BOOTS_SPEED    = 1.45;   // movement-speed multiplier while flying
   const ROCKET_BOOTS_PARTICLE = 0.04;   // seconds between rocket trail puffs
-  // Last Stand (wave 101+) — crouch buff after standing still. Damage and
+  // Last Stand (wave 40+) — crouch buff after standing still. Damage and
   // fire-rate ramp once the player has held their ground for the charge.
   // At max, holding still without shooting for an extra window cloaks the
   // keeper entirely (untargetable + translucent render).
@@ -2875,18 +3143,18 @@
   const LAST_STAND_DMG_MUL       = [1, 1.25, 1.5, 1.8, 2.1, 2.5];
   const LAST_STAND_FIRE_MUL      = [1, 0.90, 0.80, 0.70, 0.60, 0.50]; // multiplier on post-shot reloadT
   const LAST_STAND_STEALTH_DELAY = 7.0;    // extra seconds of no-shooting at max for cloak
-  // Homing Bullets (wave 101+) — slow pellets that ALWAYS hunt: after firing,
+  // Homing Bullets (wave 40+) — slow pellets that ALWAYS hunt: after firing,
   // each one keeps looking for the nearest wolf to chase (no lock roll). Tier
   // scales how sharply it can turn and how far it seeks.
   const HOMING_SPEED_MUL   = 0.55;  // multiplier on the pellet's initial speed
   const HOMING_TURN_BY_LVL = [0, 3.0, 4.0, 5.0, 6.5, 8.0]; // radians/sec turn rate by homing level
   const HOMING_SEEK_BY_LVL = [0, 9, 11, 13, 15, 18];       // tiles within which it hunts a target
   const HOMING_LIFE_MUL    = 2.2;   // pellet life multiplier so slower bullets still have reach
-  // Laser Bullets (wave 101+) — instant straight beam, like the ranged wolf's.
+  // Laser Bullets (wave 40+) — instant straight beam, like the ranged wolf's.
   // Per level scales damage + reach. Replaces the pellet burst entirely.
   const LASER_DMG          = [0, 2, 3, 4, 5, 7];
   const LASER_RANGE        = [0, 5, 6.2, 7.4, 8.6, 9.8]; // gentler per-level range gain (+1.2 vs +1.5)
-  // Cryptid Radar (wave 101+) — boosts the spawn chance of every rare wolf
+  // Cryptid Radar (wave 40+) — boosts the spawn chance of every rare wolf
   // variant (fox, sword wolf, hatted wolf, thing wolf) per level, and pings a
   // warning when one wanders near. Visually plants an antenna on about half
   // the coops so the camp reads as "tuned-in".
@@ -2897,7 +3165,7 @@
   // doubles the rare-wolf chance — and that's also where range becomes full-map.
   const CRYPTID_RADAR_MUL   = [1.0, 1.0, 1.0, 1.0, 1.0, 2.0]; // rare-wolf chance × (MAX doubles it)
   const CRYPTID_RADAR_RANGE = [0, 6, 9, 13, 18, Infinity];    // detection range per level (tiles)
-  // Rooftopper (wave 101+) — sniper allies who perch on the tallest coops.
+  // Rooftopper (wave 40+) — sniper allies who perch on the tallest coops.
   // Slow cadence, high damage, scaling with the coop's floor count. Each
   // upgrade tier adds one rooftopper, prioritising taller coops first.
   const ROOFTOP_BASE_COOLDOWN = 4.5;    // slower cadence — these are heavy, deliberate shots
@@ -2936,7 +3204,7 @@
   const dummies = [];   // {x,y,hp,maxHp,hurtT} — training dummies that wolves attack
   const statues = [];   // {x,y,hp,maxHp,hurtT} — fake chickens wolves increasingly ignore
   const debris  = [];   // {x,y,kind,hp,t} — a destroyed fence's wreckage; worker chickens rebuild from these
-  const mines   = [];   // {x,y,level,_decoy} — explosive mines that detonate on contact (wave 101+ upgrade)
+  const mines   = [];   // {x,y,level,_decoy} — explosive mines that detonate on contact (wave 40+ upgrade)
   const holes   = [];   // {x,y} — scorched craters left by detonated mines; cleared next wave
   const scorches = [];  // {x,y,t,life,r} — temporary scorch marks any explosion burns into the grass
   const rooftoppers = []; // {x,y,coop,fireT,dir,facingLeft,alive} — sniper allies stationed on coop roofs
@@ -3020,7 +3288,7 @@
   const PARRY_CHANCE_PER_SEC = 0.135; // per-second chance to start a lunge while in range
   const CRIT_MG_SHOTS        = 3;    // machine-gun: a crit reload primes up to this many continuous shots
   const SPIN_DMG_MUL         = 3.0;  // max-level Quickdraw twirl: the next burst hits triple
-  // Cold Shot / Hot Shot (wave 15, mutually exclusive). Each level raises the
+  // Cold Shot / Hot Shot (wave 5, mutually exclusive). Each level raises the
   // per-pellet chance to chill (slow + blue) or ignite (burn-over-time + flame).
   const COLD_HOT_CHANCE   = [0, 0.04, 0.08, 0.12, 0.16, 0.20]; // doubled hot/cold proc chance
   const COLD_SLOW_MUL     = 0.5;   // chilled wolves move at half speed
@@ -3047,7 +3315,7 @@
   const WEAPON_OIL_MAX_BAND   = 0.46; // cap so the bar can never become a free pass
   const WEAPON_OIL_BASE_COST  = 10;
   const WEAPON_OIL_MONEY_RATE = 0.12; // oil price scales with current money (12%), floor at WEAPON_OIL_BASE_COST
-  const WEAPON_OIL_WAVES      = 5;    // waves a purchase of oil lasts before it drains away
+  const WEAPON_OIL_WAVES      = 3;    // waves a purchase of oil lasts before it drains away
   function weaponOilCostFromMoney(curMoney) {
     return Math.max(WEAPON_OIL_BASE_COST, Math.floor(curMoney * WEAPON_OIL_MONEY_RATE));
   }
@@ -3061,7 +3329,7 @@
   const CRAZY_TRIGGER_W_REDUCE  = [0, 3, 6, 9, 12, 16];
   const CRAZY_TRIGGER_HIT_REDUCE= [0, 0.020, 0.038, 0.055, 0.070, 0.090];
   const CRAZY_TRIGGER_CRIT_BONUS= [0, 0.015, 0.030, 0.045, 0.060, 0.080];
-  // Calm Waves / Rough Waves (wave 50, mutually exclusive). Each level shifts
+  // Calm Waves / Rough Waves (wave 25, mutually exclusive). Each level shifts
   // BOTH the normal-wolf count and the wave gold by this fraction — Calm down,
   // Rough up — to a max of ±20%. (Special wolf variants are never affected.)
   const WAVE_MOD = [0, 0.02, 0.04, 0.06, 0.08, 0.10]; // Calm/Rough Waves: caps at ±10% (wolves & gold)
@@ -3138,7 +3406,7 @@
   }
   let magDumpLeft = 0;    // rounds left in an unstoppable mag dump (right-click)
   let magDumpT = 0;       // countdown to the next mag-dump round
-  // Nerd Reload / Jock Reload — two joke reload mini-games (wave 15, mutually
+  // Nerd Reload / Jock Reload — two joke reload mini-games (debug-only, mutually
   // exclusive, P1/local keeper only). Nerd: answer a math question; a wrong
   // answer jams. Jock: mash SPACE fast enough before the timer drains, or jam.
   const JOCK_RELOAD_TIME    = 2.2;  // seconds to hit the mash target
@@ -3164,7 +3432,7 @@
     player.karma       = karma;
   }
   let money = 20;         // $ — earned per chicken alive per wave, spent on coops
-  // New-game-plus: each restart AFTER beating the wave-100 boss doubles the
+  // New-game-plus: each restart AFTER beating the wave-50 boss doubles the
   // starting money / hats / barrel. The tier persists across restarts; the
   // mustache is kept too. barrelBonusMul is the derived 2^tier factor.
   let restartBonusTier = 0;
@@ -3214,7 +3482,7 @@
   // lock each other out — the player picks a playstyle.
   const DUMMY_COST = 25;
   const STATUE_COST = 35;
-  const GOLDEN_CHICKEN_COST = 1000; // wave-101 vanity: plates all chicken statues gold
+  const GOLDEN_CHICKEN_COST = 1000; // wave-51 vanity: plates all chicken statues gold
   const DUMMY_HP_TABLE   = [0, 4, 7, 10, 15, 23];   // hp by upgrade level (0 = locked)
   const STATUE_HP_TABLE  = [0, 18, 28, 40, 55, 80];
   // Chance per consideration that a wolf "sees through" a statue and ignores it.
@@ -3231,9 +3499,9 @@
   const FARM_COST_BASE = 5;     // $ for the first farm
   const FARM_COST_STEP = 5;     // extra $ per farm already placed
   function farmCost() { return FARM_COST_BASE + farms.length * FARM_COST_STEP; }
-  const FARM_UNLOCK_WAVE = 10;  // the Farm upgrade is offered from this wave on
+  const FARM_UNLOCK_WAVE = 5;   // the Farm upgrade is offered from this wave on
   // Untrampled waves to ripen, indexed by Farm upgrade level (0 = locked).
-  const FARM_WAVES = [10, 10, 9, 8, 7, 5];
+  const FARM_WAVES = [5, 5, 5, 4, 4, 3];
   const FARM_REWARD_BASE = 5;   // $ a harvest pays
   const FARM_REWARD_MAX = 10;   // $ a harvest pays at max Farm level
   const FARM_AREA_R2 = 0.32;    // squared radius of the "trample" zone
@@ -3274,6 +3542,11 @@
   let bonusUpgradeAvailable = false; // true while the second pick screen is active
   let bonusUpgradeShownThisWave = false; // ensures the roll only fires once per wave
   let bonusUpgradeForce = false;     // debug "give upgrade" — guarantees the next bonus roll
+  // Every wave now grants a SECOND guaranteed pick (the 50-wave squash halved
+  // the pick budget, so each round pays out double). The survival bonus above
+  // can still add a third. One flag per keeper in individual-upgrades co-op.
+  let extraPickUsedThisWave = false;
+  let extraPickUsedThisWave2 = false;
   let bonusDeathSnapshot = 0;        // chicken deaths captured at the wave-defended moment
   // Secret karma mechanic: a signed scale (good = +, bad = -). A wave cleared
   // without shooting a chicken nudges karma good; a wave with a friendly-fire
@@ -3285,22 +3558,22 @@
   let wave = 0;         // startWave() increments first, so wave 1 = first real wave
   let waveTimer = 12;   // seconds until next wave (also: grace period at game start)
   let nextWolves = 1;
-  const WOLF_TRAIT_START = 10; // waves before trait levels begin appearing
-  const ASSASSIN_START = 20;   // waves before 'assassin wolves' can appear
-  const SWORD_WOLF_RATE = 0.005; // expected sword wolves per wave (flat — does not scale)
-  const HAT_WOLF_RATE   = 0.16; // expected hatted wolves per wave — killing one drops a hat
-  const WOLF_SPEED_CAP = 10;    // max faster-level contribution to wolf speed (lowered so wave 80+ packs aren't blistering)
+  const WOLF_TRAIT_START = 5;  // waves before trait levels begin appearing
+  const ASSASSIN_START = 10;   // waves before 'assassin wolves' can appear
+  const SWORD_WOLF_RATE = 0.01; // expected sword wolves per wave (flat — does not scale)
+  const HAT_WOLF_RATE   = 0.32; // expected hatted wolves per wave — killing one drops a hat
+  const WOLF_SPEED_CAP = 10;    // max faster-level contribution to wolf speed (lowered so wave 40+ packs aren't blistering)
   const WOLF_SIZE_CAP = 14;     // max faster-level contribution to wolf size
   // Bomb wolves — slow wall-sappers that detonate against a wall.
-  const BOMB_WALL_WAVE = 50;    // bomb wolves start appearing from this wave
+  const BOMB_WALL_WAVE = 25;    // bomb wolves start appearing from this wave
   const BOMB_MIN_WALLS = 4;     // ...and only while at least this many walls stand
   const BOMB_WOLF_HP = 8;       // bomb wolf health
   const BOMB_WOLF_SPEED = 1.3;  // bomb wolf move speed (deliberately slow)
   const BOMB_REACH = 0.8;       // distance at which it reaches a wall and detonates
   const BOMB_BLAST_KEEPER_R = 2.4; // a bomb wolf's blast knocks a hat off a keeper this close
-  // Brood wolves — from wave 40, a fat she-wolf walks in, halts, births 3
+  // Brood wolves — from wave 20, a fat she-wolf walks in, halts, births 3
   // pups that just wander (won't attack), then runs back off the map.
-  const BREEDER_WAVE = 40;
+  const BREEDER_WAVE = 20;
   const BREEDER_HP = 10;            // brood wolf is tanky — takes a few hits to pop
   const BREEDER_SPEED = 2.4;
   const BREEDER_BIRTH_DELAY = 2.0;  // seconds the breeder stands still before birthing
@@ -3317,11 +3590,11 @@
   // Night of the Wolf — a rare wave-long event. Sky goes dark, only nearby
   // light pools illuminate the field, wolves get buffed and hard to see (only
   // their red eyes give them away). On survival the wave pays double and
-  // hands the keeper a witch hat. Triggers between waves 20-100, expected
+  // hands the keeper a witch hat. Triggers between waves 10-50, expected
   // 2-3 times per run (hard-capped at 3).
-  const NIGHT_OF_WOLF_MIN_WAVE = 20;
-  const NIGHT_OF_WOLF_MAX_WAVE = 100;
-  const NIGHT_OF_WOLF_PER_WAVE_CHANCE = 0.08; // doubled (waves 20-100)
+  const NIGHT_OF_WOLF_MIN_WAVE = 10;
+  const NIGHT_OF_WOLF_MAX_WAVE = 50;
+  const NIGHT_OF_WOLF_PER_WAVE_CHANCE = 0.16; // doubled (waves 10-50)
   const NIGHT_OF_WOLF_MAX_PER_RUN = 3;
   const NIGHT_OF_WOLF_WITCH_HAT_COLOR = '#3d1280'; // darker, more menacing purple
   const NIGHT_OF_WOLF_WITCH_HAT_CHANCE = 0.80;     // odds of getting the witch hat on survival
@@ -3331,8 +3604,8 @@
   let nightOfWolf = false;        // true while the current wave is a Night-of-the-Wolf wave
   let nightOfWolfCount = 0;       // how many have triggered this run
   let nightOfWolfDebugForce = false; // debug toggle — next startWave becomes a night wave
-  // ---------- Wave-100 boss fight ----------
-  const BOSS_WAVE = 100;
+  // ---------- Wave-50 boss fight ----------
+  const BOSS_WAVE = 50;
   const BOSS_INTRO_DELAY = 2.6;   // seconds of dusk-shift + shaking before it appears
   const BOSS_HP = 3000;           // HP per side (it's beaten 4 times) — a real slog
   const BOSS_MAX_DPS = 65;        // cap on damage it can take per second (anti-melt, like player i-frames)
@@ -3360,14 +3633,14 @@
   const BOSS_MISSILE_SPEED = 8.0;    // tiles/s
   const BOSS_MISSILE_LIFE = 5.0;     // seconds before it fizzles (must reach distant coops)
   const BOSS_MISSILE_BLAST_R = 2.2;  // explosion radius on impact
-  // Shared coop-strike payload (reused by the boss AND the wave-101+ missile wolf).
+  // Shared coop-strike payload (reused by the boss AND the wave-51+ missile wolf).
   const MISSILE_MIN_FLOORS = 1;      // fewest floors a hit knocks off
   const MISSILE_MAX_FLOORS = 3;      // most floors a hit knocks off
   const BOSS_BULLET_BLAST_R   = 1.9; // radius a cooked-off boss homing bullet flattens buildings in
   const BOSS_BULLET_BOOM_CHANCE = 0.5; // chance a boss homing bullet explodes at end of life
   const COOP_IGNITE_DURATION  = 4.5; // seconds a missile-struck coop stays on fire
   let bossPackSpawnT = 0;         // trickle timer during the 'pack' phase
-  let bossWaveActive = false;     // true through the whole wave-100 fight
+  let bossWaveActive = false;     // true through the whole wave-50 fight
   let bossPhase = '';             // 'intro'|'fight'|'retreat'|'pack'|'explode'|'cleared'
   let bossPhaseT = 0;
   let bossSidesDone = 0;          // 0..4 — times the boss has been beaten
@@ -3375,14 +3648,14 @@
   let boss = null;                // the boss wolf (also lives in wolves[])
   let bossTint = 0;               // 0..1 dusk-orange overlay strength
   let endScreen = false;          // post-boss "restart or continue" screen
-  // Post-wave-100 the event escapes its run-cap and instead schedules itself
-  // once randomly inside every consecutive 10-wave block. These two track
+  // Post-wave-50 the event escapes its run-cap and instead schedules itself
+  // once randomly inside every consecutive 5-wave block. These two track
   // which block we last rolled for and which wave inside it was picked.
   let lateNightBlockStart = 0;
   let nextLateNightWave = 0;
-  // Ranged wolves — from wave 70, a sit-and-shoot type that fires red pellets
+  // Ranged wolves — from wave 35, a sit-and-shoot type that fires red pellets
   // at the closest live player or chicken from a safe distance.
-  const RANGED_WAVE = 70;
+  const RANGED_WAVE = 35;
   const RANGED_HP = 4;
   const RANGED_SPEED = 2.2;
   const RANGED_FIRE_COOLDOWN = 5.0; // seconds between laser shots (no more miss roll — every cooldown fires)
@@ -3392,15 +3665,15 @@
   const RANGED_BULLET_DMG = 1;
   const RANGED_SETTLE_DIST = 6;     // how far in from the edge it walks before sitting
   const RANGED_PLAYER_RANGE2 = 12 * 12; // only fires at a keeper inside this radius — otherwise hunts chickens
-  // Ranged wolf (the homing-bullet shooter) — from wave 60. Sits like the laser
+  // Ranged wolf (the homing-bullet shooter) — from wave 30. Sits like the laser
   // wolf but lobs slow red homing bullets that chase the keeper for a while.
-  const HOMER_WAVE = 60;
+  const HOMER_WAVE = 30;
   const HOMER_HP = 4;
   const HOMER_FIRE_COOLDOWN = 3.6;  // seconds between shots
-  // Missile wolf — wave 101+. A big, stationary wolf with two back rockets that
+  // Missile wolf — wave 51+. A big, stationary wolf with two back rockets that
   // it lobs at coops after a long, killable wind-up.
-  const MISSILE_WOLF_WAVE = 101;     // earliest wave it can appear
-  const MISSILE_WOLF_RATE = 0.55;    // chance per wave (101+) to roll one in
+  const MISSILE_WOLF_WAVE = 51;      // earliest wave it can appear
+  const MISSILE_WOLF_RATE = 0.55;    // chance per wave (51+) to roll one in
   const MISSILE_WOLF_HP = 32;        // beefy — takes real sustained fire to drop
   const MISSILE_WOLF_SIZE = 2.0;     // a big, hulking brute
   const MISSILE_WOLF_CHARGE = 9;     // seconds of telegraph before each salvo
@@ -3412,7 +3685,7 @@
   // dies its body bursts and the head scuttles off on spider legs and flees
   // the map. Only rolls once Cryptid Radar is maxed; boosted by its multiplier.
   // Kept deliberately tiny so the thing wolf stays a true rarity even at max.
-  const THING_WOLF_RATE = 0.008;    // expected thing wolves per wave (flat, × cryptid radar)
+  const THING_WOLF_RATE = 0.016;    // expected thing wolves per wave (flat, × cryptid radar)
   const THING_HP = 4;
   const THING_CRAWLER_HP = 2;       // the fleeing head-crawler is fragile
   const THING_CRAWLER_SPEED = 6.0;  // it scuttles away very fast
@@ -3426,20 +3699,20 @@
   const HUNTER_WOLF_RETREAT    = 2.0; // seconds it scrambles to safety (invincible) after losing a hat
   const HUNTER_WOLF_EXPLODE_R  = 2.4; // blast radius when a hunter wolf is killed
   const HUNTER_WOLF_EXPLODE_DMG= 5;   // damage to each wolf caught in that blast
-  const HUNTER_WOLF_RATE = 0.16;     // chance per ELIGIBLE wave to roll one in
-  const HUNTER_WOLF_GAP_WAVES = 20;  // can appear at most once every this many waves
-  const HUNTER_WOLF_MIN_WAVE = 20;   // earliest wave it can show up (then any wave 20+, incl. 101+)
+  const HUNTER_WOLF_RATE = 0.32;     // chance per ELIGIBLE wave to roll one in
+  const HUNTER_WOLF_GAP_WAVES = 10;  // can appear at most once every this many waves
+  const HUNTER_WOLF_MIN_WAVE = 10;   // earliest wave it can show up (then any wave 10+, incl. 51+)
   let lastHunterWolfWave = -100;     // wave the last hunter wolf appeared
   let ghostWolfChance = 0;           // probability [0,1] of a ghost wolf spawning; +2% per player death
   // Parachute wolf — an ordinary wolf that drops in from the sky onto a random
   // spot inside the field (instead of walking in from a border), descending
   // under a parachute. Untouchable until it lands, then behaves normally.
-  const PARACHUTE_WAVE = 30;        // first wave they can appear
-  const PARACHUTE_RATE = 0.07;      // per-wave chance one drops in (twice as rare)
+  const PARACHUTE_WAVE = 15;        // first wave they can appear
+  const PARACHUTE_RATE = 0.14;      // per-wave chance one drops in
   const PARACHUTE_FALL_TIME = 3.8;  // seconds of descent (longer drift in)
   const PARACHUTE_START_H = 130;    // screen px above the landing spot at release
   // Player-2 cameo — a very rare single-player easter egg, at most once a run.
-  const P2_CAMEO_CHANCE = 0.02;     // per-wave roll while it hasn't appeared yet
+  const P2_CAMEO_CHANCE = 0.04;     // per-wave roll while it hasn't appeared yet
   const P2_CAMEO_LIFE   = 14;       // seconds it wanders before strolling off
   // Cryptid Radar — the dish has UNLIMITED range: it pings the moment a cryptid
   // (fox, sword, hatted, thing wolf, or the player-2 cameo) appears anywhere on
@@ -3459,7 +3732,7 @@
     for (let g = 1; g <= Math.min(3, huntersGroups); g++) f += HUNTER_GROUP_FEE[g];
     return f;
   }
-  // Metaverse (wave 101+) — once owned, every mutually-exclusive pick unlocks,
+  // Metaverse (wave 51+) — once owned, every mutually-exclusive pick unlocks,
   // so the keeper can stack both halves of each either/or upgrade.
   function metaverseOn() { return (upgradeLevels.metaverse || 0) > 0; }
   // Hat Pack: very small chance a packed hat comes in the buddy's straw colour.
@@ -3518,7 +3791,7 @@
   let waveAutoStartPaused = false;
   let pendingSpawns = 0; // wolves scheduled but not yet spawned (across all live waves)
   let resurrectCount = 0;     // times the red resurrect button has been used (max 9)
-  let resurrectLastWave = -99; // wave when last resurrect was used (cooldown: 10 waves)
+  let resurrectLastWave = -99; // wave when last resurrect was used (cooldown: 5 waves)
   let comboKills = 0;          // wolves killed in the current combo window
   let comboT = 0;              // seconds remaining in the combo window (resets on each kill)
   let comboFloat = null;       // active floating "x5" combo label; null when no combo
@@ -3894,7 +4167,7 @@
         // reloads pay off with a boosted next shot. Now a wave-50 pick.
         id: 'crazyTrigger',
         title: 'Extreme Reload',
-        available() { return wave >= 50 && upgradeLevels.crazyTrigger < 5; },
+        available() { return wave >= 25 && upgradeLevels.crazyTrigger < 5; },
         desc() {
           const n = Math.min(5, upgradeLevels.crazyTrigger + 1);
           return 'Bar/green −, critical +' + Math.round(CRAZY_TRIGGER_CRIT_BONUS[n] * 100) + '% → tier ' + n + '/5';
@@ -3906,7 +4179,7 @@
         // unaffected), but a smaller payout to match. Locks out Rough Waves.
         id: 'calmWaves',
         title: 'Calm Waves',
-        available() { return wave >= 50 && (upgradeLevels.roughWaves === 0 || metaverseOn()) && upgradeLevels.calmWaves < 5; },
+        available() { return wave >= 25 && (upgradeLevels.roughWaves === 0 || metaverseOn()) && upgradeLevels.calmWaves < 5; },
         desc() {
           const pct = Math.round(WAVE_MOD[Math.min(5, upgradeLevels.calmWaves + 1)] * 100);
           return '−' + pct + '% normal wolves, −' + pct + '% wave gold';
@@ -3918,7 +4191,7 @@
         // Locks out Calm Waves.
         id: 'roughWaves',
         title: 'Rough Waves',
-        available() { return wave >= 50 && (upgradeLevels.calmWaves === 0 || metaverseOn()) && upgradeLevels.roughWaves < 5; },
+        available() { return wave >= 25 && (upgradeLevels.calmWaves === 0 || metaverseOn()) && upgradeLevels.roughWaves < 5; },
         desc() {
           const pct = Math.round(WAVE_MOD[Math.min(5, upgradeLevels.roughWaves + 1)] * 100);
           return '+' + pct + '% normal wolves, +' + pct + '% wave gold';
@@ -3942,21 +4215,21 @@
       {
         id: 'hatchRate',
         title: 'Cozy Coops',
-        available() { return wave >= 10 && upgradeLevels.hatchRate < 5; },
+        available() { return wave >= 5 && upgradeLevels.hatchRate < 5; },
         desc() { return 'Chickens respawn ' + Math.round((1 - tableNext('hatchRate')) * 100) + '% faster'; },
         apply() { upgradeLevels.hatchRate++; },
       },
       {
         id: 'wolfDelay',
         title: 'Prep Time',
-        available() { return wave >= 10 && upgradeLevels.wolfDelay < 5; },
+        available() { return wave >= 5 && upgradeLevels.wolfDelay < 5; },
         desc() { return 'Wolves wait ' + tableNext('wolfDelay') + 's after wave start'; },
         apply() { upgradeLevels.wolfDelay++; },
       },
       {
         id: 'doubleBarrel',
         title: 'Double-Barrel',
-        available() { return wave >= 10 && (upgradeLevels.machineGun === 0 || metaverseOn()) && upgradeLevels.doubleBarrel < 5; },
+        available() { return wave >= 5 && (upgradeLevels.machineGun === 0 || metaverseOn()) && upgradeLevels.doubleBarrel < 5; },
         desc() {
           return upgradeLevels.doubleBarrel === 0
             ? 'shotgun becames double-barrel, right-click fires twice'
@@ -3967,7 +4240,7 @@
       {
         id: 'machineGun',
         title: 'Machine-Gun',
-        available() { return wave >= 10 && (upgradeLevels.doubleBarrel === 0 || metaverseOn()) && upgradeLevels.machineGun < 5; },
+        available() { return wave >= 5 && (upgradeLevels.doubleBarrel === 0 || metaverseOn()) && upgradeLevels.machineGun < 5; },
         desc() {
           return upgradeLevels.machineGun === 0
             ? 'Auto-fire (starts slow), ' + MG_MAG + '-round mag'
@@ -4002,7 +4275,7 @@
         // frosty blue and crawls at half speed. Mutually exclusive with Hot Shot.
         id: 'coldShot',
         title: 'Cold Shot',
-        available() { return wave >= 10 && (upgradeLevels.hotShot === 0 || metaverseOn()) && upgradeLevels.coldShot < 5; },
+        available() { return wave >= 5 && (upgradeLevels.hotShot === 0 || metaverseOn()) && upgradeLevels.coldShot < 5; },
         desc() { return Math.round(COLD_HOT_CHANCE[Math.min(5, upgradeLevels.coldShot + 1)] * 100) + '% chance to freeze a hit wolf (slow + blue)'; },
         apply() { upgradeLevels.coldShot++; },
       },
@@ -4011,12 +4284,12 @@
         // fire, taking damage over a few seconds. Mutually exclusive with Cold Shot.
         id: 'hotShot',
         title: 'Hot Shot',
-        available() { return wave >= 10 && (upgradeLevels.coldShot === 0 || metaverseOn()) && upgradeLevels.hotShot < 5; },
+        available() { return wave >= 5 && (upgradeLevels.coldShot === 0 || metaverseOn()) && upgradeLevels.hotShot < 5; },
         desc() { return Math.round(COLD_HOT_CHANCE[Math.min(5, upgradeLevels.hotShot + 1)] * 100) + '% chance to set a hit wolf ablaze (burns over time)'; },
         apply() { upgradeLevels.hotShot++; },
       },
       {
-        // Rocket Launcher — wave-50 weapon evolution. Requires the keeper to
+        // Rocket Launcher — wave-25 weapon evolution. Requires the keeper to
         // have ever picked Machine-Gun or Double-Barrel. Mutually exclusive
         // with Minigun. Per-level chance a pellet explodes when it HITS a wolf;
         // right-click guarantees the boom on a hit. Pellets that miss never
@@ -4024,7 +4297,7 @@
         id: 'rocket',
         title: 'Rocket Launcher',
         available() {
-          return wave >= 50
+          return wave >= 25
               && (upgradeLevels.machineGun > 0 || upgradeLevels.doubleBarrel > 0)
               && (upgradeLevels.minigun === 0 || metaverseOn())
               && upgradeLevels.rocket < 5;
@@ -4039,14 +4312,14 @@
         apply() { upgradeLevels.rocket++; },
       },
       {
-        // Minigun — wave-50 weapon evolution. Requires the keeper to have
+        // Minigun — wave-25 weapon evolution. Requires the keeper to have
         // ever picked Machine-Gun or Double-Barrel. Mutually exclusive with
         // Rocket Launcher. Each tier adds magazine capacity; at MAX the gun
         // spins up — sustained fire keeps getting faster.
         id: 'minigun',
         title: 'Minigun',
         available() {
-          return wave >= 50
+          return wave >= 25
               && (upgradeLevels.machineGun > 0 || upgradeLevels.doubleBarrel > 0)
               && (upgradeLevels.rocket === 0 || metaverseOn())
               && upgradeLevels.minigun < 5;
@@ -4069,14 +4342,14 @@
       {
         id: 'reloadMove',
         title: 'Action Reload',
-        available() { return wave >= 10 && upgradeLevels.reloadMove < MAX_LEVEL; },
+        available() { return wave >= 5 && upgradeLevels.reloadMove < MAX_LEVEL; },
         desc() { return 'Moving reload: pin ' + reloadRunMul(upgradeLevels.reloadMove + 1).toFixed(2) + '× speed'; },
         apply() { upgradeLevels.reloadMove++; },
       },
       {
         id: 'counter',
         title: 'Melee Strike',
-        available() { return wave >= 10 && upgradeLevels.counter < 5; },
+        available() { return wave >= 5 && upgradeLevels.counter < 5; },
         desc() {
           return upgradeLevels.counter >= 4
             ? 'MAX: 50% melee + area damage'
@@ -4087,7 +4360,7 @@
       {
         id: 'sprint',
         title: 'Stampede',
-        available() { return wave >= 30 && upgradeLevels.sprint < 5; },
+        available() { return wave >= 15 && upgradeLevels.sprint < 5; },
         desc() {
           return upgradeLevels.sprint >= 4
             ? 'MAX: +' + Math.round(tableNext('sprint') * 100) + '% sprint, trample enemies'
@@ -4098,7 +4371,7 @@
       {
         id: 'softBullet',
         title: 'Soft Bullets',
-        available() { return wave >= 30 && (upgradeLevels.hardBullet === 0 || metaverseOn()) && upgradeLevels.softBullet < 5; },
+        available() { return wave >= 15 && (upgradeLevels.hardBullet === 0 || metaverseOn()) && upgradeLevels.softBullet < 5; },
         desc() {
           const pct = Math.round(tableNext('softBullet') * 100);
           return upgradeLevels.softBullet >= 4
@@ -4110,7 +4383,7 @@
       {
         id: 'hardBullet',
         title: 'Hard Bullets',
-        available() { return wave >= 30 && (upgradeLevels.softBullet === 0 || metaverseOn()) && upgradeLevels.hardBullet < 5; },
+        available() { return wave >= 15 && (upgradeLevels.softBullet === 0 || metaverseOn()) && upgradeLevels.hardBullet < 5; },
         desc() {
           const mul = tableNext('hardBullet');
           const pct = Math.round((mul - 1) * 100);
@@ -4124,7 +4397,7 @@
         id: 'rust',
         title: 'Rusty Springs',
         // The final (golden) tier costs $200; the rusting tiers are free.
-        available() { return wave >= 30 && upgradeLevels.rust < 5 && (upgradeLevels.rust < 4 || money >= RUST_MAX_COST); },
+        available() { return wave >= 15 && upgradeLevels.rust < 5 && (upgradeLevels.rust < 4 || money >= RUST_MAX_COST); },
         desc() {
           return upgradeLevels.rust >= 4
             ? 'MAX ($' + RUST_MAX_COST + '): no jams at all — each consecutive critical reload pays $1 (disables Weapon Oil)'
@@ -4149,7 +4422,7 @@
       {
         id: 'spinReload',
         title: 'Quickdraw',
-        available() { return wave >= 30 && upgradeLevels.spinReload < 5; },
+        available() { return wave >= 15 && upgradeLevels.spinReload < 5; },
         desc() {
           const pct = Math.round(tableNext('spinReload') * 100) + '%';
           return upgradeLevels.spinReload >= 4
@@ -4161,7 +4434,7 @@
       {
         id: 'snatch',
         title: 'Wolf Heist',
-        available() { return wave >= 30 && upgradeLevels.snatch < 5; },
+        available() { return wave >= 15 && upgradeLevels.snatch < 5; },
         desc() {
           const pct = Math.round(tableNext('snatch') * 100) + '%';
           return upgradeLevels.snatch >= 4
@@ -4187,7 +4460,7 @@
         // sacrificing themselves in the process.
         id: 'workerChicken',
         title: 'Worker Chickens',
-        available() { return wave >= 50 && (upgradeLevels.richChicken === 0 || metaverseOn()) && upgradeLevels.workerChicken < 5; },
+        available() { return wave >= 25 && (upgradeLevels.richChicken === 0 || metaverseOn()) && upgradeLevels.workerChicken < 5; },
         desc() {
           const nxt = Math.min(5, upgradeLevels.workerChicken + 1);
           const pct = Math.round(WORKER_HATCH_CHANCE[nxt] * 100);
@@ -4205,7 +4478,7 @@
         // additively with Fat Chickens' per-tier gold.
         id: 'richChicken',
         title: 'Rich Chickens',
-        available() { return wave >= 50 && (upgradeLevels.workerChicken === 0 || metaverseOn()) && upgradeLevels.richChicken < 5; },
+        available() { return wave >= 25 && (upgradeLevels.workerChicken === 0 || metaverseOn()) && upgradeLevels.richChicken < 5; },
         desc() {
           const nxt = Math.min(5, upgradeLevels.richChicken + 1);
           const pct = Math.round(RICH_HATCH_CHANCE[nxt] * 100);
@@ -4221,7 +4494,7 @@
       {
         id: 'dog',
         title: dogUpgradeTitle(),
-        available() { return wave >= 30; },
+        available() { return wave >= 15; },
         desc() {
           if (upgradeLevels.dog === 0) return 'Adopt a guard dog that hunts wolves';
           if (upgradeLevels.dog >= 4) return 'Retire the pack — your dogs head home';
@@ -4266,7 +4539,7 @@
       {
         id: 'stoneWall',
         title: 'Stone Wall',
-        available() { return wave >= 30 && upgradeLevels.stoneWall < 5; },
+        available() { return wave >= 15 && upgradeLevels.stoneWall < 5; },
         desc() {
           if (upgradeLevels.stoneWall === 0) return 'Unlocks stone walls (2 HP)';
           if (upgradeLevels.stoneWall >= 4) return 'MAX: ' + tableNext('stoneWall') + ' HP + spikes wound attackers';
@@ -4279,7 +4552,7 @@
         // dummies; HP scales with level. At max, a destroyed dummy explodes.
         id: 'dummy',
         title: 'Scarecrow',
-        available() { return wave >= 50 && (upgradeLevels.statue === 0 || metaverseOn()) && upgradeLevels.dummy < 5; },
+        available() { return wave >= 25 && (upgradeLevels.statue === 0 || metaverseOn()) && upgradeLevels.dummy < 5; },
         desc() {
           if (upgradeLevels.dummy === 0) return 'Unlocks scarecrows — wolves chase them ($' + DUMMY_COST + ', ' + DUMMY_HP_TABLE[1] + ' HP)';
           if (upgradeLevels.dummy >= 4) return 'MAX: ' + DUMMY_HP_TABLE[5] + ' HP — destroyed scarecrows explode';
@@ -4293,7 +4566,7 @@
         // bite and may be stunned just by getting close.
         id: 'statue',
         title: 'Chicken Statue',
-        available() { return wave >= 50 && (upgradeLevels.dummy === 0 || metaverseOn()) && upgradeLevels.statue < 5; },
+        available() { return wave >= 25 && (upgradeLevels.dummy === 0 || metaverseOn()) && upgradeLevels.statue < 5; },
         desc() {
           if (upgradeLevels.statue === 0) return 'Unlocks statues — fake chicken ($' + STATUE_COST + ', ' + STATUE_HP_TABLE[1] + ' HP)';
           const nxt = upgradeLevels.statue + 1;
@@ -4303,17 +4576,17 @@
         apply() { upgradeLevels.statue++; },
       },
       {
-        // Golden Chicken — a wave-101 vanity capstone. Only surfaces once the
+        // Golden Chicken — a wave-51 vanity capstone. Only surfaces once the
         // Chicken Statue line is maxed (the "golden statue" tier). Costs a
         // hefty $1000 and does nothing but plate every chicken statue in gold.
         id: 'goldenChicken',
         title: 'Golden Chicken',
-        available() { return wave >= 101 && upgradeLevels.statue >= 5 && upgradeLevels.goldenChicken < 1 && money >= GOLDEN_CHICKEN_COST; },
+        available() { return wave >= 51 && upgradeLevels.statue >= 5 && upgradeLevels.goldenChicken < 1 && money >= GOLDEN_CHICKEN_COST; },
         desc() { return 'Spend $' + GOLDEN_CHICKEN_COST + ' → your chicken statues turn solid gold'; },
         apply() { money -= GOLDEN_CHICKEN_COST; upgradeLevels.goldenChicken = 1; },
       },
       {
-        // Explosive Mines — only unlocked after the player reaches wave 101.
+        // Explosive Mines — only unlocked after the player reaches wave 40.
         // Once placed, a mine is nearly invisible; only at max level does a
         // faint warning ring show. Each rank scales the blast bigger and
         // hits harder. Anyone — wolf or keeper — stepping on the tile sets
@@ -4509,12 +4782,12 @@
         },
       },
       {
-        // Buy Hat Pack (wave 80+) — three hats in one go, price ratchets like
+        // Buy Hat Pack (wave 40+) — three hats in one go, price ratchets like
         // Buy Hat. Each hat rolls a small leprechaun chance and a very small
         // chance to come in the buddy's straw colour.
         id: 'hatPack',
         title: 'Buy Hat Pack',
-        available() { return wave >= 80 && playerHats < MAX_HATS; },
+        available() { return wave >= 40 && playerHats < MAX_HATS; },
         affordable() { return money >= hatPackPrice; },
         desc() { return 'Spend $' + hatPackPrice + ' → +3 hats (rare leprechaun / buddy colours)'; },
         apply() {
@@ -4557,19 +4830,20 @@
           if (money < price) return;
           money -= price;
           weaponOilCharges = 1;
+          weaponOilBought++;
           weaponOilWaves = WEAPON_OIL_WAVES; // refresh the lifetime on every buy
           recomputeJamChance();
         },
       },
       {
-        // Advanced Oil (wave 80+) — a premium one-round oil that floods the
+        // Advanced Oil (wave 40+) — a premium one-round oil that floods the
         // accept band almost full AND fattens the crit line. Same rust rule as
         // Weapon Oil; costs a bit more.
         id: 'advancedOil',
         title: 'Advanced Oil',
         available() {
           if (upgradeLevels.rust > 0 && upgradeLevels.rust < 5) return false;
-          return wave >= 80 && advancedOilWaves === 0; // shown even when broke (affordable() gates the buy)
+          return wave >= 40 && advancedOilWaves === 0; // shown even when broke (affordable() gates the buy)
         },
         affordable() { return money >= advancedOilCost(); },
         desc() { return 'Spend $' + advancedOilCost() + ' → near-full reload band + bigger crit line, 1 round'; },
@@ -4577,6 +4851,7 @@
           const price = advancedOilCost();
           if (money < price) return;
           money -= price;
+          advancedOilBought++;
           advancedOilWaves = 1; // active for the single upcoming round
         },
       },
@@ -4603,20 +4878,20 @@
         },
       },
       {
-        // Hunter Caravan (wave 101+, one-time) — lets Call the Hunters be picked
+        // Hunter Caravan (wave 51+, one-time) — lets Call the Hunters be picked
         // again while a camp is up, fielding up to three groups at once.
         id: 'hunterCaravan',
         title: 'Hunter Caravan',
-        available() { return wave >= 101 && everReachedHunterGold && upgradeLevels.hunterCaravan < 1; },
+        available() { return wave >= 51 && everReachedHunterGold && upgradeLevels.hunterCaravan < 1; },
         desc() { return 'Up to 3 hunter groups (2nd +$200, 3rd +$300/wave)'; },
         apply() { upgradeLevels.hunterCaravan = 1; },
       },
       {
-        // Bribe Wolves (wave 101+) — pay off the pack: this wave runs 20%
+        // Bribe Wolves (wave 51+) — pay off the pack: this wave runs 20%
         // lighter, but the next swells 10%. Price ratchets up each buy.
         id: 'bribeWolves',
         title: 'Bribe Wolves',
-        available() { return wave >= 101 && money >= bribePrice; },
+        available() { return wave >= 51 && money >= bribePrice; },
         desc() { return 'Spend $' + bribePrice + ' → next wave −20% wolves (the one after +10%)'; },
         apply() {
           money -= bribePrice;
@@ -4626,12 +4901,12 @@
         },
       },
       {
-        // Metaverse (wave 101+, one-time) — the run-defining capstone. Once
+        // Metaverse (wave 51+, one-time) — the run-defining capstone. Once
         // taken, every either/or lock dissolves: both halves of every mutually
         // exclusive pair become buyable, so they can be stacked together.
         id: 'metaverse',
         title: 'Metaverse',
-        available() { return wave >= 101 && upgradeLevels.metaverse < 1; },
+        available() { return wave >= 51 && upgradeLevels.metaverse < 1; },
         desc() { return 'Buy BOTH sides of every either/or upgrade'; },
         apply() { upgradeLevels.metaverse = 1; playMetaverse(); },
       },
@@ -4716,7 +4991,7 @@
 
   // Filler shown when fewer than 3 real upgrades are available.
   // The payout scales with progress: one third of the current wave.
-  function cashReward() { return Math.max(2, Math.floor(wave / 2)); }
+  function cashReward() { return Math.max(2, wave); }
   function makeCashOption() {
     return {
       id: 'cash',
@@ -4754,12 +5029,301 @@
     nerdReload: 'Jock Reload', jockReload: 'Nerd Reload',
     coldShot: 'Hot Shot', hotShot: 'Cold Shot',
     calmWaves: 'Rough Waves', roughWaves: 'Calm Waves',
+    // The late-game pairs are just as exclusive (their available() gates each
+    // other the same way) — they were missing here, so their cards used to
+    // lock the counterpart out with no warning printed on the card.
+    rocket: 'Minigun', minigun: 'Rocket Launcher',
+    homing: 'Laser Shots', laser: 'Homing Shots',
+    rocketBoots: 'Last Stand', lastStand: 'Rocket Boots',
+    workerChicken: 'Rich Chickens', richChicken: 'Worker Chickens',
+  };
+  // The counterpart's ID for each exclusive pair (LOCKS_OUT holds display
+  // names; the skill tree needs the ID to read the other side's level).
+  const PAIRED_WITH = {
+    spreadUp: 'spreadDown', spreadDown: 'spreadUp',
+    focusUp: 'focusDown', focusDown: 'focusUp',
+    doubleBarrel: 'machineGun', machineGun: 'doubleBarrel',
+    softBullet: 'hardBullet', hardBullet: 'softBullet',
+    dummy: 'statue', statue: 'dummy',
+    coldShot: 'hotShot', hotShot: 'coldShot',
+    calmWaves: 'roughWaves', roughWaves: 'calmWaves',
+    rocket: 'minigun', minigun: 'rocket',
+    homing: 'laser', laser: 'homing',
+    rocketBoots: 'lastStand', lastStand: 'rocketBoots',
+    workerChicken: 'richChicken', richChicken: 'workerChicken',
   };
   // True when picking `option` right now would FRESHLY lock out its counterpart:
   // it's a paired upgrade, the Metaverse hasn't dissolved the locks, and it's
   // still at level 0 (a higher level means that lock already happened earlier).
   function optionLocksOut(option, levels) {
     return !!(option && !metaverseOn() && LOCKS_OUT[option.id] && ((levels || upgradeLevels)[option.id] || 0) === 0);
+  }
+
+  // ---------- Skill tree ----------
+  // The upgrade pool as a top-down progression map: every pickable upgrade,
+  // the wave that unlocks it, what it grows out of, and the counterpart it
+  // locks out. Drives both the in-menu tree overlay and the "new upgrades
+  // unlocked" notice, so the two can never drift apart.
+  //   tier   — wave the upgrade first becomes offerable (1 = from the start)
+  //   max    — levels the upgrade can reach (used for the x/y unlocked counter)
+  //   links  — ids this one branches off (drawn as connector lines)
+  //   needs  — extra requirement beyond the wave gate; false = still blocked
+  //   supply — repeatable/consumable buy, excluded from the level counter
+  const SKILL_TREE = [
+    // ----- Available from wave 1 -----
+    { id: 'jam',        tier: 1,  max: 5, note: 'Fewer jams when you reload' },
+    // Longer Barrel is the one upgrade that keeps being offered past its cap
+    // (further picks only grow the barrel visually), so it can run above max.
+    { id: 'range',      tier: 1,  max: 5, overflow: true, note: 'Longer barrel, shots live longer' },
+    { id: 'speed',      tier: 1,  max: 5, note: 'Move faster around the farm' },
+    { id: 'fireRate',   tier: 1,  max: 5, note: 'Slower reload pin — easier crits' },
+    { id: 'spreadUp',   tier: 1,  max: 5, note: 'Wider cone, more pellets' },
+    { id: 'spreadDown', tier: 1,  max: 5, note: 'Tighter cone, ends as a piercing slug' },
+    { id: 'focusUp',    tier: 1,  max: 5, note: 'Wolves come for you, and fast' },
+    { id: 'focusDown',  tier: 1,  max: 5, note: 'Wolves lose interest in you' },
+    { id: 'woodFence',  tier: 1,  max: 5, note: 'Unlocks wooden fences' },
+    // Consumables aren't a ladder, so instead of a level they carry held():
+    // null until the player has actually bought one, then whatever the live
+    // in-game status is. The tree hides the row until held() says otherwise.
+    { id: 'buyHat',     tier: 1,  max: 1, supply: true, note: 'One more hat — one more life',
+      held: () => hatPrice > 5 ? playerHats + ' hats' : null },
+    { id: 'weaponOil',  tier: 1,  max: 1, supply: true, note: 'Wider reload band for a few waves',
+      held: () => !weaponOilBought ? null
+                : weaponOilCharges > 0 ? weaponOilWaves + ' waves left' : 'worn off' },
+    // The hunter line isn't wave-gated at all — it opens the first time the
+    // player has ever held HUNTER_UNLOCK_GOLD. Listing it under "from the
+    // start" read as if it were available at wave 1, so it gets its own row
+    // (see SKILL_GROUPS). `tier` still drives the wave gate for caravan.
+    { id: 'hunters',    tier: 1,  max: 1, supply: true, group: 'hunters',
+      note: 'Hire shotgunners — needs the unlock gold once',
+      needs: () => everReachedHunterGold,
+      held: () => huntersCamps.length
+        ? huntersCamps.length + '/3 camps, ' + hunters.filter(h => h.alive).length + ' alive'
+        : null },
+    { id: 'hunterPower', tier: 1, max: 5, links: ['hunters'], group: 'hunters',
+      note: 'Better hunter HP, damage and guns',
+      needs: () => huntersCamps.length > 0 },
+
+    // ----- Wave 5 -----
+    { id: 'hatchRate',   tier: 5, max: 5, note: 'Chickens hatch back faster' },
+    { id: 'wolfDelay',   tier: 5, max: 5, note: 'Wolves hold off at wave start' },
+    { id: 'farm',        tier: 5, max: 5, note: 'Unlocks crop plots that pay out' },
+    { id: 'doubleBarrel', tier: 5, max: 5, note: 'Two shells — right-click fires both' },
+    { id: 'machineGun',  tier: 5, max: 5, note: 'Auto-fire with a real magazine' },
+    { id: 'coldShot',    tier: 5, max: 5, note: 'Pellets may freeze a wolf solid' },
+    { id: 'hotShot',     tier: 5, max: 5, note: 'Pellets may set a wolf ablaze' },
+    { id: 'reloadMove',  tier: 5, max: 5, note: 'Reload while running' },
+    { id: 'counter',     tier: 5, max: 5, note: 'Chance to melee a biting wolf' },
+
+    // ----- Wave 15 -----
+    { id: 'sprint',     tier: 15, max: 5, note: 'Faster sprint, trample at max' },
+    { id: 'softBullet', tier: 15, max: 5, note: 'Pellets may spare your chickens' },
+    { id: 'hardBullet', tier: 15, max: 5, note: 'Pellets hit noticeably harder' },
+    { id: 'rust',       tier: 15, max: 5, note: 'More jams — then a jam-proof golden gun' },
+    { id: 'spinReload', tier: 15, max: 5, note: 'Reload sometimes becomes an instant twirl' },
+    { id: 'snatch',     tier: 15, max: 5, note: 'Fed wolves carry the kill away, slowed' },
+    { id: 'fatChicken', tier: 15, max: 5, note: 'Fat chickens — slower, worth more' },
+    { id: 'dog',        tier: 15, max: 4, note: 'Adopt and train a guard-dog pack' },
+    { id: 'stoneWall',  tier: 15, max: 5, links: ['woodFence'], note: 'Unlocks stone walls (2 HP)' },
+
+    // ----- Wave 25 -----
+    { id: 'crazyTrigger', tier: 25, max: 5, links: ['fireRate'], note: 'Narrow bar, fat critical line' },
+    { id: 'calmWaves',    tier: 25, max: 5, note: 'Fewer wolves, smaller payout' },
+    { id: 'roughWaves',   tier: 25, max: 5, note: 'More wolves, bigger payout' },
+    { id: 'rocket',       tier: 25, max: 5, links: ['doubleBarrel', 'machineGun'], note: 'Pellets explode on hit',
+      needs: () => upgradeLevels.machineGun > 0 || upgradeLevels.doubleBarrel > 0 },
+    { id: 'minigun',      tier: 25, max: 5, links: ['doubleBarrel', 'machineGun'], note: 'Huge mag, spins up at max',
+      needs: () => upgradeLevels.machineGun > 0 || upgradeLevels.doubleBarrel > 0 },
+    { id: 'workerChicken', tier: 25, max: 5, links: ['hatchRate'], note: 'Hardhat chickens rebuild your fences' },
+    { id: 'richChicken',  tier: 25, max: 5, links: ['hatchRate'], note: 'Top-hat chickens pay extra each wave' },
+    { id: 'dummy',        tier: 25, max: 5, note: 'Scarecrows pull wolves off your flock' },
+    { id: 'statue',       tier: 25, max: 5, note: 'Tanky decoy statues wolves learn to ignore' },
+
+    // ----- Wave 40 -----
+    { id: 'mine',        tier: 40, max: 5, note: 'Buried bombs — anyone can set them off' },
+    { id: 'sabotage',    tier: 40, max: 5, note: 'Wolves hatch defective, some turn traitor' },
+    { id: 'sizeMatters', tier: 40, max: 5, links: ['range'], note: 'Double barrel growth, much longer shots',
+      needs: () => upgradeLevels.range > 0 },
+    { id: 'rocketBoots', tier: 40, max: 5, links: ['sprint'], note: 'Sprint can launch you into flight' },
+    { id: 'lastStand',   tier: 40, max: 5, links: ['sprint'], note: 'Stand still to crouch up damage and rate' },
+    { id: 'homing',      tier: 40, max: 5, note: 'Slow pellets that chase the nearest wolf' },
+    { id: 'laser',       tier: 40, max: 5, note: 'Shots become an instant piercing beam' },
+    { id: 'cryptidRadar', tier: 40, max: 5, note: 'Coop antennas pull in rare wolf variants' },
+    { id: 'rooftopper',  tier: 40, max: 5, note: 'Station snipers on your coop roofs',
+      needs: () => coops.length > 0 },
+    { id: 'hatPack',     tier: 40, max: 1, supply: true, links: ['buyHat'], note: 'Three hats at once, rare colours',
+      held: () => hatPackPrice > 100 ? playerHats + ' hats' : null },
+    { id: 'advancedOil', tier: 40, max: 1, supply: true, links: ['weaponOil'], note: 'Premium one-round oil',
+      held: () => !advancedOilBought ? null
+                : advancedOilWaves > 0 ? 'active this round' : 'used up' },
+
+    // ----- Wave 51 (endless) -----
+    { id: 'goldenChicken', tier: 51, max: 1, links: ['statue'], note: 'Plate every statue in solid gold',
+      needs: () => upgradeLevels.statue >= 5 },
+    { id: 'hunterCaravan', tier: 51, max: 1, links: ['hunters'], group: 'hunters',
+      note: 'Field up to three hunter camps (wave 51+)',
+      needs: () => everReachedHunterGold },
+    { id: 'bribeWolves',   tier: 51, max: 1, supply: true, note: 'Pay the pack off for one lighter wave',
+      held: () => bribePrice > 300 ? 'next costs $' + bribePrice : null },
+    { id: 'metaverse',     tier: 51, max: 1, note: 'Dissolves every either/or lock — buy both sides' },
+  ];
+  const SKILL_TREE_BY_ID = (() => {
+    const m = Object.create(null);
+    for (const n of SKILL_TREE) m[n.id] = n;
+    return m;
+  })();
+  // Rows that aren't wave tiers — they hang off a condition instead, so they
+  // render after the numeric tiers with their own heading.
+  const SKILL_GROUPS = [
+    { key: 'hunters', label: 'Hunter Camp' },
+  ];
+  // Human-readable tier labels, in display order. Grouped nodes are pulled out
+  // of the wave tiers so they only appear in their own row.
+  const SKILL_TIERS = [...new Set(SKILL_TREE.filter(n => !n.group).map(n => n.tier))].sort((a, b) => a - b);
+  // Total upgrade LEVELS the tree can hold (consumables don't count — they're
+  // repeatable buys, not progression).
+  const SKILL_TREE_TOTAL = SKILL_TREE.reduce((sum, n) => sum + (n.supply ? 0 : n.max), 0);
+
+  // Titles come from the live pool so the tree never drifts from the cards.
+  // Built once and cached — getUpgradePool() allocates the whole pool on every
+  // call, and the tree asks for ~55 titles per open.
+  let _skillTitleCache = null;
+  function skillTitle(id) {
+    // Dog Friend's pool title changes with the generation ("Dog Friend II",
+    // "Retire the pack", …) — the tree wants the stable line name.
+    if (id === 'dog') return 'Dog Friend';
+    if (!_skillTitleCache) {
+      _skillTitleCache = Object.create(null);
+      for (const o of getUpgradePool()) _skillTitleCache[o.id] = o.title;
+    }
+    return _skillTitleCache[id] || id;
+  }
+  // Levels the player currently holds across the whole tree.
+  function skillTreeOwnedLevels() {
+    let owned = 0;
+    for (const n of SKILL_TREE) {
+      if (n.supply) continue;
+      owned += Math.min(n.max, upgradeLevels[n.id] || 0);
+    }
+    return owned;
+  }
+  // The wave the tree should judge against. `wave` is 0 in the title menu (no
+  // run yet) — reading it literally would grey out even the from-the-start
+  // upgrades, so a not-yet-started run counts as wave 1.
+  function skillTreeWave() { return Math.max(1, wave || 0); }
+  // One of: over | maxed | owned | open | pairlocked | blocked | locked.
+  //   over       — past its cap (Longer Barrel only); further picks are cosmetic
+  //   pairlocked — the other half of an either/or the player already committed
+  //                to; permanent unless the Metaverse dissolves the locks
+  //   locked     — the wave gate hasn't been reached yet
+  //   blocked    — reachable wave-wise, but a prerequisite isn't met
+  function skillNodeState(node) {
+    const lvl = upgradeLevels[node.id] || 0;
+    if (node.overflow && lvl >= node.max) return 'over';
+    if (lvl >= node.max && !node.supply) return 'maxed';
+    const pair = PAIRED_WITH[node.id];
+    if (pair && lvl === 0 && !metaverseOn() && (upgradeLevels[pair] || 0) > 0) {
+      // Only call it out once the tier is actually reachable — before that
+      // it's still just an unreached tier and mustn't be revealed.
+      return skillTreeWave() >= node.tier ? 'pairlocked' : 'locked';
+    }
+    if (skillTreeWave() < node.tier) return lvl > 0 ? 'owned' : 'locked';
+    if (node.needs && !node.needs()) return lvl > 0 ? 'owned' : 'blocked';
+    return lvl > 0 ? 'owned' : 'open';
+  }
+
+  // ---------- "New upgrades unlocked" notice ----------
+  // A banner that heads the player up one wave BEFORE a tier opens, then
+  // announces it when it lands. Driven off the local `wave` value changing
+  // rather than startWave() so the guest gets it too (its wave arrives in the
+  // host's snapshot and never runs startWave locally).
+  let unlockNoticeT = 0;        // seconds of banner left
+  let unlockNoticeTitle = '';
+  let unlockNoticeSub = '';
+  let unlockNoticeAhead = false; // true = "next wave" heads-up, false = "unlocked"
+  let unlockNoticeSeenWave = -1; // last wave the tier check ran for
+  const UNLOCK_NOTICE_DUR = 5.0;
+
+  function upgradesUnlockingAt(fromWaveExclusive, toWaveInclusive) {
+    return SKILL_TREE.filter(n =>
+      n.tier > 1 && n.tier > fromWaveExclusive && n.tier <= toWaveInclusive);
+  }
+
+  function tickUnlockNotice(dt) {
+    const w = wave || 0;
+    if (w !== unlockNoticeSeenWave) {
+      const prev = unlockNoticeSeenWave;
+      unlockNoticeSeenWave = w;
+      // A restart (or the menu demo) rewinds the wave — resync silently.
+      if (!gameStarted || w <= 0 || prev < 0 || w < prev) {
+        unlockNoticeT = 0;
+        return;
+      }
+      // Everything that opened up between the last wave we looked at and now
+      // (a debug multi-wave skip can cross more than one tier at once).
+      const landed = upgradesUnlockingAt(prev, w);
+      const ahead  = upgradesUnlockingAt(w, w + 1);
+      // Deliberately no names: announcing WHAT unlocked would spoil the pool
+      // the upgrade screen is about to offer. Just the count.
+      if (landed.length) {
+        unlockNoticeAhead = false;
+        unlockNoticeTitle = landed.length + (landed.length === 1 ? ' NEW UPGRADE' : ' NEW UPGRADES') + ' UNLOCKED';
+        unlockNoticeSub = 'Check the upgrade tree when you pause';
+        unlockNoticeT = UNLOCK_NOTICE_DUR;
+        playUnlockChime();
+      } else if (ahead.length) {
+        unlockNoticeAhead = true;
+        unlockNoticeTitle = 'NEXT WAVE UNLOCKS ' + ahead.length + (ahead.length === 1 ? ' UPGRADE' : ' UPGRADES');
+        unlockNoticeSub = 'Survive to see what they are';
+        unlockNoticeT = UNLOCK_NOTICE_DUR;
+      }
+      return;
+    }
+    if (unlockNoticeT > 0 && !paused && !upgradeMode) {
+      unlockNoticeT = Math.max(0, unlockNoticeT - dt);
+    }
+  }
+
+  function drawUnlockNotice() {
+    if (unlockNoticeT <= 0 || !unlockNoticeTitle) return;
+    // Fade in over the first 0.25s, out over the last 0.6s.
+    const inA  = Math.min(1, (UNLOCK_NOTICE_DUR - unlockNoticeT) / 0.25);
+    const outA = Math.min(1, unlockNoticeT / 0.6);
+    const alpha = Math.min(inA, outA);
+    if (alpha <= 0) return;
+
+    const accent = unlockNoticeAhead ? '#7fd0ff' : '#ffd166';
+
+    ctx.save();
+    if (document.body.classList.contains('pixelate-all')) ctx.filter = 'url(#pixelate)';
+    ctx.globalAlpha = alpha;
+    ctx.font = 'bold 13px "Lucida Console", Consolas, monospace';
+    let boxW = ctx.measureText(unlockNoticeTitle).width;
+    ctx.font = '11px "Lucida Console", Consolas, monospace';
+    boxW = Math.max(boxW, ctx.measureText(unlockNoticeSub).width);
+    boxW = Math.min(W - 24, Math.max(190, boxW + 28));
+    const boxH = 44;
+    const bx = Math.round((W - boxW) / 2);
+    // Sits below the #toast / #buildhint strip (both are fixed at top:12px in
+    // CSS pixels) so a wave-start toast and this banner don't stack on top of
+    // each other. Slides down into place as it fades in.
+    const by = Math.round(44 + (1 - inA) * -8);
+
+    ctx.fillStyle = 'rgba(15, 18, 24, 0.94)';
+    ctx.fillRect(bx, by, boxW, boxH);
+    ctx.strokeStyle = accent;
+    ctx.lineWidth = 2;
+    ctx.strokeRect(bx + 1, by + 1, boxW - 2, boxH - 2);
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = accent;
+    ctx.font = 'bold 13px "Lucida Console", Consolas, monospace';
+    ctx.fillText(unlockNoticeTitle, bx + boxW / 2, by + 19);
+
+    ctx.fillStyle = '#9aa0a8';
+    ctx.font = '11px "Lucida Console", Consolas, monospace';
+    ctx.fillText(unlockNoticeSub, bx + boxW / 2, by + 34);
+    ctx.restore();
   }
 
   function pickDistinct(pool, n, cashFn, levels) {
@@ -4893,22 +5457,7 @@
       if (upgradePicked2) {
         upgradeOptions2 = [];
       } else {
-        const p2Avail = shuffle(getP2UpgradePool().filter(option => {
-          // Same sword-locks-out-the-gun rule as the host pool, but read
-          // against P2's own ladder.
-          if (upgradeLevels2.sword >= 1 && GUN_UPGRADES.has(option.id)) return false;
-          return !option.available || option.available();
-        }));
-          // Slight bias for P2's pool too.
-          const r2 = p2Avail.findIndex(o => o.id === 'range');
-          if (r2 >= 0) p2Avail.push(p2Avail[r2]);
-        // Surface a Resurrect first if it's available (same as the host's pool).
-        const resIdx = p2Avail.findIndex(o => o.id === 'resurrect');
-        if (resIdx > 0) {
-          const r = p2Avail.splice(resIdx, 1)[0];
-          p2Avail.unshift(r);
-        }
-        upgradeOptions2 = pickDistinct(p2Avail, 3, makeP2CashOption, upgradeLevels2);
+        upgradeOptions2 = buildP2UpgradePicks();
       }
     } else {
       // Otherwise the buddy just spectates the host's pick.
@@ -4918,6 +5467,25 @@
     // If everyone is already done (e.g. host ghost in shared mode with no
     // buddy pick), close the phase straight away.
     maybeFinishUpgradePhase();
+  }
+
+  // P2's three options for the individual-upgrades picker — same filtering,
+  // Longer-Barrel bias and Resurrect-surfacing as the host pool, read against
+  // P2's own ladder. Shared by the wave-start screen and the second pick.
+  function buildP2UpgradePicks() {
+    const p2Avail = shuffle(getP2UpgradePool().filter(option => {
+      // Same sword-locks-out-the-gun rule as the host pool.
+      if (upgradeLevels2.sword >= 1 && GUN_UPGRADES.has(option.id)) return false;
+      return !option.available || option.available();
+    }));
+    const r2 = p2Avail.findIndex(o => o.id === 'range');
+    if (r2 >= 0) p2Avail.push(p2Avail[r2]);
+    const resIdx = p2Avail.findIndex(o => o.id === 'resurrect');
+    if (resIdx > 0) {
+      const r = p2Avail.splice(resIdx, 1)[0];
+      p2Avail.unshift(r);
+    }
+    return pickDistinct(p2Avail, 3, makeP2CashOption, upgradeLevels2);
   }
 
   function finishUpgradePhase() {
@@ -4957,46 +5525,46 @@
         desc: () => l.spreadDown+1 >= MAX_LEVEL ? 'MAX: slug, pierces 10 wolves' : 'Spread → ' + TIGHT_SPREAD[Math.min(l.spreadDown+1, MAX_LEVEL)] + '°',
         apply: () => { l.spreadDown++; } },
       crazyTrigger: { id: 'crazyTrigger', title: 'Extreme Reload',
-        available: () => wave >= 50 && l.crazyTrigger < 5,
+        available: () => wave >= 25 && l.crazyTrigger < 5,
         desc: () => 'Narrows bar/green, widens critical line',
         apply: () => { l.crazyTrigger++; } },
       doubleBarrel: { id: 'doubleBarrel', title: 'Double-Barrel',
-        available: () => wave >= 10 && (l.machineGun === 0 || metaverseOn()) && l.doubleBarrel < 5,
+        available: () => wave >= 5 && (l.machineGun === 0 || metaverseOn()) && l.doubleBarrel < 5,
         desc: () => l.doubleBarrel === 0 ? '2-shell mag: left = one barrel, right = both' : 'Damage ×' + SKILL_TABLES.doubleBarrel[Math.min(l.doubleBarrel+1, 5)].toFixed(2),
         apply: () => { l.doubleBarrel++; } },
       machineGun: { id: 'machineGun', title: 'Machine-Gun',
-        available: () => wave >= 10 && (l.doubleBarrel === 0 || metaverseOn()) && l.machineGun < 5,
+        available: () => wave >= 5 && (l.doubleBarrel === 0 || metaverseOn()) && l.machineGun < 5,
         desc: () => l.machineGun === 0 ? 'Auto-fire (starts slow), ' + MG_MAG + '-round mag' : 'Faster fire rate (mag stays ' + MG_MAG + ')',
         apply: () => { l.machineGun++; player2.ammo = mgMagSize(player2); } },
       reloadMove: { id: 'reloadMove', title: 'Action Reload',
-        available: () => wave >= 10 && l.reloadMove < MAX_LEVEL,
+        available: () => wave >= 5 && l.reloadMove < MAX_LEVEL,
         desc: () => 'Moving reload: pin ' + reloadRunMul(l.reloadMove + 1).toFixed(2) + '× speed',
         apply: () => { l.reloadMove++; } },
       counter: { id: 'counter', title: 'Melee Strike',
-        available: () => wave >= 10 && l.counter < 5,
+        available: () => wave >= 5 && l.counter < 5,
         desc: () => l.counter >= 4 ? 'MAX: 50% melee + area damage'
                                    : 'Melee chance → ' + Math.round(SKILL_TABLES.counter[Math.min(l.counter+1, 5)] * 100) + '%',
         apply: () => { l.counter++; } },
-      sprint: { id: 'sprint', title: 'Stampede', available: () => wave >= 30 && l.sprint < 5,
+      sprint: { id: 'sprint', title: 'Stampede', available: () => wave >= 15 && l.sprint < 5,
         desc: () => '+' + Math.round(SKILL_TABLES.sprint[Math.min(l.sprint+1, 5)] * 100) + '% sprint',
         apply: () => { l.sprint++; } },
       softBullet: { id: 'softBullet', title: 'Soft Bullets',
-        available: () => wave >= 30 && (l.hardBullet === 0 || metaverseOn()) && l.softBullet < 5,
+        available: () => wave >= 15 && (l.hardBullet === 0 || metaverseOn()) && l.softBullet < 5,
         desc: () => 'Spare chicken → ' + Math.round(SKILL_TABLES.softBullet[Math.min(l.softBullet+1, 5)] * 100) + '%',
         apply: () => { l.softBullet++; } },
       hardBullet: { id: 'hardBullet', title: 'Hard Bullets',
-        available: () => wave >= 30 && (l.softBullet === 0 || metaverseOn()) && l.hardBullet < 5,
+        available: () => wave >= 15 && (l.softBullet === 0 || metaverseOn()) && l.hardBullet < 5,
         desc: () => 'Pellet damage +' + Math.round((SKILL_TABLES.hardBullet[Math.min(l.hardBullet+1, 5)] - 1) * 100) + '%',
         apply: () => { l.hardBullet++; } },
       rust: { id: 'rust', title: 'Rusty Springs',
-        available: () => wave >= 30 && l.rust < 5 && (l.rust < 4 || moneyOf(player2) >= RUST_MAX_COST),
+        available: () => wave >= 15 && l.rust < 5 && (l.rust < 4 || moneyOf(player2) >= RUST_MAX_COST),
         desc: () => l.rust >= 4 ? 'MAX ($' + RUST_MAX_COST + '): no jams — crits pay $1 each' : 'Jam +' + Math.round(SKILL_TABLES.rust[Math.min(l.rust+1, 5)] * 100) + '%, rusts gun',
         apply: () => { if (l.rust === 4) spendMoney(player2, RUST_MAX_COST); l.rust++; } },
-      spinReload: { id: 'spinReload', title: 'Quickdraw', available: () => wave >= 30 && l.spinReload < 5,
+      spinReload: { id: 'spinReload', title: 'Quickdraw', available: () => wave >= 15 && l.spinReload < 5,
         desc: () => Math.round(SKILL_TABLES.spinReload[Math.min(l.spinReload+1, 5)] * 100) + '% twirl reload',
         apply: () => { l.spinReload++; } },
       rocket: { id: 'rocket', title: 'Rocket Launcher',
-        available: () => wave >= 50 && (l.machineGun > 0 || l.doubleBarrel > 0) && (l.minigun === 0 || metaverseOn()) && l.rocket < 5,
+        available: () => wave >= 25 && (l.machineGun > 0 || l.doubleBarrel > 0) && (l.minigun === 0 || metaverseOn()) && l.rocket < 5,
         desc: () => {
           const nxt = SKILL_TABLES.rocket[Math.min(l.rocket + 1, 5)];
           return l.rocket >= 4
@@ -5005,15 +5573,15 @@
         },
         apply: () => { l.rocket++; } },
       coldShot: { id: 'coldShot', title: 'Cold Shot',
-        available: () => wave >= 10 && (l.hotShot === 0 || metaverseOn()) && l.coldShot < 5,
+        available: () => wave >= 5 && (l.hotShot === 0 || metaverseOn()) && l.coldShot < 5,
         desc: () => Math.round(COLD_HOT_CHANCE[Math.min(5, l.coldShot + 1)] * 100) + '% chance to freeze a hit wolf (slow + blue)',
         apply: () => { l.coldShot++; } },
       hotShot: { id: 'hotShot', title: 'Hot Shot',
-        available: () => wave >= 10 && (l.coldShot === 0 || metaverseOn()) && l.hotShot < 5,
+        available: () => wave >= 5 && (l.coldShot === 0 || metaverseOn()) && l.hotShot < 5,
         desc: () => Math.round(COLD_HOT_CHANCE[Math.min(5, l.hotShot + 1)] * 100) + '% chance to set a hit wolf ablaze (burns over time)',
         apply: () => { l.hotShot++; } },
       minigun: { id: 'minigun', title: 'Minigun',
-        available: () => wave >= 50 && (l.machineGun > 0 || l.doubleBarrel > 0) && (l.rocket === 0 || metaverseOn()) && l.minigun < 5,
+        available: () => wave >= 25 && (l.machineGun > 0 || l.doubleBarrel > 0) && (l.rocket === 0 || metaverseOn()) && l.minigun < 5,
         desc: () => l.minigun >= 4
             ? 'MAX: +' + MINIGUN_MAG_PER_LVL + ' mag — and it spins up: hold fire to shoot faster'
             : '+' + MINIGUN_MAG_PER_LVL + ' magazine size',
@@ -5122,7 +5690,7 @@
       .map(opt => personal[opt.id] || opt);
   }
   function makeP2CashOption() {
-    const r = Math.max(2, Math.floor(wave / 3));
+    const r = Math.max(2, Math.floor(wave * 2 / 3));
     return {
       id: 'cash', title: 'Cash',
       desc: () => 'Pick up $' + r,
@@ -5162,6 +5730,17 @@
             : upgradeLevels.dog === 1 ? (dogGen + (dogGen === 1 ? ' dog joins you!' : ' dogs join you!'))
             : 'Dog pack trained')
         : option.title + ' upgraded');
+    // Second guaranteed pick — every wave hands out two upgrades now that the
+    // run is squashed to 50 waves. Options are re-rolled so the fresh levels
+    // from the first pick are reflected (and the same card can't be re-shown
+    // at its old level).
+    if (!extraPickUsedThisWave && !bonusUpgradeAvailable) {
+      extraPickUsedThisWave = true;
+      upgradePicked = false;
+      upgradeOptions = buildUpgradePicks();
+      toast('Pick one more!', 1.6);
+      return;
+    }
     // Bonus upgrade screen: rolls once per wave, before the phase closes.
     // Death-count probability table is in bonusUpgradeChance(). Ghost buddys
     // and individual-upgrade mode skip the bonus to keep the flow simple.
@@ -5213,6 +5792,15 @@
     applyPickedUpgrade(option); // Fast mode stacks 5 levels here too
     upgradePicked2 = true;
     toast('Buddy picked ' + option.title, 1.4);
+    // The buddy gets the same second guaranteed pick the host gets. Fresh
+    // options + picked=false ride the next snapshot, which reopens the
+    // guest's picker (guestUpgradePicked is host-authoritative there).
+    if (!extraPickUsedThisWave2) {
+      extraPickUsedThisWave2 = true;
+      upgradePicked2 = false;
+      upgradeOptions2 = buildP2UpgradePicks();
+      return;
+    }
     maybeFinishUpgradePhase();
   }
 
@@ -5375,7 +5963,7 @@
         }
       }
     } else if (valid) { // any fence type
-      // Fences are locked until their upgrade is taken (wave 15 / wave 30).
+      // Fences are locked until their upgrade is taken (wood / stone at wave 15).
       const fenceLvl = type === 'stonefence' ? upgradeLevels.stoneWall : upgradeLevels.woodFence;
       if (fenceLvl <= 0) {
         valid = false;
@@ -5709,10 +6297,15 @@
     if (moneyOf(builder) < cost) { exitBuildModeFor(builder); buildToast(builder, 'Need $' + cost + ' to build coop'); return; }
     const target = getBuildTarget(builder);
     if (!target.valid) { buildToast(builder, target.reason); return; }
-    coops.push({ x: target.x, y: target.y, spawnT: 3, hp: 3, builtWave: wave, level: 0, dirtR: 0 });
+    // The very first coop of the run carries a hatch hint: a bobbing egg over
+    // the roof (drawCoop) until its first chicken actually hatches, so new
+    // players learn that coops are where chickens come from.
+    coops.push({ x: target.x, y: target.y, spawnT: 3, hp: 3, builtWave: wave, level: 0, dirtR: 0,
+                 hatchHint: coopsPlaced === 0 });
     spendMoney(builder, cost);
     playBuild();
-    buildToast(builder, 'Coop placed!  -$' + cost);
+    if (coopsPlaced === 0) buildToast(builder, 'Coop placed!  -$' + cost + ' — a chicken will hatch here!', 3.2);
+    else                   buildToast(builder, 'Coop placed!  -$' + cost);
     // Coops close out the builder's build mode (you only need one at a time).
     if (builder === player2) player2.buildMode = false;
     else                     buildMode = false;
@@ -5733,6 +6326,7 @@
   }
 
   function spawnChicken(coop, silent = false) {
+    if (coop && coop.hatchHint) coop.hatchHint = false; // first chick arrived — egg hint done
     // Bookkeeping for the wave-end bonus roll — every hatch counts so the
     // death tally is births + starting alive − ending alive.
     if (waveActive) chickensBornThisWave++;
@@ -5775,10 +6369,10 @@
     else { x = rand(-r, r); y = r; }
     // Continuous trait levels (scale with wave): after `traitStart` a wolf
     // may spawn with a `fasterLevel` and/or `resistLevel`. Levels can grow
-    // arbitrarily large as waves progress (so at wave 99 you can get ~lvl30).
+    // arbitrarily large as waves progress (so at wave 49 you can get ~lvl30).
     const extra = Math.max(0, wave - WOLF_TRAIT_START);
-    // Compute a soft max level based on wave — tuned so wave 99 => ~30
-    const baseMax = Math.floor(extra * 0.34);
+    // Compute a soft max level based on wave — tuned so wave 49 => ~30
+    const baseMax = Math.floor(extra * 0.68);
     // Combine deterministic base with the stochastic global cap; allow a
     // rare per-spawn bonus so ultra-high wolves can still appear unpredictably.
     let maxLevel = Math.max(baseMax, wolfLevelCap);
@@ -5793,36 +6387,36 @@
       return Math.floor(Math.pow(Math.random(), bias) * (max + 1));
     }
 
-    // Fast (faster-level) wolves are gated to wave 50+ so the early and mid
+    // Fast (faster-level) wolves are gated to wave 25+ so the early and mid
     // game stay about resistant wolves rather than speedy ones, and they climb
     // slower than resist (half the level cap) once they do start appearing.
-    const fasterLevel = wave >= 50 ? sampleLevel(Math.ceil(maxLevel / 2)) : 0;
+    const fasterLevel = wave >= 25 ? sampleLevel(Math.ceil(maxLevel / 2)) : 0;
     const resistLevel = sampleLevel(maxLevel);
 
-    // Assassin wolves: from wave 20 on, a growing share of the pack spawns as
-    // player-hunters. The per-wolf chance climbs 0.5% each wave so packs slowly
+    // Assassin wolves: from wave 10 on, a growing share of the pack spawns as
+    // player-hunters. The per-wolf chance climbs 1% each wave so packs slowly
     // fill with assassins, with a softer ceiling so the late game isn't a
     // wall of them.
     const assassinChance = wave >= ASSASSIN_START
-      ? clamp(0.04 + (wave - ASSASSIN_START) * 0.005, 0, 0.35)
+      ? clamp(0.04 + (wave - ASSASSIN_START) * 0.01, 0, 0.35)
       : 0;
     const assassin = Math.random() < assassinChance;
 
-    // Sword wolves: a very rare variant (from wave 5 on) that carries a blade
+    // Sword wolves: a very rare variant (from wave 3 on) that carries a blade
     // in its jaws — longer attack reach plus a melee-swing animation. The
     // per-wolf chance is divided by the pack size, so the rate stays flat
     // (~SWORD_WOLF_RATE per wave) no matter how big the wave gets.
     const crMul = CRYPTID_RADAR_MUL[Math.min(5, upgradeLevels.cryptidRadar || 0)];
-    const sword = !swordWolfAppeared && wave >= 5
+    const sword = !swordWolfAppeared && wave >= 3
       && Math.random() < SWORD_WOLF_RATE * crMul / Math.max(1, nextWolves);
     if (sword) swordWolfAppeared = true;
 
     // Hatted wolves: a rare variant that drops a hat onto the player's stack
     // when killed. Rate is divided by pack size so it averages ~HAT_WOLF_RATE
     // per wave. Mutually exclusive with sword/assassin for visual clarity.
-    // Hatted-wolf rate doubles past wave 50 so late runs can keep refilling
+    // Hatted-wolf rate doubles past wave 25 so late runs can keep refilling
     // the keeper's hat stack as the bullet hell ramps up.
-    const hatRate = (wave >= 50 ? HAT_WOLF_RATE * 2 : HAT_WOLF_RATE) * crMul;
+    const hatRate = (wave >= 25 ? HAT_WOLF_RATE * 2 : HAT_WOLF_RATE) * crMul;
     const hatted = (opts && opts.hatted) ? true : (!sword && !assassin && Math.random() < hatRate / Math.max(1, nextWolves));
 
     // Convert levels into gameplay values. Assassins roll HP/size/speed from
@@ -5838,9 +6432,9 @@
       speedMul *= 1.25;
       hp = Math.max(hp, Math.ceil(hp * 1.5));
     }
-    // Endless ramp: past wave 100 the whole pack gets a little beefier every
+    // Endless ramp: past wave 50 the whole pack gets a little beefier every
     // wave, so survival runs keep getting harder.
-    if (wave > 100) hp = Math.ceil(hp * (1 + (wave - 100) * 0.04));
+    if (wave > 50) hp = Math.ceil(hp * (1 + (wave - 50) * 0.08));
 
     // Sabotage roll — applies only to plain wolves (not sword/assassin
     // specials, which already have their own personality). If they roll
@@ -5857,9 +6451,9 @@
       }
     }
     // Jumping wolves — ordinary wolves that hop around and vault clean over
-    // fences. They only start appearing after wave 100 (wave 101+), and the
+    // fences. They only start appearing after wave 50 (wave 51+), and the
     // chance is flat on plain wolves; silent (no intro toast).
-    const jumper = wave > 100 && !assassin && !sword && !defective && Math.random() < 0.12;
+    const jumper = wave > 50 && !assassin && !sword && !defective && Math.random() < 0.12;
     wolves.push({
       x, y, vx: 0, vy: 0,
       target: null,
@@ -5942,7 +6536,7 @@
     return                 { x: rand(-r, r), y:  r };
   }
 
-  // Brood wolf — appears from wave 40. Behaves like an ordinary wolf in
+  // Brood wolf — appears from wave 20. Behaves like an ordinary wolf in
   // every way; the trick is that when it dies it bursts into 3 wandering
   // pups (visual blast only — no damage to anyone nearby).
   function spawnBreederWolf() {
@@ -5978,7 +6572,7 @@
     });
   }
 
-  // Ranged wolf — appears from wave 80. Walks into the map, sits down, and
+  // Ranged wolf — appears from wave 35. Walks into the map, sits down, and
   // pelts the closest live keeper or chicken with red bullets.
   function spawnRangedWolf() {
     const s = pickEdgeSpawn();
@@ -5997,7 +6591,7 @@
     toastEnemyIntroOnce('ranged', 'A laser wolf has joined the pack!', 1.8);
   }
 
-  // Ranged wolf — appears from wave 60. Sits and shoots like the laser wolf,
+  // Ranged wolf — appears from wave 30. Sits and shoots like the laser wolf,
   // but instead of a hit-scan beam it lobs slow red homing bullets that chase
   // the keeper. Shares the laser wolf's sit-and-fire AI (updateRangedWolf).
   function spawnHomerWolf() {
@@ -6017,7 +6611,7 @@
     toastEnemyIntroOnce('homer', 'A ranged wolf has joined the pack!', 1.8);
   }
 
-  // Missile wolf — wave 101+. A big wolf that lumbers a short way in, plants
+  // Missile wolf — wave 51+. A big wolf that lumbers a short way in, plants
   // itself, and bombards coops with twin back-mounted rockets after a long,
   // telegraphed wind-up. It never chases — the threat is to the coops, not the
   // keeper — so the player has a window to run it down before each salvo.
@@ -6161,7 +6755,7 @@
 
   function maybeSpawnP2Cameo() {
     if (multiplayer || p2CameoUsed || p2Cameo) return;
-    if (wave < 30) return; // the buddy cameo only shows up from wave 30 on
+    if (wave < 15) return; // the buddy cameo only shows up from wave 15 on
     if (Math.random() >= P2_CAMEO_CHANCE) return;
     p2CameoUsed = true;
     const s = pickEdgeSpawn();
@@ -6738,6 +7332,8 @@
     chickensBornThisWave = 0;
     chickenDeathsThisWave = 0;
     bonusUpgradeShownThisWave = false;
+    extraPickUsedThisWave = false;
+    extraPickUsedThisWave2 = false;
     // Weapon Oil lasts WEAPON_OIL_WAVES waves per purchase: tick the timer
     // down each new wave and clear all charges once it runs out, so the
     // bar's amber halo holds for several waves instead of a single shot.
@@ -6762,8 +7358,8 @@
     if (skipCount > 1) addSharedMoney(growFarms(skipCount - 1));
     // Night of the Wolf — flip the wave dark + buff wolves. Triggered by:
     //  (a) the debug force flag,
-    //  (b) a probabilistic roll within the pre-100 band, capped to 3/run, or
-    //  (c) the pre-rolled wave inside the current post-100 10-wave block.
+    //  (b) a probabilistic roll within the pre-50 band, capped to 3/run, or
+    //  (c) the pre-rolled wave inside the current post-50 5-wave block.
     nightOfWolf = false;
     let triggerNight = nightOfWolfDebugForce;
     if (wave === BOSS_WAVE) triggerNight = false; // the boss wave is never night
@@ -6774,11 +7370,11 @@
           triggerNight = true;
         }
       } else if (wave > NIGHT_OF_WOLF_MAX_WAVE) {
-        // Pre-roll one Night per 10-wave block: 101-110, 111-120, …
-        const blockStart = Math.floor((wave - 1) / 10) * 10 + 1;
+        // Pre-roll one Night per 5-wave block: 51-55, 56-60, …
+        const blockStart = Math.floor((wave - 1) / 5) * 5 + 1;
         if (lateNightBlockStart !== blockStart) {
           lateNightBlockStart = blockStart;
-          nextLateNightWave = blockStart + Math.floor(Math.random() * 10);
+          nextLateNightWave = blockStart + Math.floor(Math.random() * 5);
         }
         if (wave === nextLateNightWave) triggerNight = true;
       }
@@ -6804,17 +7400,17 @@
         toast('Hunters took your last $' + taken + ' — leaving after this wave', 2.6);
       }
     }
-    // Wave 100 is the boss fight — no normal pack spawns; the boss controller
+    // Wave 50 is the boss fight — no normal pack spawns; the boss controller
     // (bossTick) drives everything from here.
     if (wave === BOSS_WAVE) { startBossWave(); return; }
     // Wolf count scales with the wave, then is reduced by a factor of 1.5 (at least 1).
-    // Wolf-count ramp: linear early on, then damped past wave 30 so the
-    // late game doesn't drown the player. At wave 60 this saves ~12 wolves
-    // vs the old curve, at wave 100 closer to 30.
-    const rampInput = wave <= 30 ? wave * 1.2 : 30 * 1.2 + (wave - 30) * 0.6;
+    // Wolf-count ramp: linear early on, then damped past wave 15 so the
+    // late game doesn't drown the player. At wave 30 this saves ~12 wolves
+    // vs the old curve, at wave 50 closer to 30.
+    const rampInput = wave <= 15 ? wave * 2.4 : 15 * 2.4 + (wave - 15) * 1.2;
     nextWolves = Math.min(MAX_WOLVES, Math.max(1, Math.round((1 + Math.floor(rampInput)) / 1.5)) + 1);
-    // Endless mode (wave 101+) ramps the pack up a little faster each wave.
-    if (wave > 101) nextWolves += Math.floor((wave - 101) * 0.5);
+    // Endless mode (wave 51+) ramps the pack up a little faster each wave.
+    if (wave > 51) nextWolves += wave - 51;
     // Calm/Rough Waves shift the NORMAL wolf count (specials are added separately
     // below and stay untouched). Bribe Wolves layers a one-shot multiplier on top
     // for this wave, then rolls its "wave after" bonus into the next one.
@@ -6829,9 +7425,9 @@
     pendingSpawns += nextWolves;
     // Howl Delay upgrade delays when wolves first appear each wave.
     const spawnDelay = tableAt('wolfDelay') * 1000;
-    // Stagger between spawns also stretches past wave 40 — gives the player
+    // Stagger between spawns also stretches past wave 20 — gives the player
     // breathing room when the pack count climbs.
-    const spawnStagger = 600 + Math.max(0, wave - 40) * 8;
+    const spawnStagger = 600 + Math.max(0, wave - 20) * 16;
     // Capture the current run generation — if the run is restarted before a
     // delayed spawn fires, the callback bails out instead of seeding the
     // fresh game with extra wolves.
@@ -6848,9 +7444,9 @@
     const cryptidMul = CRYPTID_RADAR_MUL[Math.min(5, upgradeLevels.cryptidRadar || 0)];
     // Rare: a fox slips in alongside the pack (6% per wave × cryptid mul).
     // Foxes are scarce in the opening waves (when a snatched chicken hurts
-    // most) and ramp up to the full rate by ~wave 25.
-    const foxWaveScale = Math.min(1, Math.max(0.12, wave / 25));
-    if (Math.random() < 0.06 * cryptidMul * foxWaveScale) {
+    // most) and ramp up to the full rate by ~wave 12.
+    const foxWaveScale = Math.min(1, Math.max(0.12, wave / 12));
+    if (Math.random() < 0.12 * cryptidMul * foxWaveScale) {
       pendingSpawns++;
       setTimeout(() => {
         if (gen !== runGen) return;
@@ -6884,10 +7480,10 @@
         spawnFox();
       }, lateAt);
     }
-    // Bomb wolves — slow wall-sappers from wave 50, once 4+ walls stand. One
-    // per wave, plus one more every 10 waves past 50.
+    // Bomb wolves — slow wall-sappers from wave 25, once 4+ walls stand. One
+    // per wave, plus one more every 5 waves past 25.
     if (wave >= BOMB_WALL_WAVE && fences.length >= BOMB_MIN_WALLS) {
-      const bombCount = Math.min(120, 1 + Math.floor((wave - BOMB_WALL_WAVE) / 10));
+      const bombCount = Math.min(120, 1 + Math.floor((wave - BOMB_WALL_WAVE) / 5));
       for (let i = 0; i < bombCount; i++) {
         pendingSpawns++;
         setTimeout(() => {
@@ -6898,10 +7494,10 @@
         }, spawnDelay + 800 + i * 900);
       }
     }
-    // Brood wolves — from wave 40 every pack contains a brood wolf that drops
-    // 3 wandering pups. One every wave, plus one more every 20 waves past start.
+    // Brood wolves — from wave 20 every pack contains a brood wolf that drops
+    // 3 wandering pups. One every wave, plus one more every 10 waves past start.
     if (wave >= BREEDER_WAVE) {
-      const breederCount = Math.min(100, 1 + Math.floor((wave - BREEDER_WAVE) / 20));
+      const breederCount = Math.min(100, 1 + Math.floor((wave - BREEDER_WAVE) / 10));
       for (let i = 0; i < breederCount; i++) {
         pendingSpawns++;
         setTimeout(() => {
@@ -6914,7 +7510,7 @@
     }
     // Laser wolves — from RANGED_WAVE, a sit-and-shoot beam wolf joins each pack.
     if (wave >= RANGED_WAVE) {
-      const rangedCount = Math.min(100, 1 + Math.floor((wave - RANGED_WAVE) / 20));
+      const rangedCount = Math.min(100, 1 + Math.floor((wave - RANGED_WAVE) / 10));
       for (let i = 0; i < rangedCount; i++) {
         pendingSpawns++;
         setTimeout(() => {
@@ -6925,10 +7521,10 @@
         }, spawnDelay + 1400 + i * 700);
       }
     }
-    // Ranged wolves (homing-bullet shooters) — from wave 60, one per pack plus
-    // one more every 20 waves past the start.
+    // Ranged wolves (homing-bullet shooters) — from wave 30, one per pack plus
+    // one more every 10 waves past the start.
     if (wave >= HOMER_WAVE) {
-      const homerCount = Math.min(100, 1 + Math.floor((wave - HOMER_WAVE) / 20));
+      const homerCount = Math.min(100, 1 + Math.floor((wave - HOMER_WAVE) / 10));
       for (let i = 0; i < homerCount; i++) {
         pendingSpawns++;
         setTimeout(() => {
@@ -6949,7 +7545,7 @@
         spawnParachuteWolf();
       }, spawnDelay + rand(400, 2200));
     }
-    // Missile wolf — wave 101+, an occasional siege brute that bombards coops.
+    // Missile wolf — wave 51+, an occasional siege brute that bombards coops.
     if (wave >= MISSILE_WOLF_WAVE && coops.length > 0 && Math.random() < MISSILE_WOLF_RATE) {
       pendingSpawns++;
       setTimeout(() => {
@@ -6959,9 +7555,9 @@
         spawnMissileWolf();
       }, spawnDelay + rand(600, 2600));
     }
-    // Hunter wolf — a rare keeper-reskin cryptid. At most one every 20 waves.
+    // Hunter wolf — a rare keeper-reskin cryptid. At most one every 10 waves.
     // Only ever shows up in a NEW-GAME-PLUS run: the player has to beat the
-    // wave-100 boss and hit restart first (restartBonusTier > 0). It never
+    // wave-50 boss and hit restart first (restartBonusTier > 0). It never
     // appears on a first playthrough.
     if (restartBonusTier > 0 && wave >= HUNTER_WOLF_MIN_WAVE
         && wave - lastHunterWolfWave >= HUNTER_WOLF_GAP_WAVES
@@ -6975,8 +7571,8 @@
         spawnHunterWolf();
       }, spawnDelay + rand(800, 3200));
     }
-    // Ghost wolf — chance grows +2% per player death; appears from wave 5+ onward.
-    if (wave >= 5 && ghostWolfChance > 0 && Math.random() < ghostWolfChance) {
+    // Ghost wolf — chance grows +2% per player death; appears from wave 3+ onward.
+    if (wave >= 3 && ghostWolfChance > 0 && Math.random() < ghostWolfChance) {
       pendingSpawns++;
       setTimeout(() => {
         if (gen !== runGen) return;
@@ -6988,9 +7584,9 @@
     // Player-2 cameo — a vanishingly rare solo-run easter egg (see the helper).
     maybeSpawnP2Cameo();
     toast('Wave ' + wave + ': ' + nextWolves + ' wolves!');
-    // Coops level up every 10 waves they've stood — each level stacks a floor.
+    // Coops level up every 5 waves they've stood — each level stacks a floor.
     for (const c of coops) {
-      const newLevel = Math.min(MAX_COOP_LEVEL, Math.floor((wave - (c.builtWave || 0)) / 10));
+      const newLevel = Math.min(MAX_COOP_LEVEL, Math.floor((wave - (c.builtWave || 0)) / 5));
       if (newLevel > (c.level || 0)) c.level = newLevel;
     }
     // Next-wave timer: length grows with wave count
@@ -7000,7 +7596,7 @@
     // slowly than before so late waves do not ramp speed too hard.
     if (wave > WOLF_TRAIT_START) {
       const extra = wave - WOLF_TRAIT_START;
-      const incChance = Math.min(0.30, 0.03 + extra * 0.005);
+      const incChance = Math.min(0.30, 0.03 + extra * 0.01);
       if (Math.random() < incChance) {
         // usually +1, rarely +2
         wolfLevelCap += 1 + (Math.random() < 0.08 ? 1 : 0);
@@ -7022,7 +7618,7 @@
     if (advancedOilWaves > 0) advancedOilWaves--; // Advanced Oil lasts a single round
 
     // Each surviving chicken pays $1 (fat ones pay more); the shot-chicken
-    // penalty doubles every 10 waves.
+    // penalty doubles every 5 waves.
     let aliveChickens = 0, grossReward = 0;
     for (const c of chickens) {
       if (!c.alive) continue;
@@ -7039,7 +7635,7 @@
     // — so if either signal misses an edge case, the other catches it.
     const formulaDeaths = Math.max(0, chickensAtWaveStart + chickensBornThisWave - aliveChickens);
     bonusDeathSnapshot = Math.max(chickenDeathsThisWave, formulaDeaths);
-    const penaltyMul = Math.pow(2, Math.floor(wave / 10));
+    const penaltyMul = Math.pow(2, Math.floor(wave / 5));
     // Each keeper's friendly-fire kills are tracked separately now, so the
     // shared chicken-kill tally is just their sum.
     const totalShot = chickensKilledByPlayer + (player2.chickensKilledThisWave || 0);
@@ -9214,7 +9810,7 @@
     if (Math.abs(wSvx) > 0.05) w.facingLeft = wSvx < 0;
   }
 
-  // Missile wolf (wave 101+). Ambles a short way in, plants itself, then
+  // Missile wolf (wave 51+). Ambles a short way in, plants itself, then
   // bombards coops with twin rockets after a long telegraphed wind-up. It never
   // chases a keeper — the menace is to the coops — so it can be run down and
   // shot before the next salvo lands. Killable via the normal pellet/hurt path.
@@ -9486,7 +10082,7 @@
     beams.push({ x1: w.x, y1: w.y, x2: end.x, y2: end.y, t: 0, life: 0.22, color: '#ff2a22', thick: 0.45 });
   }
 
-  // ---------- Wave-100 boss fight ----------
+  // ---------- Wave-50 boss fight ----------
   function startBossWave() {
     bossWaveActive = true;
     bossPhase = 'intro';
@@ -9944,7 +10540,7 @@
   }
 
   // Launch a pair of coop-seeking missiles from (x,y). Shared by the boss's
-  // MK-04 salvo and the wave-101+ missile wolf. They steer gently toward the
+  // MK-04 salvo and the wave-51+ missile wolf. They steer gently toward the
   // coop so a standing one is reliably struck. `ignoreWalls` (the boss's
   // missiles) lets them pierce fences; the missile wolf's still detonate on
   // walls, so for the wolf a stone wall is a real defence.
@@ -9978,7 +10574,7 @@
     explosionHitKeepers(m.x, m.y, BOSS_MISSILE_BLAST_R);
   }
 
-  // A missile (boss OR the wave-101+ missile wolf) connects with a coop: it
+  // A missile (boss OR the wave-51+ missile wolf) connects with a coop: it
   // shudders, sheds 1–3 floors that it must then regrow, and any rooftopper
   // perched on it is knocked off to its death. Fewer floors = fewer chicken
   // slots and a weaker/slower rooftopper, so a strike really stings.
@@ -9989,7 +10585,7 @@
     const lost = Math.min(have, MISSILE_MIN_FLOORS + Math.floor(Math.random() * span));
     if (lost > 0) {
       coop.level = have - lost;
-      // Push builtWave forward so the regular every-10-waves growth has to
+      // Push builtWave forward so the regular every-5-waves growth has to
       // rebuild the lost floors instead of snapping them straight back.
       coop.builtWave = (coop.builtWave || 0) + lost * 10;
     }
@@ -10067,12 +10663,12 @@
     }
   }
 
-  // The state machine that runs the whole wave-100 fight (host-authoritative).
+  // The state machine that runs the whole wave-50 fight (host-authoritative).
   function bossTick(dt) {
     if (!bossWaveActive) return;
     // The boss's chicken-siphon orbs tick every frame of the fight, regardless
     // of which sub-phase the state machine is in. (Missiles tick in the main
-    // update loop so the wave-101+ missile wolf's salvos work outside the fight.)
+    // update loop so the wave-51+ missile wolf's salvos work outside the fight.)
     updateChickenSuckers(dt);
     bossPhaseT += dt;
     if (bossPhase === 'intro') {
@@ -10178,7 +10774,7 @@
   }
 
   // Endscreen "Keep going" — close it and flow into the normal wave-cleared
-  // upgrade screen, which then advances to wave 101.
+  // upgrade screen, which then advances to wave 51.
   function bossContinue() {
     endScreen = false;
     bossPhase = '';
@@ -10368,9 +10964,9 @@
   function updateWolf(w, dt) {
     if (!w.alive) return;
     if (w.boss) return; // the boss is driven by bossTick, not the generic wolf AI
-    // Post-wave-100 damage-soak window — refreshes the per-second cap (see
+    // Post-wave-50 damage-soak window — refreshes the per-second cap (see
     // cappedWolfDamage). Ticked here for every wolf variant.
-    if (wave > 100) {
+    if (wave > 50) {
       w.dmgWindowT = (w.dmgWindowT || 1) - dt;
       if (w.dmgWindowT <= 0) { w.dmgWindowT = 1; w.dmgInWindow = 0; }
     }
@@ -11181,13 +11777,13 @@
   // Apply damage to a wolf/fox outside the pellet path (used by the melee
   // counter) — mirrors the pellet kill bookkeeping. `attacker` (default
   // player1) gets credit for the kill on the per-player scoreboard.
-  // Post-wave-100, every wolf soaks damage like the boss: a rolling per-second
+  // Post-wave-50, every wolf soaks damage like the boss: a rolling per-second
   // cap that TIGHTENS as the waves climb (the "increasing soak" stat). Returns
   // the damage actually allowed through this frame; updates the rolling window
   // (the window itself is ticked in updateWolf).
-  function wolfDpsCap() { return Math.max(8, 40 - (wave - 100) * 0.5); }
+  function wolfDpsCap() { return Math.max(8, 40 - (wave - 50) * 1); }
   function cappedWolfDamage(w, dmg) {
-    if (wave <= 100 || w.boss) return dmg;
+    if (wave <= 50 || w.boss) return dmg;
     const cap = wolfDpsCap();
     w.dmgInWindow = w.dmgInWindow || 0;
     if (w.dmgInWindow >= cap) return 0;
@@ -11446,7 +12042,7 @@
 
   function activateResurrect() {
     if (resurrectCount >= 9 || multiplayer) return;
-    if (wave - resurrectLastWave < 10 && resurrectLastWave >= 0) return;
+    if (wave - resurrectLastWave < 5 && resurrectLastWave >= 0) return;
     resurrectCount++;
     resurrectLastWave = wave;
 
@@ -11518,13 +12114,18 @@
   let hatsBought = 0;     // lifetime Buy Hat purchases — green hats can appear after 5
   let revivePrice = 10;   // Resurrect Buddy cost — starts at $10, grows $10 per use
   let firstReviveFree = true; // the first Resurrect Buddy of a run is on the house
-  let hatPackPrice = 100; // Buy Hat Pack (wave 80+) — 3 hats at once, ratchets up
+  let hatPackPrice = 100; // Buy Hat Pack (wave 40+) — 3 hats at once, ratchets up
   // Weapon Oil is single-tier. While active it widens the reload skill-check
   // accept band by `WEAPON_OIL_PER_CHARGE` for `weaponOilWaves` waves.
   let weaponOilCharges = 0;
   let weaponOilWaves   = 0;
-  let advancedOilWaves = 0; // Advanced Oil (wave 80+) — bigger band + crit, one round only
-  let bribePrice = 300;     // Bribe Wolves (wave 101+) — ratchets up each buy
+  // Lifetime purchase counts. The oils leave no trace once they wear off, so
+  // without these the upgrade tree couldn't tell "never bought" from "bought
+  // and expired" — it needs that to know whether to list the row at all.
+  let weaponOilBought   = 0;
+  let advancedOilBought = 0;
+  let advancedOilWaves = 0; // Advanced Oil (wave 40+) — bigger band + crit, one round only
+  let bribePrice = 300;     // Bribe Wolves (wave 51+) — ratchets up each buy
   let bribeNextWaveMul = 1; // wolf-count multiplier applied to the very next wave
   let bribeFollowWaveMul = 1; // ...then this one rolls into the wave after
   const hatColors = Array(START_HATS).fill('#5a3825'); // colour of each stacked hat (bottom → top)
@@ -11714,11 +12315,11 @@
           continue;
         }
         // Hunter wolf: one hat per hit (debounced); everything else takes the
-        // normal damage, capped per-second post-wave-100.
+        // normal damage, capped per-second post-wave-50.
         if (w.hunterWolf) {
           if ((w.hitDebounceT || 0) <= 0) { w.hitDebounceT = HUNTER_WOLF_HIT_IFRAME; w.hp -= 1; }
         } else {
-          w.hp -= cappedWolfDamage(w, p.dmg); // post-100 per-second soak cap
+          w.hp -= cappedWolfDamage(w, p.dmg); // post-50 per-second soak cap
         }
         w.hurtT = 0.12;
         // Cold Shot / Hot Shot: chill (slow + blue) or ignite (burn-over-time).
@@ -11933,6 +12534,9 @@
     }
     // Keeper death-falls keep animating even after the sim freezes on gameOver.
     tickKeeperDeaths(dt);
+    // Watches the wave counter for a tier boundary — runs before the pause /
+    // upgrade-screen bailouts so a wave change is never missed.
+    tickUnlockNotice(dt);
     if (gameOver) return;
     if (paused) return;
     if (upgradeMode) return;
@@ -12299,7 +12903,7 @@
       // active wave. Outside that window (pre-game grace, late wave, between
       // waves) they hold off — keeps each round's flock to what the player
       // started with plus the early-wave dump.
-      // During the wave-100 fight, let coops keep laying through the 'pack'
+      // During the wave-50 fight, let coops keep laying through the 'pack'
       // phases (the wolf-horde breaks between boss sides) so the flock the boss
       // is siphoning can replenish.
       const coopsCanLay = (waveActive && waveElapsed < CHICKEN_SPAWN_WINDOW)
@@ -12339,7 +12943,7 @@
       // Entities
       for (const c of chickens) updateChicken(c, dt);
       for (const w of wolves) updateWolf(w, dt);
-      bossTick(dt); // wave-100 boss state machine
+      bossTick(dt); // wave-50 boss state machine
       // Ghost keepers haunt the pack — drifting through a wolf has a tiny chance
       // to flip it turncoat (it turns on its own). Host-authoritative.
       if (player.ghost) ghostSabotage(player, dt);
@@ -12541,6 +13145,9 @@
       drawLagWarning();
     }
 
+    // Unlock banner — under the pause / upgrade panels, over the world.
+    if (!upgradeMode && !gameOver && !endScreen) drawUnlockNotice();
+
     if (paused) {
       drawPauseWindow();
     }
@@ -12619,12 +13226,12 @@
     } else if (multiplayer && isHost && guestWantsRestart) {
       footer = 'Buddy is ready!   R / F5 — restart (with a bonus!)   C — keep going';
     } else {
-      footer = 'C / Enter — keep going (Wave 101+)     R / F5 — restart (with a bonus!)';
+      footer = 'C / Enter — keep going (Wave 51+)     R / F5 — restart (with a bonus!)';
     }
     drawGameOverPanel({
       title: 'FANGUS MK-04 DESTROYED',
       titleColor: '#ff8a4a',
-      subtitle: 'Wave 100 conquered — carry on into the endless waves, or restart for a mystery bonus.',
+      subtitle: 'Wave 50 conquered — carry on into the endless waves, or restart for a mystery bonus.',
       footer: footer,
       footerColor: '#9fe6a0',
     });
@@ -12791,11 +13398,11 @@
       ctx.fillText('Buddy wants a rematch!', W / 2, btnY - 6);
     }
 
-    // RESPAWN button — singleplayer death only, max 9 uses, 10-wave cooldown.
+    // RESPAWN button — singleplayer death only, max 9 uses, 5-wave cooldown.
     // Always visible when singleplayer; grayed out when on cooldown or uses exhausted.
     let resurrBtn = null;
     const canResurrect = !isEndScr && !multiplayer && resurrectCount < 9
-      && (wave - resurrectLastWave >= 10 || resurrectLastWave < 0);
+      && (wave - resurrectLastWave >= 5 || resurrectLastWave < 0);
     if (!isEndScr && !multiplayer) {
       const rBtnW = 160;
       const rBtnH = 26;
@@ -12818,7 +13425,7 @@
       ctx.font = 'bold 12px "Lucida Console", Consolas, monospace';
       const usesLeft = Math.max(0, 9 - resurrectCount);
       const cooldown = !canResurrect && resurrectLastWave >= 0 && resurrectCount < 9
-        ? (10 - (wave - resurrectLastWave)) : 0;
+        ? (5 - (wave - resurrectLastWave)) : 0;
       let label = 'RESPAWN (' + usesLeft + ' left)';
       if (resurrectCount >= 9) label = 'RESPAWN (used up)';
       else if (cooldown > 0) label = 'RESPAWN (wave -' + cooldown + ')';
@@ -14037,26 +14644,31 @@
     const pbY  = panelY + panelH - hintH + 6;
     const pbGap = 8;
     ctx.font = 'bold 13px "Lucida Console", Consolas, monospace';
-    const resumeW = Math.round(ctx.measureText('RESUME').width) + 32;
-    const quitW   = Math.round(ctx.measureText('QUIT TO MENU').width) + 32;
-    const pbTotalW = resumeW + pbGap + quitW;
+    const PAUSE_BTN_LABEL = { resume: 'RESUME', tree: 'TREE', quit: 'QUIT TO MENU' };
+    const PAUSE_BTN_COLOR = { resume: '#ffd166', tree: '#7fd0ff', quit: '#ff8a8a' };
+    const resumeW = Math.round(ctx.measureText(PAUSE_BTN_LABEL.resume).width) + 32;
+    const treeW   = Math.round(ctx.measureText(PAUSE_BTN_LABEL.tree).width) + 26;
+    const quitW   = Math.round(ctx.measureText(PAUSE_BTN_LABEL.quit).width) + 32;
+    const pbTotalW = resumeW + pbGap + treeW + pbGap + quitW;
     const pbStartX = Math.round(panelX + (panelW - pbTotalW) / 2);
 
-    const resumeR = { x: pbStartX,               y: pbY, w: resumeW, h: pbH };
-    const quitR   = { x: pbStartX + resumeW + pbGap, y: pbY, w: quitW,   h: pbH };
-    pauseBtnRects = { resume: resumeR, quit: quitR };
+    pauseBtnRects = {
+      resume: { x: pbStartX,                                y: pbY, w: resumeW, h: pbH },
+      tree:   { x: pbStartX + resumeW + pbGap,              y: pbY, w: treeW,   h: pbH },
+      quit:   { x: pbStartX + resumeW + treeW + pbGap * 2,  y: pbY, w: quitW,   h: pbH },
+    };
 
     for (const [key, r] of Object.entries(pauseBtnRects)) {
       const hovered = mouse.x >= r.x && mouse.x <= r.x + r.w &&
                       mouse.y >= r.y && mouse.y <= r.y + r.h;
       ctx.fillStyle = hovered ? 'rgba(255,209,102,0.22)' : 'rgba(255,255,255,0.06)';
       ctx.fillRect(r.x, r.y, r.w, r.h);
-      ctx.strokeStyle = key === 'resume' ? '#ffd166' : '#ff8a8a';
+      ctx.strokeStyle = PAUSE_BTN_COLOR[key];
       ctx.lineWidth = 1;
       ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
-      ctx.fillStyle = key === 'resume' ? '#ffd166' : '#ff8a8a';
+      ctx.fillStyle = PAUSE_BTN_COLOR[key];
       ctx.textAlign = 'center';
-      ctx.fillText(key === 'resume' ? 'RESUME' : 'QUIT TO MENU', r.x + r.w / 2, r.y + 17);
+      ctx.fillText(PAUSE_BTN_LABEL[key], r.x + r.w / 2, r.y + 17);
     }
 
     ctx.restore();
@@ -15066,7 +15678,7 @@
     else drawShadow(c.x, c.y, 0.95);
     const wallH = 22; // height of one floor in screen px
     const roofH = 16; // roof height above the top floor in screen px
-    // A coop gains a floor for every 10 waves it survives (see startWave()).
+    // A coop gains a floor for every 5 waves it survives (see startWave()).
     const floors = (c.level || 0) + 1;
     // Per-section fade: the ground floor uses the standard player-behind fade
     // so the keeper still shows through, while floors 2+/roof/chimney fade
@@ -15182,16 +15794,16 @@
       }
       ctx.restore();
     }
-    // From wave 50 on, coops weather to stone — the ground floor first, then
+    // From wave 25 on, coops weather to stone — the ground floor first, then
     // one more floor every so often. Each subsequent floor takes a MINIMUM of
-    // 10 rounds, plus a per-coop, per-floor random jitter (0–6) so coops don't
+    // 5 rounds, plus a per-coop, per-floor random jitter (0–3) so coops don't
     // all petrify in lockstep — every building ages on its own schedule.
     let stoneFloors = 0;
-    if (wave >= 50) {
-      stoneFloors = 1;          // ground floor always weathers at wave 50
-      let thresh = 50;
+    if (wave >= 25) {
+      stoneFloors = 1;          // ground floor always weathers at wave 25
+      let thresh = 25;
       for (let k = 1; k < floors; k++) {
-        thresh += 10 + (vhash(200 + k) % 7); // ≥10 rounds + random factor
+        thresh += 5 + (vhash(200 + k) % 4); // ≥5 rounds + random factor
         if (wave >= thresh) stoneFloors++; else break;
       }
     }
@@ -15431,6 +16043,36 @@
           ctx.ellipse(cx + off, baseY - 4, 1.3, 3.4 * flick, 0, 0, Math.PI * 2);
           ctx.fill();
         }
+      }
+      ctx.restore();
+    }
+    // First-coop hatch hint — a bobbing, cracking egg over the fresh coop so
+    // the player knows a chicken is on the way. Cleared by spawnChicken() the
+    // moment the first chick hatches out.
+    if (c.hatchHint && !preview && !launching) {
+      ctx.save();
+      ctx.globalAlpha = coopBaseAlpha;
+      const bob = Math.sin(Date.now() * 0.004) * 2.5;
+      const ex = cx;
+      const ey = cy - floors * wallH - roofH - 14 + bob;
+      ctx.fillStyle = '#fffbe8';
+      ctx.strokeStyle = '#2a2a30';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.ellipse(ex, ey, 4.5, 6, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      // Zig-zag crack so it reads "about to hatch", not just an egg.
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(ex - 3, ey + 1); ctx.lineTo(ex - 1, ey - 1);
+      ctx.lineTo(ex + 1, ey + 1); ctx.lineTo(ex + 3, ey - 1);
+      ctx.stroke();
+      // Three ticking dots underneath, lighting up in sequence.
+      const step = Math.floor(Date.now() / 350) % 3;
+      for (let i = 0; i < 3; i++) {
+        ctx.fillStyle = i === step ? '#ffd166' : 'rgba(255,255,255,0.35)';
+        ctx.fillRect(ex - 5 + i * 4, ey + 9, 2, 2);
       }
       ctx.restore();
     }
@@ -16080,7 +16722,7 @@
     ctx.restore();
   }
 
-  // The wave-100 boss — a "Tarkus"-style wolf/war-tank: a normal-grey wolf
+  // The wave-50 boss — a "Tarkus"-style wolf/war-tank: a normal-grey wolf
   // head fused to a segmented armoured shell that rolls on caterpillar treads.
   function drawBoss(w) {
     const s = w.size || BOSS_SIZE;
@@ -17926,10 +18568,14 @@
     bonusUpgradeAvailable = false;
     bonusUpgradeShownThisWave = false;
     bonusUpgradeForce = false;
+    extraPickUsedThisWave = false;
+    extraPickUsedThisWave2 = false;
     bonusDeathSnapshot = 0;
     weaponOilCharges = 0;
     weaponOilWaves = 0;
+    weaponOilBought = 0;
     advancedOilWaves = 0;
+    advancedOilBought = 0;
     bribePrice = 300;
     bribeNextWaveMul = 1;
     bribeFollowWaveMul = 1;
@@ -17979,7 +18625,7 @@
   // lobby (no peer teardown, no menu detour). Single-player falls back to
   // quitToMenu + startGame(false).
   // ---- Post-boss "rocket launch" restart cutscene ----
-  // After beating the wave-100 boss, restarting doesn't reset instantly: the
+  // After beating the wave-50 boss, restarting doesn't reset instantly: the
   // biggest coop turns into a rocket and blasts off. Once it clears the screen
   // the run actually restarts (with the doubled new-game-plus bonus).
   function beginRocketCutscene(onDone) {
@@ -18386,7 +19032,7 @@
       ['spawn-ranged',    'Spawn laser wolf',      'Spawn a single laser wolf (sits and fires a red hit-scan beam)'],
       ['spawn-homer',     'Spawn ranged wolf',     'Spawn a single ranged wolf (sits and lobs slow red homing bullets)'],
       ['spawn-thing',     'Spawn thing wolf',      'Spawn a single thing wolf (its head scuttles off on death)'],
-      ['spawn-missilewolf','Spawn missile wolf',   'Spawn a stationary missile wolf that bombards coops (wave 101+ enemy)'],
+      ['spawn-missilewolf','Spawn missile wolf',   'Spawn a stationary missile wolf that bombards coops (wave 51+ enemy)'],
       ['spawn-hunterwolf', 'Spawn hunter wolf',    'Spawn the hunter-wolf cryptid (keeper reskin that shoots back)'],
       ['spawn-ghostwolf',  'Spawn ghost wolf',     'Spawn a ghost wolf (vanishes silently when shot; chance grows with player deaths)'],
       ['spawn-parachute', 'Spawn parachute wolf',  'Drop a single wolf in by parachute'],
@@ -18394,7 +19040,7 @@
       ['karma-max',       'Max karma',             'Slam karma to +' + (typeof KARMA_MAX !== 'undefined' ? KARMA_MAX : 'MAX')],
       ['karma-min',       'Min karma',             'Slam karma to -' + (typeof KARMA_MAX !== 'undefined' ? KARMA_MAX : 'MAX')],
       ['skip-waves-10',   'Skip 10 waves',         'Jump the game forward by 10 waves'],
-      ['boss-wave',       'Boss wave (100)',       'Jump straight to the wave-100 boss fight'],
+      ['boss-wave',       'Boss wave (50)',        'Jump straight to the wave-50 boss fight'],
     ];
     for (const [action, label, tip] of TOOL_BUTTONS) {
       const btn = document.createElement('button');
@@ -18539,7 +19185,7 @@
         startWave(debugFastMode ? 5 : 10);
         toast('Skipped to wave ' + wave, 1.2);
       } else if (action === 'boss-wave') {
-        // Clear the field and jump straight into the wave-100 boss fight.
+        // Clear the field and jump straight into the wave-50 boss fight.
         for (let i = wolves.length - 1; i >= 0; i--) wolves.splice(i, 1);
         pellets.length = 0; beams.length = 0; pendingSpawns = 0;
         chickenSuckers.length = 0; bossMissiles.length = 0;
@@ -19130,7 +19776,7 @@
   const SNAP_FIELDS = {
     wolves:   ['x','y','size','fasterLevel','hurtT','facingLeft','alive','fox','bomb','sword','assassin','hatted','aggroT','carrying','fleeing','meleeT','meleeDir','bob','smokeT','defective','turncoat','coldT','burnT','boss','aimDir','walkT','missileWolf','missilePhase','missileChargeT','jumper','jumpT','jumpDur','hunterWolf','muzzleT','maxHp','hp','hatColor','gunColor','pup','ranged','homer','parachuting','parachuteH','parachuteSway','crawler','legPhase','sparkleT'],
     chickens: ['x','y','alive','facingLeft','fat','worker','rich','bob','fleeT'],
-    coops:    ['x','y','level','dirtR','builtWave','shakeT','igniteT','launching'],
+    coops:    ['x','y','level','dirtR','builtWave','shakeT','igniteT','launching','hatchHint'],
     fences:   ['x','y','kind','hp','hurtT'],
     farms:    ['x','y','growth','need','trampleFlash'],
     dogs:     ['x','y','facingLeft','bob','variant'],
@@ -19153,7 +19799,7 @@
     huntersCamps: ['x','y','dirtR','smokeT'],
     // FANGUS chicken-siphon orbs so the guest sees the steal-and-heal attack.
     chickenSuckers: ['x','y','phase'],
-    // Boss/wave-101 missile rockets so the guest sees the incoming salvo.
+    // Boss/wave-51 missile rockets so the guest sees the incoming salvo.
     bossMissiles: ['x','y','vx','vy'],
   };
 
@@ -19273,7 +19919,7 @@
         waveTimer: waveTimer,
         mapSize: MAP_SIZE,
         // Boss fight + end-of-boss screen state so the guest sees the health bar
-        // and the "Wave 100 conquered" continue/restart screen.
+        // and the "Wave 50 conquered" continue/restart screen.
         bossWaveActive: bossWaveActive,
         bossPhase: bossPhase,
         bossSidesDone: bossSidesDone,
@@ -19573,7 +20219,307 @@
     });
   }
 
+  // ---------- Upgrade tree overlay ----------
+  // Renders SKILL_TREE as a top-down map: one row per unlock wave, connector
+  // lines from an upgrade to whatever it branches off, and a live x/y level
+  // counter. Reachable from the title menu and from the pause panel, so it
+  // doubles as a "what's coming" preview and an in-run progress sheet.
+  const SVG_NS = 'http://www.w3.org/2000/svg';
+  const treeEl     = document.getElementById('skilltree');
+  const treeBodyEl = document.getElementById('st-body');
+  const treeTiersEl = document.getElementById('st-tiers');
+  const treeLinksEl = document.getElementById('st-links');
+  const treeCountEl = document.getElementById('st-count');
+  // id -> node element, rebuilt on every open so the link pass can measure.
+  const treeNodeEls = new Map();
+
+  function skillTreeOpen() { return !!treeEl && treeEl.classList.contains('is-open'); }
+
+  function tierLabel(tier) {
+    if (tier <= 1) return 'Wave 1 — From the start';
+    if (tier === 51) return 'Wave 51 — Endless';
+    return 'Wave ' + tier;
+  }
+
+  // What the player is allowed to see: taken, maxed, available now — plus the
+  // half of an either/or they gave up, shown greyed so the road not taken is
+  // still legible. Wave-gated tiers and unmet prerequisites stay hidden; the
+  // tree reports where the run stands, it doesn't preview what's coming.
+  // Consumables appear only once one has actually been bought.
+  function skillNodeVisible(n) {
+    if (n.supply) return !!(n.held && n.held());
+    const s = skillNodeState(n);
+    return s === 'open' || s === 'owned' || s === 'maxed' || s === 'over' || s === 'pairlocked';
+  }
+
+  // One compact card: name, level pips, and MAX when it's finished. No prose —
+  // the full description lives in the native tooltip for anyone who wants it.
+  function buildSkillCard(n) {
+    const state = skillNodeState(n);
+    const raw = upgradeLevels[n.id] || 0;   // Longer Barrel can exceed n.max
+    const lvl = Math.min(n.max, raw);
+    const el = document.createElement('div');
+    el.className = 'st-node is-' + state + (n.supply ? ' is-supply' : '');
+    el.dataset.id = n.id;
+    el.title = n.note;
+
+    const name = document.createElement('div');
+    name.className = 'st-node-name';
+    name.textContent = skillTitle(n.id);
+    el.appendChild(name);
+
+    const foot = document.createElement('div');
+    foot.className = 'st-node-foot';
+    const tag = (txt) => {
+      const s = document.createElement('span');
+      s.className = 'st-node-state';
+      s.textContent = txt;
+      foot.appendChild(s);
+    };
+    if (n.supply) {
+      // No ladder to show — just the live in-game status of the last buy.
+      tag(n.held() || '');
+    } else {
+      const pips = document.createElement('div');
+      pips.className = 'st-pips';
+      for (let i = 0; i < n.max; i++) {
+        const pip = document.createElement('span');
+        pip.className = 'st-pip' + (i < lvl ? ' is-on' : '');
+        pips.appendChild(pip);
+      }
+      foot.appendChild(pips);
+      // Past the cap the pick is cosmetic only, so the count matters more than
+      // the pips — show how many times it's been taken.
+      if (state === 'over')            tag('×' + raw);
+      else if (state === 'maxed')      tag('MAX');
+      else if (state === 'pairlocked') tag('LOCKED');
+    }
+    el.appendChild(foot);
+    treeNodeEls.set(n.id, el);
+    return el;
+  }
+
+  // A heading plus a row of cards. Returns false when there was nothing to show.
+  function buildSkillRow(labelText, subText, nodes, locked) {
+    const tierDiv = document.createElement('div');
+    tierDiv.className = 'st-tier' + (locked ? ' is-locked' : '');
+
+    const label = document.createElement('div');
+    label.className = 'st-tier-label';
+    const head = document.createElement('span');
+    head.textContent = labelText;
+    label.appendChild(head);
+    if (subText) {
+      const sub = document.createElement('span');
+      sub.className = 'st-tier-sub';
+      sub.textContent = subText;
+      label.appendChild(sub);
+    }
+    tierDiv.appendChild(label);
+
+    const row = document.createElement('div');
+    row.className = 'st-row';
+    if (locked) {
+      const sealed = document.createElement('div');
+      sealed.className = 'st-node st-sealed';
+      sealed.textContent = '? ? ?  ' + nodes.length + ' sealed';
+      row.appendChild(sealed);
+    } else {
+      const shown = nodes.filter(skillNodeVisible);
+      if (!shown.length) return false;
+      for (const n of shown) row.appendChild(buildSkillCard(n));
+    }
+    tierDiv.appendChild(row);
+    treeTiersEl.appendChild(tierDiv);
+    return true;
+  }
+
+  function buildSkillTree() {
+    if (!treeEl) return;
+    treeTiersEl.innerHTML = '';
+    treeNodeEls.clear();
+
+    treeCountEl.innerHTML = '<b>' + skillTreeOwnedLevels() + '</b> / ' + SKILL_TREE_TOTAL + ' unlocked';
+
+    for (const tier of SKILL_TIERS) {
+      const nodes = SKILL_TREE.filter(n => n.tier === tier && !n.group);
+      if (!nodes.length) continue;
+      // A tier the run hasn't reached stays sealed — a count and a wave, no names.
+      const tierLocked = skillTreeWave() < tier;
+      const got = nodes.reduce((s, n) => s + (n.supply ? 0 : Math.min(n.max, upgradeLevels[n.id] || 0)), 0);
+      const cap = nodes.reduce((s, n) => s + (n.supply ? 0 : n.max), 0);
+      buildSkillRow(tierLabel(tier), tierLocked ? '' : got + '/' + cap, nodes, tierLocked);
+    }
+
+    // Condition-gated rows (the hunter camp) go last, under their own heading.
+    for (const g of SKILL_GROUPS) {
+      const nodes = SKILL_TREE.filter(n => n.group === g.key);
+      if (!nodes.length) continue;
+      const got = nodes.reduce((s, n) => s + (n.supply ? 0 : Math.min(n.max, upgradeLevels[n.id] || 0)), 0);
+      const cap = nodes.reduce((s, n) => s + (n.supply ? 0 : n.max), 0);
+      buildSkillRow(g.label, got + '/' + cap, nodes, false);
+    }
+
+    if (!treeTiersEl.children.length) {
+      const empty = document.createElement('div');
+      empty.className = 'st-empty';
+      empty.textContent = 'No upgrades unlocked yet.';
+      treeTiersEl.appendChild(empty);
+    }
+    // Lines can only be measured once the nodes have been laid out.
+    requestAnimationFrame(drawSkillTreeLinks);
+  }
+
+  // Position of a node in the scroll container's own coordinate space (the
+  // space the absolutely-positioned SVG shares), so lines stay glued to the
+  // nodes while the tree scrolls.
+  function treeNodeBox(el) {
+    const b = treeBodyEl.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    return {
+      left:   r.left - b.left + treeBodyEl.scrollLeft,
+      top:    r.top  - b.top  + treeBodyEl.scrollTop,
+      right:  r.right - b.left + treeBodyEl.scrollLeft,
+      bottom: r.bottom - b.top + treeBodyEl.scrollTop,
+      cx:     (r.left + r.right) / 2 - b.left + treeBodyEl.scrollLeft,
+      cy:     (r.top + r.bottom) / 2 - b.top + treeBodyEl.scrollTop,
+    };
+  }
+
+  function svgLine(d, stroke, width, dash) {
+    const p = document.createElementNS(SVG_NS, 'path');
+    p.setAttribute('d', d);
+    p.setAttribute('fill', 'none');
+    p.setAttribute('stroke', stroke);
+    p.setAttribute('stroke-width', String(width));
+    if (dash) p.setAttribute('stroke-dasharray', dash);
+    return p;
+  }
+
+  function drawSkillTreeLinks() {
+    if (!skillTreeOpen()) return;
+    treeLinksEl.innerHTML = '';
+    // Cover the whole scrollable canvas, not just the visible slice — an SVG
+    // clips its children to its own viewport, so anything past this box would
+    // be cut off mid-line. Measured from the laid-out content and padded.
+    const wide = Math.max(treeBodyEl.scrollWidth || 0, treeTiersEl.offsetWidth || 0) + 40;
+    const tall = Math.max(treeBodyEl.scrollHeight || 0, treeTiersEl.offsetHeight || 0) + 80;
+    treeLinksEl.setAttribute('width', String(wide));
+    treeLinksEl.setAttribute('height', String(tall));
+    treeLinksEl.setAttribute('viewBox', '0 0 ' + wide + ' ' + tall);
+    treeLinksEl.style.width = wide + 'px';
+    treeLinksEl.style.height = tall + 'px';
+
+    // Branch links: parent (earlier tier) down to child. Both ends have to be
+    // on screen — a sealed tier renders no cards, so its links are skipped.
+    let routed = 0;
+    for (const n of SKILL_TREE) {
+      if (!n.links) continue;
+      const childEl = treeNodeEls.get(n.id);
+      if (!childEl) continue;
+      const c = treeNodeBox(childEl);
+      const childState = skillNodeState(n);
+      for (const parentId of n.links) {
+        const parentEl = treeNodeEls.get(parentId);
+        if (!parentEl) continue;
+        const p = treeNodeBox(parentEl);
+        const lit = childState === 'owned' || childState === 'maxed';
+        const stroke = lit ? '#6fd09a' : 'rgba(255, 209, 102, 0.38)';
+        let d;
+        const gutter = c.top - p.bottom;
+        if (gutter > 14) {
+          // Elbow routed through the gap BETWEEN the two rows, so the
+          // horizontal run never crosses a card's face. It hugs the parent
+          // row rather than splitting the gap, because the child's tier
+          // label sits in the lower half of that gap — a mid-gap run would
+          // strike straight through the heading text. Successive links fan
+          // out a few pixels apart to stay individually readable.
+          const room = Math.min(10, Math.max(0, (gutter - 14) / 2));
+          const stagger = room ? ((routed % 4) - 1.5) * (room / 3) : 0;
+          const midY = Math.round(p.bottom + Math.min(10, gutter / 3) + stagger);
+          d = 'M ' + p.cx + ' ' + p.bottom +
+              ' L ' + p.cx + ' ' + midY +
+              ' L ' + c.cx + ' ' + midY +
+              ' L ' + c.cx + ' ' + c.top;
+        } else if (c.top >= p.bottom) {
+          d = 'M ' + p.cx + ' ' + p.bottom + ' L ' + c.cx + ' ' + c.top;
+        } else {
+          // Same visual row (wrapped) — hug the side rather than cut across.
+          const [l, r] = p.cx <= c.cx ? [p, c] : [c, p];
+          d = 'M ' + l.right + ' ' + l.cy + ' L ' + r.left + ' ' + r.cy;
+        }
+        treeLinksEl.appendChild(svgLine(d, stroke, 2));
+        routed++;
+      }
+    }
+
+    // Either/or links: a dashed tie between the two halves of an exclusive
+    // pair, drawn once per pair and only when both cards are visible.
+    const drawnPairs = new Set();
+    for (const n of SKILL_TREE) {
+      const other = PAIRED_WITH[n.id];
+      if (!other) continue;
+      const key = [n.id, other].sort().join('|');
+      if (drawnPairs.has(key)) continue;
+      const aEl = treeNodeEls.get(n.id), bEl = treeNodeEls.get(other);
+      if (!aEl || !bEl) continue;
+      drawnPairs.add(key);
+      const a = treeNodeBox(aEl), b = treeNodeBox(bEl);
+      // Metaverse dissolves the locks — show the tie as spent, not exclusive.
+      const stroke = metaverseOn() ? 'rgba(111, 208, 154, 0.45)' : 'rgba(255, 157, 77, 0.65)';
+      let d;
+      if (Math.abs(a.cy - b.cy) < 8) {
+        // Side by side: a short tie between the facing edges.
+        const [l, r] = a.cx <= b.cx ? [a, b] : [b, a];
+        d = 'M ' + l.right + ' ' + l.cy + ' L ' + r.left + ' ' + r.cy;
+      } else {
+        // Wrapped onto different rows: drop out of the upper card's bottom
+        // and come up into the lower card's top, hooking around the outside
+        // so the tie doesn't slice through the cards in between.
+        const [u, dn] = a.cy <= b.cy ? [a, b] : [b, a];
+        const midY = Math.round(u.bottom + (dn.top - u.bottom) / 2);
+        d = 'M ' + u.cx + ' ' + u.bottom +
+            ' L ' + u.cx + ' ' + midY +
+            ' L ' + dn.cx + ' ' + midY +
+            ' L ' + dn.cx + ' ' + dn.top;
+      }
+      treeLinksEl.appendChild(svgLine(d, stroke, 2, '4 4'));
+    }
+  }
+
+  // NOTE: do NOT touch body.pixelate-all here. Toggling a CSS `filter` on
+  // <body> makes the browser tear down and rebuild the compositing layer, and
+  // the half-resolution canvas comes back upscaled differently — it reads as
+  // the whole game suddenly zooming. The tree just renders through the filter
+  // like the rest of the UI does; its type is sized to stay legible under it.
+  function openSkillTree() {
+    if (!treeEl) return;
+    treeEl.classList.add('is-open');
+    buildSkillTree();
+    treeBodyEl.scrollTop = 0; // always opens at the top of the tree
+  }
+  function closeSkillTree() {
+    if (!treeEl) return;
+    treeEl.classList.remove('is-open');
+  }
+
+  if (treeEl) {
+    document.getElementById('st-close').addEventListener('click', closeSkillTree);
+    // Capture phase: while the tree is up it swallows every key so nothing
+    // leaks into the game (or the menu's join-code field) behind it. Escape
+    // closes it without also toggling the pause state it was opened from.
+    window.addEventListener('keydown', e => {
+      if (!skillTreeOpen()) return;
+      e.stopPropagation();
+      if (e.key === 'Escape' || e.key === 'Enter') { e.preventDefault(); closeSkillTree(); }
+    }, true);
+    // Lines are measured from laid-out boxes, so a reflow has to redraw them.
+    window.addEventListener('resize', () => { if (skillTreeOpen()) drawSkillTreeLinks(); });
+  }
+
   // ---------- Wire up the menu buttons ----------
+  // (The upgrade tree is deliberately NOT on the title menu — it tracks a live
+  // run's progression, and showing the whole ladder up front spoils it.)
   document.getElementById('btnSingle').addEventListener('click', () => startGame(false));
   document.getElementById('btnMulti').addEventListener('click', () => {
     setStatus(document.getElementById('onlineStatus'), '');
