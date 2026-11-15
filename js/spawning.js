@@ -142,6 +142,27 @@
   }
 
   // Every 10 coops placed, the world grows by one tile in every direction.
+  // Hidden-wolf tell: the forest border is tall enough to completely cover a
+  // wolf skulking behind it, so the trees in front of one rustle. Same
+  // front-of-point geometry as isOccludedByBuilding, run per tree.
+  const TREE_RUSTLE_T = 0.45; // seconds a tree keeps swaying after the wolf moves on
+  function updateTreeRustle(dt) {
+    for (const t of trees) if (t.rustleT > 0) t.rustleT -= dt;
+    // Trees only exist in the border band, so only wolves out near the edge
+    // can be behind one — skip the rest instead of testing every wolf × tree.
+    const edge = HALF_MAP - 3;
+    for (const w of wolves) {
+      if (!w.alive) continue;
+      if (Math.abs(w.x) < edge && Math.abs(w.y) < edge) continue;
+      for (const t of trees) {
+        const dv = (t.x + t.y) - (w.x + w.y);
+        if (dv <= 0 || dv > 2.4) continue; // tree must sit in front of the wolf
+        if (Math.abs((t.x - t.y) - (w.x - w.y)) > 1.35) continue;
+        t.rustleT = TREE_RUSTLE_T;
+      }
+    }
+  }
+
   function expandMap() {
     const oldBorder = HALF_MAP - 1; // the inner ring that was forest before expansion
     HALF_MAP += 2;
@@ -578,7 +599,9 @@
     }
     // Endless ramp: past wave 50 the whole pack gets a little beefier every
     // wave, so survival runs keep getting harder.
-    if (wave > 50) hp = Math.ceil(hp * (1 + (wave - 50) * 0.08));
+    // Post-boss HP ramp, cut by 25% (0.08/wave -> 0.06) — late-game wolves had
+    // turned into bullet sponges.
+    if (wave > 50) hp = Math.ceil(hp * (1 + (wave - 50) * 0.06));
 
     // Sabotage roll — applies only to plain wolves (not sword/assassin
     // specials, which already have their own personality). If they roll

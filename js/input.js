@@ -87,7 +87,10 @@
     // to the title menu. Guarded so a stray Q mid-wave can't quit you.
     if (e.key.toLowerCase() === 'q' && (paused || gameOver)) {
       e.preventDefault();
-      quitToMenu();
+      // Mid-run quits ask for a second press; the run is already over on the
+      // game-over screen, so there's nothing left to lose — leave immediately.
+      if (gameOver) quitToMenu();
+      else          requestQuitToMenu();
       return;
     }
     // F5 on the game-over screen restarts the run directly instead of the
@@ -236,7 +239,7 @@
               mouse.y >= r.y && mouse.y <= r.y + r.h) {
             if (key === 'resume') togglePause();
             if (key === 'tree')   openSkillTree(); // stays paused behind the overlay
-            if (key === 'quit')   quitToMenu();
+            if (key === 'quit')   requestQuitToMenu(); // two presses to leave a live run
             return;
           }
         }
@@ -585,7 +588,7 @@
         if (hitTest(pauseBtnRects, {
           resume: () => togglePause(),
           tree:   () => openSkillTree(),
-          quit:   () => quitToMenu(),
+          quit:   () => requestQuitToMenu(), // two taps to leave a live run
         })) return;
         // Tab-switch button — touch had no handler for it, so mobile players
         // could never reach the UPGRADES tab from the pause panel.

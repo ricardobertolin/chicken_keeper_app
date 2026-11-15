@@ -1238,6 +1238,20 @@
     toast('Game restarted', 2.4);
   }
 
+  // Quitting mid-run throws the whole run away, and ESC → QUIT is easy to hit
+  // by accident, so the first press only arms it: press again within the
+  // window to actually leave. Uses a wall-clock deadline rather than a ticking
+  // timer because the game is frozen while the pause panel is open.
+  let quitArmedUntil = 0;
+  const QUIT_CONFIRM_MS = 3000;
+  function quitArmed() { return Date.now() < quitArmedUntil; }
+  function disarmQuit() { quitArmedUntil = 0; }
+  function requestQuitToMenu() {
+    if (quitArmed()) { quitArmedUntil = 0; quitToMenu(); return; }
+    quitArmedUntil = Date.now() + QUIT_CONFIRM_MS;
+    toast('Quit the run? Press again to confirm', QUIT_CONFIRM_MS / 1000);
+  }
+
   function quitToMenu() {
     if (typeof teardownConnection === 'function') teardownConnection();
     multiplayer = false;
@@ -1263,6 +1277,8 @@
     ghostWolfChance = 0;
     coops.length = 0;
     chickens.length = 0;
+    bossBurstChickens.length = 0;
+    bossSkyFade = 1;
     wolves.length = 0;
     pellets.length = 0;
     corpses.length = 0;

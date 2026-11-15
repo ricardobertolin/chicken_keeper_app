@@ -10,6 +10,148 @@
     return audioCtx;
   }
 
+  // ---- War music: the FANGUS approach ---------------------------------
+  // Everything here is synthesised on a lookahead scheduler pumped from the
+  // game loop — not setInterval, which drifts and gets throttled in a
+  // background tab. Notes are queued a fraction of a second ahead against the
+  // audio clock, so the pulse stays rock-steady even if frames hitch.
+  //
+  // Four intensities, chosen from the wave / boss phase by musicModeForState:
+  //   'off'     — silence
+  //   'distant' — drums only, quiet and heavily muffled (wave 48: war far off)
+  //   'near'    — drums only, close and clear (wave 49, and between boss sides)
+  //   'full'    — drums plus the war theme over the top (the fight itself)
+  // 'distant' and 'near' are the SAME pattern; only the bus gain and the
+  // low-pass differ, which is what sells the drums "getting closer".
+  const MUSIC_BPM = 96;
+  const MUSIC_STEP_S = 60 / MUSIC_BPM / 2; // one eighth note
+  const MUSIC_LOOKAHEAD = 0.25;            // seconds of notes queued ahead
+  const MUSIC_LEVELS = {                   // mode -> [bus gain, lowpass Hz]
+    off:     [0.0,   400],
+    distant: [0.055, 300],
+    near:    [0.150, 1500],
+    full:    [0.200, 9000],
+  };
+  // Taiko-ish war pattern over 16 eighths (two bars). 0 = rest.
+  const DRUM_PATTERN = [1, 0, 0.35, 0, 0.8, 0, 0.35, 0.5,
+                        1, 0, 0.35, 0.35, 0.8, 0, 0.5, 0.6];
+  // Low war-horn ostinato under the fight, D minor. null = rest.
+  const WAR_BASS = [73.42, null, null, 73.42, null, 87.31, null, null,
+                    73.42, null, null, 110.00, null, 98.00, 87.31, null];
+
+  let musicMode = 'off';
+  let musicBus = null, musicLp = null;
+  let musicNextT = 0; // audio-clock time the next step is due
+  let musicStep = 0;  // position in the 16-step loop
+
+  function musicNodes(ctx) {
+    if (musicBus) return;
+    musicLp = ctx.createBiquadFilter();
+    musicLp.type = 'lowpass';
+    musicLp.frequency.setValueAtTime(MUSIC_LEVELS.off[1], ctx.currentTime);
+    musicBus = ctx.createGain();
+    musicBus.gain.setValueAtTime(0, ctx.currentTime);
+    musicLp.connect(musicBus);
+    musicBus.connect(ctx.destination);
+  }
+
+  // Crossfade rather than cut, so a phase flip never clicks.
+  function setMusicMode(mode) {
+    if (mode === musicMode) return;
+    musicMode = mode;
+    if (!audioCtx || !musicBus) return;
+    const [g, lp] = MUSIC_LEVELS[mode];
+    musicBus.gain.setTargetAtTime(g, audioCtx.currentTime, 0.5);
+    musicLp.frequency.setTargetAtTime(lp, audioCtx.currentTime, 0.5);
+  }
+
+  // One war-drum hit: a pitch-dropping body with a noise slap for the skin.
+  function musicDrum(ctx, at, vel) {
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(165, at);
+    osc.frequency.exponentialRampToValueAtTime(48, at + 0.18);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(0.9 * vel, at + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 0.34);
+    osc.connect(g); g.connect(musicLp);
+    osc.start(at); osc.stop(at + 0.36);
+    const dur = 0.05;
+    const sz = Math.floor(ctx.sampleRate * dur);
+    const b = ctx.createBuffer(1, sz, ctx.sampleRate);
+    const d = b.getChannelData(0);
+    for (let i = 0; i < sz; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / sz, 2);
+    const src = ctx.createBufferSource(); src.buffer = b;
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.35 * vel, at);
+    ng.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    src.connect(ng); ng.connect(musicLp);
+    src.start(at); src.stop(at + dur);
+  }
+
+  // A brass-ish war horn — sawtooth through a sweeping low-pass.
+  function musicHorn(ctx, at, freq, vel, dur) {
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(freq, at);
+    const f = ctx.createBiquadFilter();
+    f.type = 'lowpass';
+    f.frequency.setValueAtTime(freq * 3, at);
+    f.frequency.linearRampToValueAtTime(freq * 7, at + dur * 0.3);
+    f.frequency.linearRampToValueAtTime(freq * 2.5, at + dur);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(0.16 * vel, at + 0.04);
+    g.gain.setValueAtTime(0.16 * vel, at + dur * 0.7);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    osc.connect(f); f.connect(g); g.connect(musicLp);
+    osc.start(at); osc.stop(at + dur + 0.02);
+  }
+
+  // Which intensity the current game state calls for.
+  function musicModeForState() {
+    if (!gameStarted || inMenu || gameOver || endScreen) return 'off';
+    if (bossWaveActive) {
+      // The death cutscene plays out under its own explosions — music out.
+      if (bossPhase === 'explode' || bossPhase === 'cleared') return 'off';
+      // It fled to lick its wounds: back to just the drums, as on wave 49.
+      if (bossPhase === 'retreat' || bossPhase === 'pack') return 'near';
+      return 'full'; // intro + fight
+    }
+    const away = BOSS_WAVE - wave; // waves left before it arrives
+    if (away === 2) return 'distant';
+    if (away === 1) return 'near';
+    return 'off';
+  }
+
+  // Pumped once per frame from loop().
+  function updateMusic() {
+    const want = musicModeForState();
+    // Idle: don't even spin up an AudioContext before the player needs one.
+    if (want === 'off' && musicMode === 'off') return;
+    const ctx = getAudio();
+    if (!ctx) return;
+    musicNodes(ctx);
+    setMusicMode(want);
+    if (musicMode === 'off') return; // fading out — stop queueing new hits
+    const now = ctx.currentTime;
+    if (musicNextT < now) musicNextT = now + 0.05; // resync after a stall/restart
+    while (musicNextT < now + MUSIC_LOOKAHEAD) {
+      const at = musicNextT;
+      const vel = DRUM_PATTERN[musicStep];
+      if (vel > 0) musicDrum(ctx, at, vel);
+      if (musicMode === 'full') {
+        const f = WAR_BASS[musicStep];
+        if (f) musicHorn(ctx, at, f, 1, MUSIC_STEP_S * 1.6);
+        // An answering cry at the top of each two-bar phrase.
+        if (musicStep === 0) musicHorn(ctx, at, 293.66, 0.5, MUSIC_STEP_S * 3);
+      }
+      musicStep = (musicStep + 1) % 16;
+      musicNextT += MUSIC_STEP_S;
+    }
+  }
+
   // ---- Multiplayer audio relay ----
   // Sounds normally fire on the host (where the sim runs) so the guest stays
   // silent. Each play*() function calls queueNetSound() at the top; the host
@@ -43,6 +185,9 @@
       case 'keeperDeath':      playKeeperDeath(); break;
       case 'keeperHit':        playKeeperHit(); break;
       case 'cashRegister':     playCashRegister(); break;
+      case 'woodChop':         playWoodChop(); break;
+      case 'fireCrackle':      playFireCrackle(); break;
+      case 'freeze':           playFreeze(); break;
       case 'radarPing':        playRadarPing(); break;
       case 'rocketBoots':      playRocketBoots(); break;
       case 'critical':         playCritical(); break;
@@ -124,6 +269,124 @@
       osc.connect(g); g.connect(ctx.destination);
       osc.start(now + off); osc.stop(now + off + 0.06);
     });
+  }
+
+  // Timber! Three axe bites into wood, then the creak-and-whump of the trunk
+  // coming down. Played when the land expands and the old tree ring is cut.
+  function playWoodChop() {
+    queueNetSound('woodChop');
+    const ctx = getAudio();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    // Each chop: a short filtered noise crack with a woody pitched knock.
+    [0, 0.22, 0.44].forEach((off, i) => {
+      const dur = 0.07;
+      const sz = Math.floor(ctx.sampleRate * dur);
+      const b = ctx.createBuffer(1, sz, ctx.sampleRate);
+      const d = b.getChannelData(0);
+      for (let j = 0; j < sz; j++) d[j] = (Math.random() * 2 - 1) * Math.pow(1 - j / sz, 1.5);
+      const src = ctx.createBufferSource(); src.buffer = b;
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(1400 - i * 150, now + off);
+      bp.Q.setValueAtTime(1.2, now + off);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.3, now + off);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + off + dur);
+      src.connect(bp); bp.connect(g); g.connect(ctx.destination);
+      src.start(now + off); src.stop(now + off + dur);
+      // Woody thunk under each bite.
+      const osc = ctx.createOscillator();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(210 - i * 20, now + off);
+      osc.frequency.exponentialRampToValueAtTime(90, now + off + 0.09);
+      const og = ctx.createGain();
+      og.gain.setValueAtTime(0.0001, now + off);
+      og.gain.exponentialRampToValueAtTime(0.11, now + off + 0.005);
+      og.gain.exponentialRampToValueAtTime(0.0001, now + off + 0.11);
+      osc.connect(og); og.connect(ctx.destination);
+      osc.start(now + off); osc.stop(now + off + 0.12);
+    });
+    // The trunk hitting the ground — a low whump with a noise tail.
+    const fall = now + 0.72;
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(120, fall);
+    osc.frequency.exponentialRampToValueAtTime(42, fall + 0.3);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, fall);
+    g.gain.exponentialRampToValueAtTime(0.2, fall + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, fall + 0.36);
+    osc.connect(g); g.connect(ctx.destination);
+    osc.start(fall); osc.stop(fall + 0.38);
+  }
+
+  // Soft fire crackle — played on the burn damage tick. Throttled globally in
+  // playFireCrackle's caller guard so a dozen burning wolves don't roar.
+  let _lastCrackleT = 0;
+  function playFireCrackle() {
+    const ctx = getAudio();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    if (now - _lastCrackleT < 0.3) return; // one crackle at a time, however much is alight
+    _lastCrackleT = now;
+    queueNetSound('fireCrackle');
+    // A few random pops inside a breathy hiss.
+    const dur = 0.26;
+    const sz = Math.floor(ctx.sampleRate * dur);
+    const b = ctx.createBuffer(1, sz, ctx.sampleRate);
+    const d = b.getChannelData(0);
+    for (let i = 0; i < sz; i++) {
+      const env = 1 - i / sz;
+      let v = (Math.random() * 2 - 1) * 0.35 * env;        // hiss bed
+      if (Math.random() < 0.004) v += (Math.random() * 2 - 1) * 0.9 * env; // pop
+      d[i] = v;
+    }
+    const src = ctx.createBufferSource(); src.buffer = b;
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(1700, now);
+    bp.Q.setValueAtTime(0.7, now);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.09, now);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    src.connect(bp); bp.connect(g); g.connect(ctx.destination);
+    src.start(now); src.stop(now + dur);
+  }
+
+  // Flash-freeze — a glassy descending chime with an icy shiver of noise.
+  // Throttled the same way as the crackle.
+  let _lastFreezeT = 0;
+  function playFreeze() {
+    const ctx = getAudio();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    if (now - _lastFreezeT < 0.3) return;
+    _lastFreezeT = now;
+    queueNetSound('freeze');
+    [[0, 2600], [0.05, 1950], [0.1, 1450]].forEach(([off, f]) => {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(f, now + off);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, now + off);
+      g.gain.exponentialRampToValueAtTime(0.05, now + off + 0.006);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + off + 0.22);
+      osc.connect(g); g.connect(ctx.destination);
+      osc.start(now + off); osc.stop(now + off + 0.24);
+    });
+    // Brittle high shiver.
+    const dur = 0.2;
+    const sz = Math.floor(ctx.sampleRate * dur);
+    const b = ctx.createBuffer(1, sz, ctx.sampleRate);
+    const d = b.getChannelData(0);
+    for (let i = 0; i < sz; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / sz, 2);
+    const src = ctx.createBufferSource(); src.buffer = b;
+    const hp = ctx.createBiquadFilter(); hp.type = 'highpass';
+    hp.frequency.setValueAtTime(5200, now);
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.05, now);
+    ng.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    src.connect(hp); hp.connect(ng); ng.connect(ctx.destination);
+    src.start(now); src.stop(now + dur);
   }
 
   // Tiny UI tick for buttons/taps — purely local feedback so the menus and the

@@ -345,7 +345,7 @@
     breakLastStand(target); // a hit drops the keeper out of the Last Stand pose
     if (keeperDodgesHatLoss(target)) return; // hidden dodge — kept the hat
     if (target === player) {
-      if (immortal && playerHats <= 1) { toast('Immortal — last hat held!', 0.9); return; }
+      if (immortal && playerHats <= 1) return; // Immortal holds the last hat (silently)
       const lost = hatColors[hatColors.length - 1];
       playerHats--;
       hatColors.pop();
@@ -374,7 +374,7 @@
     breakLastStand(target); // a hit drops the keeper out of the Last Stand pose
     if (keeperDodgesHatLoss(target)) return; // hidden dodge — kept the hat
     if (target === player) {
-      if (immortal && playerHats <= 1) { toast('Immortal — last hat held!', 0.9); return; }
+      if (immortal && playerHats <= 1) return; // Immortal holds the last hat (silently)
       const lost = hatColors[hatColors.length - 1];
       playerHats--;
       hatColors.pop();
@@ -582,7 +582,7 @@
           if (di >= 0) debris.splice(di, 1);
           spawnSmoke(bestD.x, bestD.y, 4);
           playBuild();
-          toast('A worker chicken rebuilt the ' + (bestD.kind === 'stone' ? 'wall' : 'fence') + '!', 1.4);
+          // (No toast — the rebuilt fence is visible on its own.)
           return;
         }
         // Walk toward the pile at the worker's normal pace.
@@ -814,7 +814,7 @@
     breakLastStand(keeper);
     if (keeperDodgesHatLoss(keeper)) return; // hidden dodge — kept the hat
     if (keeper === player) {
-      if (immortal && playerHats <= 1) { toast('Immortal — last hat held!', 0.9); return; }
+      if (immortal && playerHats <= 1) return; // Immortal holds the last hat (silently)
       const lost = hatColors[hatColors.length - 1];
       playerHats--;
       hatColors.pop();

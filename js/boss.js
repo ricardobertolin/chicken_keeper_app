@@ -147,7 +147,7 @@
     breakLastStand(k);
     if (keeperDodgesHatLoss(k)) return; // hidden dodge — kept the hat
     if (k === player) {
-      if (immortal && playerHats <= 1) { toast('Immortal — last hat held!', 0.9); return; }
+      if (immortal && playerHats <= 1) return; // Immortal holds the last hat (silently)
       const lost = hatColors[hatColors.length - 1];
       playerHats--; hatColors.pop(); onHatLost(lost);
       if (playerHats <= 0) { if (!tryKarmaResurrect()) killKeeper(player, 'host', 'crushed by FANGUS'); }
@@ -170,6 +170,10 @@
   // The boss is immune to status effects entirely — only raw damage counts.
   function bossTakeDamage(b, amount) {
     if (bossPhase !== 'fight' || amount <= 0) return;
+    // Landing a shot on FANGUS jolts it hard enough to drop whatever it is
+    // siphoning. Checked BEFORE the per-second damage cap so the interrupt
+    // still works while sustained fire is being soaked.
+    breakChickenSiphons();
     if (b.dmgInWindow >= BOSS_MAX_DPS) { b.hurtT = Math.max(b.hurtT, 0.05); return; }
     const applied = Math.min(amount, BOSS_MAX_DPS - b.dmgInWindow);
     b.hp = Math.max(0, b.hp - applied);
@@ -398,6 +402,64 @@
     playLaser();
   }
 
+  // Fling one swallowed chicken out of the dying boss on a tumbling arc.
+  function burstChickenFromBoss(b) {
+    const a = Math.random() * Math.PI * 2;
+    const sp = rand(1.8, 5.2);
+    bossBurstChickens.push({
+      x: b.x + rand(-0.8, 0.8),
+      y: b.y + rand(-0.8, 0.8),
+      vx: Math.cos(a) * sp,
+      vy: Math.sin(a) * sp,
+      z: rand(0.6, 1.6),            // height in "tiles" above the ground
+      vz: rand(5.5, 9.0),
+      spin: Math.random() * Math.PI * 2,
+      spinV: rand(-9, 9),
+    });
+    playChickenPop();
+  }
+
+  // Ballistic arcs for the disgorged flock. A bird that lands inside the map
+  // joins the flock for real — the player gets back what FANGUS ate.
+  function updateBossBurstChickens(dt) {
+    for (let i = bossBurstChickens.length - 1; i >= 0; i--) {
+      const c = bossBurstChickens[i];
+      c.x += c.vx * dt;
+      c.y += c.vy * dt;
+      c.vz -= 15 * dt;             // gravity
+      c.z += c.vz * dt;
+      c.spin += c.spinV * dt;
+      if (c.z > 0) continue;
+      bossBurstChickens.splice(i, 1);
+      const lim = HALF_MAP - 1.5;
+      if (Math.abs(c.x) > lim || Math.abs(c.y) > lim) continue; // flung off the farm
+      if (chickens.length >= MAX_CHICKENS) continue;
+      chickens.push({
+        x: c.x, y: c.y, vx: 0, vy: 0, wanderT: 0,
+        // No coop to call home is fine — every .home read is null-guarded.
+        home: coops.length ? coops[Math.floor(Math.random() * coops.length)] : null,
+        fleeT: 0, alive: true, bob: Math.random() * Math.PI * 2,
+        facingLeft: false, fat: false, worker: false, rich: false,
+      });
+    }
+  }
+
+  // Pop every live siphon orb and release its chicken ALIVE, with the same
+  // brief re-snag grace that shooting an orb directly grants. Called when the
+  // boss itself is hit, so a kidnap in progress can be interrupted by fighting
+  // back instead of only by sniping the orb.
+  function breakChickenSiphons() {
+    if (!chickenSuckers.length) return;
+    for (let i = chickenSuckers.length - 1; i >= 0; i--) {
+      const s = chickenSuckers[i];
+      if (s.target) { s.target.suckedBy = null; s.target.savedT = 1.5; }
+      spawnSmoke(s.x, s.y, 4);
+      chickenSuckers.splice(i, 1);
+    }
+    playChickenPop();
+    toast('FANGUS lost its grip — chicken saved!', 1.2);
+  }
+
   function updateChickenSuckers(dt) {
     for (let i = chickenSuckers.length - 1; i >= 0; i--) {
       const s = chickenSuckers[i];
@@ -587,6 +649,7 @@
     // of which sub-phase the state machine is in. (Missiles tick in the main
     // update loop so the wave-51+ missile wolf's salvos work outside the fight.)
     updateChickenSuckers(dt);
+    updateBossBurstChickens(dt);
     bossPhaseT += dt;
     if (bossPhase === 'intro') {
       // Sky shifts to dusk-orange and the screen quakes before it shows up.
@@ -643,14 +706,39 @@
       return;
     }
     if (bossPhase === 'explode') {
-      if (boss && bossPhaseT < 1.2 && Math.random() < dt * 14) {
-        spawnBlast(boss.x + rand(-1.6, 1.6), boss.y + rand(-1.6, 1.6));
-        playExplosion();
-        shake = Math.max(shake, 0.7); // violent quaking as it comes apart
+      // Act 1 — FANGUS tears itself apart. Blasts rip across the hull while
+      // the whole flock it swallowed comes squawking back out, then one last
+      // detonation. Act 2 is the quiet: the blood sky bleeds back to normal
+      // before the end screen drops (handled by bossSkyFade below).
+      if (bossPhaseT < BOSS_EXPLODE_BLASTS_T) {
+        // Blast rate ramps as it comes apart — a slow cook-off building to a roar.
+        const ramp = 0.35 + 0.65 * (bossPhaseT / BOSS_EXPLODE_BLASTS_T);
+        if (boss && Math.random() < dt * 14 * ramp) {
+          spawnBlast(boss.x + rand(-2.0, 2.0), boss.y + rand(-2.0, 2.0));
+          playExplosion();
+          shake = Math.max(shake, 0.55 + 0.35 * ramp);
+        }
+        // …and it disgorges the flock, a few birds at a time.
+        if (boss && Math.random() < dt * 11) burstChickenFromBoss(boss);
       }
-      if (bossPhaseT > 1.4) {
-        if (boss) { spawnBlast(boss.x, boss.y); playExplosion(); shake = Math.max(shake, 1.1); }
+      if (boss && bossPhaseT >= BOSS_EXPLODE_BLASTS_T) {
+        // The finale: one huge blast, a last spray of birds, then it's gone.
+        for (let i = 0; i < 10; i++) burstChickenFromBoss(boss);
+        spawnBlast(boss.x, boss.y);
+        spawnSmoke(boss.x, boss.y, 14);
+        playExplosion();
+        shake = Math.max(shake, 1.2);
         removeBoss();
+      }
+      // Act 2 — drain the red out of the sky over the remaining seconds.
+      if (bossPhaseT >= BOSS_EXPLODE_BLASTS_T) {
+        const t = (bossPhaseT - BOSS_EXPLODE_BLASTS_T) / BOSS_EXPLODE_FADE_T;
+        bossSkyFade = Math.max(0, 1 - t);
+        bossTint = Math.max(0, bossTint - dt / BOSS_EXPLODE_FADE_T);
+      }
+      if (bossPhaseT > BOSS_EXPLODE_DUR) {
+        removeBoss();
+        bossSkyFade = 1; // the flag has done its job; reset for a future run
         bossPhase = 'cleared';
         bossWaveActive = false;
         bossWaveCleared();
@@ -869,7 +957,7 @@
     breakLastStand(k);
     if (keeperDodgesHatLoss(k)) return; // hidden dodge — kept the hat
     if (k === player) {
-      if (immortal && playerHats <= 1) { toast('Immortal — last hat held!', 0.9); return; }
+      if (immortal && playerHats <= 1) return; // Immortal holds the last hat (silently)
       const lost = hatColors[hatColors.length - 1];
       playerHats--; hatColors.pop(); onHatLost(lost);
       if (playerHats <= 0) { if (!tryKarmaResurrect()) killKeeper(player, 'host', 'wolf'); }
@@ -902,6 +990,7 @@
       w.burnTickT = (w.burnTickT || 0) - dt;
       if (w.burnTickT <= 0) {
         w.burnTickT = BURN_TICK;
+        playFireCrackle(); // self-throttled — one crackle however many are alight
         hurtWolf(w, burnTickDmg(w), 0, 0, player); // credits P1; handles death/scoring
         if (!w.alive) return;
       }
@@ -1213,7 +1302,7 @@
               if (keeperDodgesHatLoss(player)) {
                 // hidden dodge — kept the hat
               } else if (immortal && playerHats <= 1) {
-                toast('Immortal — last hat held!', 0.9);
+                // Immortal holds the last hat (silently)
               } else {
                 const lost = hatColors[hatColors.length - 1];
                 playerHats--;
@@ -2264,7 +2353,7 @@
         }
         w.hurtT = 0.12;
         // Cold Shot / Hot Shot: chill (slow + blue) or ignite (burn-over-time).
-        if (p.cold) w.coldT = p.coldDur || 3;
+        if (p.cold) { const fresh = !(w.coldT > 0); w.coldT = p.coldDur || 3; if (fresh) playFreeze(); }
         if (p.hot)  { w.burnT = p.hotDur || 3; if (!(w.burnTickT > 0)) w.burnTickT = BURN_TICK; }
         if (w.hp <= 0) {
           w.alive = false;

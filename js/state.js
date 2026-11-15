@@ -772,10 +772,15 @@
   // ---------- Wave-50 boss fight ----------
   const BOSS_WAVE = 50;
   const BOSS_INTRO_DELAY = 2.6;   // seconds of dusk-shift + shaking before it appears
-  const BOSS_HP = 3000;           // HP per side (it's beaten 4 times) — a real slog
+  const BOSS_HP = 2000;           // HP per side (it's beaten 4 times) — cut by a third from 3000
   const BOSS_MAX_DPS = 65;        // cap on damage it can take per second (anti-melt, like player i-frames)
   const BOSS_SIZE = 3.4;          // draw scale
-  const BOSS_HIT_BONUS = 1.5;     // fattens the boss's pellet hitbox so it's far easier to land shots
+  // Fattens the boss's pellet hitbox. NOTE the comparison this feeds is
+  // `dist2(...) < (0.35 + bonus) * size`, and dist2 is a SQUARED distance, so
+  // the real pickup radius is sqrt((0.35 + bonus) * size) tiles — at the old
+  // 1.5 that was only ~2.5 tiles on a sprite drawn 3.4× scale, which is why
+  // shots felt like they had to land in its belly. 3.9 → ~3.8 tiles.
+  const BOSS_HIT_BONUS = 3.9;
   const BOSS_TOUCH_R = 2.2;       // body radius that crushes a keeper on contact (guaranteed hat hit)
   const BOSS_FIRE_COOLDOWN = 4.4; // seconds between its volleys (slow, deliberate)
   const BOSS_PACK_DURATION = 30;  // seconds wolves keep pouring in between sides
@@ -812,6 +817,13 @@
   let bossOrder = [0, 1, 2, 3];   // shuffled corner order it appears from
   let boss = null;                // the boss wolf (also lives in wolves[])
   let bossTint = 0;               // 0..1 dusk-orange overlay strength
+  let bossSkyFade = 1;            // 1 = full boss sky, ramps to 0 as the death cutscene clears it
+  // Chickens FANGUS swallowed, bursting back out while it comes apart.
+  // {x,y,vx,vy,z,vz,spin,spinV} — cosmetic arcs that become real birds on landing.
+  const bossBurstChickens = [];
+  const BOSS_EXPLODE_BLASTS_T = 3.6; // seconds of escalating blasts + chicken burst
+  const BOSS_EXPLODE_FADE_T   = 2.0; // seconds of red-sky fade after the final blast
+  const BOSS_EXPLODE_DUR      = BOSS_EXPLODE_BLASTS_T + BOSS_EXPLODE_FADE_T;
   let endScreen = false;          // post-boss "restart or continue" screen
   // Post-wave-50 the event escapes its run-cap and instead schedules itself
   // once randomly inside every consecutive 5-wave block. These two track

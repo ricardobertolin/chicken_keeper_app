@@ -1,11 +1,38 @@
   // ---------- Render ----------
+  // How red the sky burns, 0 (clear) .. 1 (full FANGUS). The dread builds over
+  // the BOSS_SKY_BUILDUP_WAVES waves leading up to the boss so the fight is
+  // visible on the horizon before it arrives, then the fight itself pins it.
+  const BOSS_SKY_BUILDUP_WAVES = 2;
+  function skyRedLevel() {
+    // Picks up where the last build-up wave left off and deepens through the
+    // intro as bossTint ramps, so there's no jump when the fight starts.
+    if (bossWaveActive) {
+      const floor = BOSS_SKY_BUILDUP_WAVES / (BOSS_SKY_BUILDUP_WAVES + 1);
+      const lvl = Math.min(1, floor + (bossTint || 0) * (1 - floor));
+      // bossSkyFade drains to 0 across the death cutscene, so the blood sky
+      // bleeds back to a normal afternoon before the end screen appears.
+      return lvl * bossSkyFade;
+    }
+    const away = BOSS_WAVE - wave; // waves still to survive before the boss
+    if (away >= 1 && away <= BOSS_SKY_BUILDUP_WAVES) {
+      return (BOSS_SKY_BUILDUP_WAVES + 1 - away) / (BOSS_SKY_BUILDUP_WAVES + 1);
+    }
+    return 0;
+  }
+
   function render() {
-    // Sky / background
-    if (!skyGrad) {
+    // Sky / background. Rebuilt on resize (skyGrad nulled) and whenever the
+    // boss-red level moves — quantised so a smooth ramp doesn't allocate a new
+    // gradient every single frame.
+    const redLvl = skyRedLevel();
+    const redKey = Math.round(redLvl * 40); // 2.5% steps
+    if (!skyGrad || redKey !== skyGradRedKey) {
+      skyGradRedKey = redKey;
+      const f = redKey / 40;
       skyGrad = ctx.createLinearGradient(0, 0, 0, H);
-      skyGrad.addColorStop(0, '#7ec7ff');
-      skyGrad.addColorStop(0.6, '#bfe6a8');
-      skyGrad.addColorStop(1, '#5fa15a');
+      skyGrad.addColorStop(0,   mixHex('#7ec7ff', '#6e0f08', f)); // blue   → deep blood sky
+      skyGrad.addColorStop(0.6, mixHex('#bfe6a8', '#c23a1b', f)); // haze   → ember band
+      skyGrad.addColorStop(1,   mixHex('#5fa15a', '#5e2113', f)); // grass  → scorched earth
     }
     ctx.fillStyle = skyGrad;
     ctx.fillRect(0, 0, W, H);
@@ -22,6 +49,7 @@
     drawEntities();
     drawLaserPreviews(); // red telegraph lines for locking lasers (wolf + boss)
     if (bossWaveActive) drawChickenSuckers();
+    if (bossBurstChickens.length) drawBossBurstChickens();
     drawBossMissiles(); // boss + missile-wolf rockets (drawn any wave)
     if (rocketLaunch) drawRocketLaunch(); // post-boss restart cutscene
     drawBuildPreview(player);
@@ -35,9 +63,24 @@
 
     // Boss wave: a dusk-orange wash over everything, deepening through the
     // intro, plus the boss health bar while it's actively fighting.
-    if (bossWaveActive && bossTint > 0) {
+    // Red sky. The ground covers almost the whole viewport from mid-map, so
+    // tinting the sky gradient alone is invisible unless you're at the edge —
+    // this wash is what actually sells it. It's a vertical gradient, heaviest
+    // at the top where the horizon sits and thinning toward the camera, so it
+    // reads as a blood sky hanging over the farm instead of the flat full-
+    // screen filter this replaces. Driven by skyRedLevel(), so it also covers
+    // the build-up waves, not just the fight.
+    if (redLvl > 0) {
+      if (!redWashGrad || redKey !== redWashKey) {
+        redWashKey = redKey;
+        const f = redKey / 40;
+        redWashGrad = ctx.createLinearGradient(0, 0, 0, H);
+        redWashGrad.addColorStop(0,    'rgba(150, 18,  8, ' + (0.72 * f).toFixed(3) + ')');
+        redWashGrad.addColorStop(0.45, 'rgba(190, 48, 18, ' + (0.40 * f).toFixed(3) + ')');
+        redWashGrad.addColorStop(1,    'rgba(120, 30, 14, ' + (0.18 * f).toFixed(3) + ')');
+      }
       ctx.save();
-      ctx.fillStyle = 'rgba(214, 96, 32, ' + (bossTint * 0.34).toFixed(3) + ')';
+      ctx.fillStyle = redWashGrad;
       ctx.fillRect(0, 0, W, H);
       ctx.restore();
     }
@@ -3310,6 +3353,13 @@
     const cx = p.x;
     const cy = p.y + TILE_H / 2;
     const s = t.size;
+    // Rustle — a wolf is hidden in this tree's blindspot, so the canopy shakes
+    // and gives it away from across the map. Only the foliage moves; the trunk
+    // stays planted, which reads as leaves thrashing rather than the whole
+    // tree sliding. Phase is seeded per tree so a row doesn't sway in unison.
+    const fx = cx + ((t.rustleT > 0)
+      ? Math.sin(Date.now() * 0.026 + t.x * 5.1 + t.y * 3.7) * 3.0 * s
+      : 0);
     // Trunk (taller)
     ctx.fillStyle = '#4a2f17';
     ctx.fillRect(cx - 2 * s, cy - 26 * s, 4 * s, 22 * s);
@@ -3317,24 +3367,42 @@
     const greens = ['#2c6b2c', '#388838', '#244e24'];
     ctx.fillStyle = greens[t.shade % greens.length];
     ctx.beginPath();
-    ctx.arc(cx,         cy - 30 * s, 9 * s,   0, Math.PI * 2);
-    ctx.arc(cx - 6 * s, cy - 28 * s, 6 * s,   0, Math.PI * 2);
-    ctx.arc(cx + 6 * s, cy - 28 * s, 6 * s,   0, Math.PI * 2);
-    ctx.arc(cx - 4 * s, cy - 36 * s, 6 * s,   0, Math.PI * 2);
-    ctx.arc(cx + 4 * s, cy - 36 * s, 6 * s,   0, Math.PI * 2);
-    ctx.arc(cx,         cy - 44 * s, 7 * s,   0, Math.PI * 2);
-    ctx.arc(cx - 2 * s, cy - 50 * s, 5 * s,   0, Math.PI * 2);
+    ctx.arc(fx,         cy - 30 * s, 9 * s,   0, Math.PI * 2);
+    ctx.arc(fx - 6 * s, cy - 28 * s, 6 * s,   0, Math.PI * 2);
+    ctx.arc(fx + 6 * s, cy - 28 * s, 6 * s,   0, Math.PI * 2);
+    ctx.arc(fx - 4 * s, cy - 36 * s, 6 * s,   0, Math.PI * 2);
+    ctx.arc(fx + 4 * s, cy - 36 * s, 6 * s,   0, Math.PI * 2);
+    ctx.arc(fx,         cy - 44 * s, 7 * s,   0, Math.PI * 2);
+    ctx.arc(fx - 2 * s, cy - 50 * s, 5 * s,   0, Math.PI * 2);
     ctx.fill();
     // Highlight
     ctx.fillStyle = 'rgba(255,255,255,0.12)';
     ctx.beginPath();
-    ctx.arc(cx - 3 * s, cy - 42 * s, 3.5 * s, 0, Math.PI * 2);
-    ctx.arc(cx - 2 * s, cy - 50 * s, 2.5 * s, 0, Math.PI * 2);
+    ctx.arc(fx - 3 * s, cy - 42 * s, 3.5 * s, 0, Math.PI * 2);
+    ctx.arc(fx - 2 * s, cy - 50 * s, 2.5 * s, 0, Math.PI * 2);
     ctx.fill();
   }
 
   // Standalone chicken sprite for UI (the easter-egg upgrade card). Screen-space,
   // scaled, centred on (cx, cy) — mirrors the in-world drawChicken body shape.
+  // The flock FANGUS swallowed, tumbling back out as it explodes. Screen-space
+  // arcs drawn with the UI chicken sprite, lifted by the entity's height and
+  // spun end-over-end, with a shadow on the ground it's falling toward.
+  function drawBossBurstChickens() {
+    for (const c of bossBurstChickens) {
+      drawShadow(c.x, c.y, 0.3);
+      const p = worldToScreen(c.x, c.y);
+      const sx = p.x;
+      const sy = p.y + TILE_H / 2 - c.z * 16;
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.rotate(c.spin);
+      ctx.translate(-sx, -sy);
+      drawChickenIcon(sx, sy, 1);
+      ctx.restore();
+    }
+  }
+
   function drawChickenIcon(cx, cy, s) {
     s = s || 1;
     ctx.save();

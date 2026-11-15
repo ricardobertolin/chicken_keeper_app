@@ -4,6 +4,15 @@
     return dx*dx + dy*dy;
   }
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  // Blend two #rrggbb colours. t=0 → a, t=1 → b.
+  function mixHex(a, b, t) {
+    const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
+    const ch = sh => {
+      const ca = (pa >> sh) & 255, cb = (pb >> sh) & 255;
+      return Math.round(ca + (cb - ca) * t);
+    };
+    return 'rgb(' + ch(16) + ',' + ch(8) + ',' + ch(0) + ')';
+  }
   function rand(a, b) { return a + Math.random() * (b - a); }
 
   function inBounds(x, y) {
@@ -109,6 +118,7 @@
   function togglePause() {
     paused = !paused;
     if (paused) { pauseTab = 'status'; pauseUpgradeScroll = 0; } // always re-open on the status tab
+    disarmQuit(); // a half-finished quit confirmation never survives the panel closing
   }
 
   function shuffle(items) {

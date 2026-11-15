@@ -200,21 +200,16 @@
       }
       // Everything that opened up between the last wave we looked at and now
       // (a debug multi-wave skip can cross more than one tier at once).
+      // No names and no count: announcing WHAT unlocked spoils the pool the
+      // upgrade screen is about to offer, and the count was just noise. There
+      // is deliberately no "next wave will unlock…" heads-up any more either.
       const landed = upgradesUnlockingAt(prev, w);
-      const ahead  = upgradesUnlockingAt(w, w + 1);
-      // Deliberately no names: announcing WHAT unlocked would spoil the pool
-      // the upgrade screen is about to offer. Just the count.
       if (landed.length) {
         unlockNoticeAhead = false;
-        unlockNoticeTitle = landed.length + (landed.length === 1 ? ' NEW UPGRADE' : ' NEW UPGRADES') + ' UNLOCKED';
+        unlockNoticeTitle = 'NEW UPGRADES UNLOCKED';
         unlockNoticeSub = 'Check the upgrade tree when you pause';
         unlockNoticeT = UNLOCK_NOTICE_DUR;
         playUnlockChime();
-      } else if (ahead.length) {
-        unlockNoticeAhead = true;
-        unlockNoticeTitle = 'NEXT WAVE UNLOCKS ' + ahead.length + (ahead.length === 1 ? ' UPGRADE' : ' UPGRADES');
-        unlockNoticeSub = 'Survive to see what they are';
-        unlockNoticeT = UNLOCK_NOTICE_DUR;
       }
       return;
     }
@@ -363,6 +358,7 @@
     // Apply any deferred map growth now — hidden behind the upgrade overlay.
     if (pendingMapExpansions > 0) {
       while (pendingMapExpansions > 0) { expandMap(); pendingMapExpansions--; }
+      playWoodChop(); // the old tree ring was felled to make room
       toast('The land has expanded!', 2);
     }
     upgradeMode = true;

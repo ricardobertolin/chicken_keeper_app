@@ -11,6 +11,7 @@
     // after it was killed. Catch, log, and keep the loop alive so at worst one
     // frame is skipped instead of the whole game hanging.
     try {
+      updateMusic(); // war drums / boss theme — driven off the audio clock
       update(dt);
       // The cutscene + wipe are host-authoritative in co-op: the guest mirrors
       // them from the snapshot (rocketLaunch / fade), so it must NOT advance them
@@ -328,6 +329,7 @@
     updateSmoke(dt);
     updateBlasts(dt);
     updateScorches(dt);
+    updateTreeRustle(dt); // shake the canopy over any wolf hiding behind it
     updateFlyHats(dt);
     updateBeams(dt);
     if (!(multiplayer && !isHost)) {
@@ -457,9 +459,14 @@
         const coopSlots = 4 + (c.level || 0);
         const hasRoom = aliveChickens < maxChickens && nearby < coopSlots;
         // Cosmetic flag: the coop gently rocks in drawCoop while a chicken is
-        // actually brewing inside (lay window open + room for the chick).
+        // brewing inside. This is the cue that replaced the old egg-on-roof
+        // hint, so it has to show in the same situations the egg did —
+        // including a coop placed BETWEEN waves, where coopsCanLay is false
+        // but the chick is still on its way once the wave starts. Rocking
+        // therefore only needs room in the flock; it stops when the coop is
+        // full (nothing is coming) or the coop is in the air.
         // Synced to the guest via the coop snapshot.
-        c.laying = coopsCanLay && hasRoom;
+        c.laying = hasRoom && !c.launching;
         if (c.spawnT <= 0) {
           // Hold the timer at zero outside the lay window — otherwise placing
           // a coop between waves burns its first cycle on the silent re-roll
