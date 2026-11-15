@@ -1,7 +1,9 @@
 // Bumping VERSION is what evicts the previous cache in `activate`. It had been
 // pinned at v0.8.3 across every release since, so the old entry was never
 // purged and returning visitors kept getting that build served to them.
-const VERSION = 'chicken-keeper-v0.9.5';
+// Must match the version printed on the title screen (index.html, .menu-version)
+// so a player's reported build maps to a known cache.
+const VERSION = 'chicken-keeper-v0.10.0';
 
 // Only files index.html actually references. app.js / manifest.webmanifest /
 // icon.svg are unused stubs and are not precached. The game script is split

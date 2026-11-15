@@ -856,7 +856,7 @@
       if (w.smokeT <= 0) { w.smokeT = 0.18; spawnSmoke(w.x, w.y - 0.5, 1); }
     }
     if (w.sabotageFuseT >= SABOTAGE_FUSE) { explodeSabotagedWolf(w); return; }
-    const baseSpeed = 2.2 * (w.speedMul || 1);
+    const baseSpeed = 2.2 * (w.speedMul || 1) * weatherSpeedMul(); // snow bogs the pack down
     // Turncoat: pick the nearest live non-defective wolf as prey and chew it down.
     if (w.turncoat) {
       let prey = null, nd = Infinity;
@@ -1836,7 +1836,8 @@
       kills++;
       attacker.kills = (attacker.kills || 0) + 1;
       onWolfKilled(w, attacker);
-      if (!w.thing) corpses.push({ x: w.x, y: w.y, kind: w.fox ? 'fox' : 'wolf', t: 5 });
+      // Late-game wolves sometimes fly apart instead of leaving a body.
+      if (!w.thing && !tryWolfDisassemble(w)) corpses.push({ x: w.x, y: w.y, kind: w.fox ? 'fox' : 'wolf', t: 5 });
       if (w.fox) {
         const bounty = 50 + wave;
         addSharedMoney(bounty);
@@ -1908,6 +1909,11 @@
     who.deathCause = byWhat;
     // Ignore a hit that lands on a keeper already down — mid-fall or a ghost.
     if (who.ghost || who.dying) { checkBothDown(); return; }
+    // Plant a headstone on the spot. It's cleared by the next startWave, so
+    // it marks this round only — and the game-over screen hides it (drawGraves
+    // skips while gameOver/endScreen is up), which is why a solo death never
+    // shows one but a co-op death or a RESPAWN revive does.
+    graves.push({ x: who.x, y: who.y, lean: rand(-0.16, 0.16) });
     if (!multiplayer || !player2.active) {
       // Single-player: freeze into game-over, but first let the keeper visibly
       // topple. `dying` keeps drawPlayer rendering the body flat on the ground
@@ -2365,7 +2371,8 @@
           const shooter = p.shooter === 2 ? player2 : player;
           if (!hunterKill) shooter.kills = (shooter.kills || 0) + 1;
           onWolfKilled(w, shooter);
-          if (!w.thing) corpses.push({ x: w.x, y: w.y, kind: w.fox ? 'fox' : 'wolf', t: 5 });
+          // Late-game wolves sometimes fly apart instead of leaving a body.
+      if (!w.thing && !tryWolfDisassemble(w)) corpses.push({ x: w.x, y: w.y, kind: w.fox ? 'fox' : 'wolf', t: 5 });
           if (w.fox && !hunterKill) {
             const bounty = 50 + wave;
             // Fox bounty goes to whoever fired the killing pellet.
@@ -2391,16 +2398,27 @@
     // come from a fellow hunter; the camp would otherwise mow itself down.
     // Homing ("bending") bullets pass harmlessly through hunters — they seek
     // wolves only and shouldn't gun down allies.
-    if (p.shooter !== 'hunter' && !p.homing && hunters.length) {
+    // A keeper can only hurt the crew when friendly fire is switched on — the
+    // same toggle that governs shooting your buddy now governs shooting your
+    // allies. Wolf and fox rounds still clip them either way. (Hunters have no
+    // hat stack, so this only ever costs them HP.)
+    const keeperShot = p.shooter === 1 || p.shooter === 2;
+    const canHitHunters = !keeperShot || gameOpts.friendlyFire;
+    if (p.shooter !== 'hunter' && !p.homing && canHitHunters && hunters.length) {
       for (const h of hunters) {
         if (!h.alive) continue;
         if (p.hit && p.hit.has(h)) continue;
         if (dist2(p.x, p.y, h.x, h.y) < 0.18) {
+          // Half of all incoming hits simply don't stick.
+          if (Math.random() < HUNTER_DODGE_CHANCE) {
+            if (p.hit) p.hit.add(h);
+            continue;
+          }
           h.hp -= p.dmg;
           h.hurtT = 0.18;
           // Only a keeper's pellet (shooter 1 or 2) counts as a player kill;
           // a wolf/fox bullet that clips a hunter never spooks the crew.
-          if (h.hp <= 0) onHunterKilled(h, p.shooter === 1 || p.shooter === 2);
+          if (h.hp <= 0) onHunterKilled(h, keeperShot);
           if (p.hit) p.hit.add(h);
           p.didHit = true; // rocket pellets only detonate on a wolf/hunter hit
           if (--p.pierce <= 0) return false;
@@ -2449,12 +2467,12 @@
     if (gameOpts.friendlyFire && player2.active) {
       if (p.shooter !== 1 && !player.ghost &&
           dist2(p.x, p.y, player.x, player.y) < 0.18) {
-        applyFriendlyFireHit(player);
+        applyFriendlyFireHit(player, FRIENDLY_FIRE_HAT_CHANCE);
         return false;
       }
       if (p.shooter !== 2 && !player2.ghost &&
           dist2(p.x, p.y, player2.x, player2.y) < 0.18) {
-        applyFriendlyFireHit(player2);
+        applyFriendlyFireHit(player2, FRIENDLY_FIRE_HAT_CHANCE);
         return false;
       }
     }

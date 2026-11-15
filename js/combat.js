@@ -44,8 +44,8 @@
     const critRange2 = isCrit2 ? RELOAD_SC_CRIT_RANGE : 1;
     const life = (shotgunLifeFor(player2) * (homingLvl2 > 0 ? HOMING_LIFE_MUL : 1) + sizeMattersLifeBonus(player2)) * critRange2;
     const sizeBounce2 = (lvls.sizeMatters || 0) >= 5;
-    const coldChance2 = COLD_HOT_CHANCE[Math.min(5, lvls.coldShot || 0)];
-    const hotChance2  = COLD_HOT_CHANCE[Math.min(5, lvls.hotShot || 0)];
+    const coldChance2 = Math.min(1, COLD_HOT_CHANCE[Math.min(5, lvls.coldShot || 0)] * statusPotencyMul());
+    const hotChance2  = Math.min(1, COLD_HOT_CHANCE[Math.min(5, lvls.hotShot  || 0)] * statusPotencyMul());
     const coldDur2 = statusEffectDur(lvls.coldShot || 0);
     const hotDur2  = statusEffectDur(lvls.hotShot || 0);
     // Double Helix fans into THREE tight clusters (left / centre / right).
@@ -335,7 +335,10 @@
     return Math.random() < (0.10 + bonus);
   }
 
-  function applyFriendlyFireHit(target) {
+  // `hatChance` (optional) is the odds this hit actually costs a hat. Buddy-on-
+  // buddy fire passes FRIENDLY_FIRE_HAT_CHANCE so a stray pellet usually only
+  // stings; hunter strays and anything else omit it and always count.
+  function applyFriendlyFireHit(target, hatChance) {
     if (target.ghost) return;
     if (target.bulletHitT > 0) return; // already debited by an earlier pellet this blast
     target.bulletHitT = 0.18;          // ~one blast window
@@ -343,6 +346,8 @@
     target.hurtT = 0.22;
     playKeeperHit();
     breakLastStand(target); // a hit drops the keeper out of the Last Stand pose
+    // Grazed — the blast window is still spent, so one volley can't re-roll.
+    if (hatChance !== undefined && Math.random() >= hatChance) return;
     if (keeperDodgesHatLoss(target)) return; // hidden dodge — kept the hat
     if (target === player) {
       if (immortal && playerHats <= 1) return; // Immortal holds the last hat (silently)

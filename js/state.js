@@ -113,7 +113,7 @@
   // Lobby-configurable multiplayer rules. The host writes these when starting
   // the game and broadcasts them inside the snapshot; the guest mirrors them.
   const gameOpts = {
-    friendlyFire: false,    // can players damage each other's hats?
+    friendlyFire: false,    // can players damage each other's hats? (also gates shooting the hunters)
     separateMoney: false,   // each player has their own pot vs sharing one
     individualUpgrades: true, // each player picks their own gun upgrades (default; lobby can flip to host-picks)
   };
@@ -326,7 +326,7 @@
   // Rooftopper (wave 40+) — sniper allies who perch on the tallest coops.
   // Slow cadence, high damage, scaling with the coop's floor count. Each
   // upgrade tier adds one rooftopper, prioritising taller coops first.
-  const ROOFTOP_BASE_COOLDOWN = 4.5;    // slower cadence — these are heavy, deliberate shots
+  const ROOFTOP_BASE_COOLDOWN = 2.2;    // was 4.5 — they fire roughly twice as often now
   const ROOFTOP_BASE_DMG      = 20;
   const ROOFTOP_DMG_PER_FLOOR = 0.55;   // each extra floor adds this fraction of base damage
   const ROOFTOP_DELAY_PER_FLOOR = 1.0;  // each extra floor adds this many seconds to the cooldown
@@ -335,6 +335,11 @@
   const ROOFTOP_PELLET_SPEED  = 30;
   const ROOFTOP_PELLET_R      = 2.4;
   const FAT_CHANCE = 0.20;         // chance a chicken hatches fat (once the upgrade is taken)
+  // Plain birds don't stay plain forever: at the top of each wave every
+  // unmodified chicken gets a small roll to grow into one of the variants the
+  // player has unlocked. Much rarer than the at-hatch roll — this is a slow
+  // drift, not a second helping.
+  const CHICKEN_MORPH_CHANCE = 0.06;
   // Wave-50 chicken variants — mutually exclusive picks. Worker chickens wear
   // hardhats, move a bit faster and run to fence debris to rebuild walls (one
   // chicken per rebuild). Rich chickens wear top hats, walk slower and pay
@@ -353,6 +358,15 @@
   const wolves = [];    // {x,y,vx,vy,target,attackT,alive}
   const pellets = [];   // {x,y,vx,vy,life,dmg,pierce,hit}
   const corpses = [];   // {x,y,kind,t}
+  // A little headstone wherever a keeper fell. Cleared at the next wave, the
+  // same way the hunters' burnt-out fireplace ages away.
+  const graves = [];    // {x,y,wave,lean}
+  // Scrap thrown off a wolf that came apart instead of dying normally.
+  const wolfScrap = []; // {x,y,vx,vy,z,vz,spin,spinV,t,kind}
+  // From this wave on, a share of kills end with the wolf flying to pieces
+  // like a shot-up machine rather than toppling over.
+  const WOLF_SCRAP_WAVE   = 25;
+  const WOLF_SCRAP_CHANCE = 0.10;
   const trees = [];     // {x,y,size,shade} — static decoration on the dark border
   const stumps = [];    // {x,y,size,ang} — tiny cut stumps on old borders after map expansion
   const twigs  = [];    // {x,y,ang,len} — scattered fallen twigs on expanded grass
@@ -462,7 +476,7 @@
     return (w.coldT > 0) ? BURN_DMG * 2 : BURN_DMG; // chilled-and-burning takes double burn
   }
   // Chill/burn lasts longer the higher the upgrade: 3s at level 1 → 7s at level 5.
-  function statusEffectDur(lvl) { return 3 + Math.max(0, Math.min(5, lvl) - 1); }
+  function statusEffectDur(lvl) { return (3 + Math.max(0, Math.min(5, lvl) - 1)) * statusPotencyMul(); }
   // Weapon Oil — single-tier. One charge extends the skill-check accept zone
   // by this many 0..1 bar units, drawn as an amber halo outside the green
   // core, and lasts WEAPON_OIL_WAVES waves. It never stacks: the shop only
@@ -597,7 +611,12 @@
   let barrelBonusMul = 1;
   let passedBoss = false; // true once this run has cleared (or survived past) the boss
   let pendingCarryMoney = 0; // post-boss restarts carry 0.1% of the run's money (NOT doubled)
-  let runMoneyEarned = 0;    // every $ credited this run — death-screen restarts carry 1% of it
+  let runMoneyEarned = 0;    // every $ credited this run — death-screen restarts carry RESTART_CARRY_PCT of it
+  const RESTART_CARRY_PCT = 0.02; // share of the run's earnings a death-restart keeps
+  // A death-restart also quietly hands back half the Longer Barrel levels the
+  // run had reached. Deliberately NOT surfaced anywhere in the UI — the money
+  // carry is the advertised reward and this is a silent leg-up on top.
+  let pendingCarryRange = 0;
   // Post-hit invincibility window (wolf bites / boss contact / pup nips).
   // P2 gets an extra second so network lag can't eat the guest's dodge window.
   const KEEPER_IFRAMES    = 2.5;
@@ -679,7 +698,7 @@
     let mul = 1 - fatTierOf(c) * FAT_SPEED_PER_TIER;
     if (c.worker) mul *= WORKER_SPEED_MUL;
     if (c.rich)   mul *= RICH_SPEED_MUL;
-    return mul;
+    return mul * weatherSpeedMul(); // snow slows the flock too
   }
   // Coop price scales with how many coops currently exist — selling one lowers it.
   function coopCost() {
@@ -766,6 +785,40 @@
   const LEPRECHAUN_HAT_COLOR = '#1f6b1f';
   const LEPRECHAUN_BUY_CHANCE = 0.06;              // chance a bought hat comes out leprechaun (was 0.01)
   const LEPRECHAUN_PAYOUT = 100;
+  // ---- Weather events ----------------------------------------------------
+  // Two siblings of Night of the Wolf, rolled on exactly the same gate (see
+  // WEATHER_* below). At most ONE weather event runs per wave, and never
+  // alongside a night — the ground rules stay readable that way.
+  //   'rain' — wolves short out: most spawn confused, and live ones cook off.
+  //   'snow' — everything slows, cold/hot shots bite harder, the farm whitens.
+  let weather = '';               // '' | 'rain' | 'snow'
+  const rainDrops = [];           // {x,y,len,spd} in screen space
+  const snowFlakes = [];          // {x,y,r,spd,sway,phase} in screen space
+  // Same window, odds and per-run cap the night event uses.
+  const WEATHER_MIN_WAVE = 10;
+  const WEATHER_MAX_WAVE = 50;
+  const WEATHER_PER_WAVE_CHANCE = 0.16;
+  const WEATHER_MAX_PER_RUN = 3;
+  const weatherEvents = {
+    rain: { count: 0, blockStart: -1, nextWave: -1, force: false },
+    snow: { count: 0, blockStart: -1, nextWave: -1, force: false },
+  };
+  const RAIN_CONFUSE_CHANCE   = 0.55; // share of wolves that spawn confused in the rain
+  const RAIN_SHORT_OUT_PER_SEC = 0.05; // per-wolf per-second chance to cook off
+  const RAIN_BLAST_R   = 2.0;  // tiles a short-out blast reaches
+  const RAIN_BLAST_DMG = 4;    // damage to each wolf caught in it
+  const SNOW_SLOW_MUL   = 0.75; // everything moves at three-quarter pace
+  const SNOW_STATUS_MUL = 2;    // cold/hot proc chance AND duration both doubled
+  const SNOW_GIFT_MIN   = 40;   // smallest winter gift (player is already rich)
+  const SNOW_GIFT_MAX   = 300;  // largest (player is broke)
+  const SNOW_GIFT_FULL_AT = 600; // wallet at/above this gets only the minimum
+  function snowing() { return weather === 'snow'; }
+  function raining() { return weather === 'rain'; }
+  // Movement multiplier from the weather — snow bogs everyone down equally.
+  function weatherSpeedMul() { return weather === 'snow' ? SNOW_SLOW_MUL : 1; }
+  // Cold/Hot Shot are far more potent in a blizzard.
+  function statusPotencyMul() { return weather === 'snow' ? SNOW_STATUS_MUL : 1; }
+
   let nightOfWolf = false;        // true while the current wave is a Night-of-the-Wolf wave
   let nightOfWolfCount = 0;       // how many have triggered this run
   let nightOfWolfDebugForce = false; // debug toggle — next startWave becomes a night wave
@@ -886,6 +939,14 @@
   // under a parachute. Untouchable until it lands, then behaves normally.
   const PARACHUTE_WAVE = 15;        // first wave they can appear
   const PARACHUTE_RATE = 0.14;      // per-wave chance one drops in
+  // Two more oddities, rolled at the same rarity as the parachute drop.
+  // Moonwalker: ambles in facing the wrong way the whole time.
+  // Brute: ten times the health and a furrowed, furious brow.
+  const MOONWALK_WAVE = 15;
+  const MOONWALK_RATE = 0.14;
+  const BRUTE_WAVE    = 15;
+  const BRUTE_RATE    = 0.14;
+  const BRUTE_HP_MUL  = 10;
   const PARACHUTE_FALL_TIME = 3.8;  // seconds of descent (longer drift in)
   const PARACHUTE_START_H = 130;    // screen px above the landing spot at release
   // Player-2 cameo — a very rare single-player easter egg, at most once a run.
@@ -934,7 +995,15 @@
   // Tiered tables: max HP, damage multiplier, fire-cooldown multiplier.
   const HUNTER_POWER_COST = 200;
   const HUNTER_POWER_HP    = [6, 9, 12, 15, 18, 21];
-  const HUNTER_POWER_DMG   = [1.0, 1.2, 1.4, 1.6, 1.8, 2.0];
+  // Doubled across every tier — the crew was hitting far too softly for what
+  // the gear costs. Index 0 (un-geared, "level 1" hunters) included.
+  const HUNTER_POWER_DMG   = [2.0, 2.4, 2.8, 3.2, 3.6, 4.0];
+  // Each time a hunter would take a hit, this much of the time it just doesn't
+  // land — they're seasoned, and it stops a stray spray from wiping the camp.
+  const HUNTER_DODGE_CHANCE = 0.5;
+  // Odds a pellet that lands on the other keeper actually knocks a hat off.
+  // The rest graze: same flinch and blast debounce, no hat lost.
+  const FRIENDLY_FIRE_HAT_CHANCE = 0.75;
   const HUNTER_POWER_RATE  = [1.0, 0.85, 0.72, 0.61, 0.52, 0.44];
   function hunterPowerLvl() { return Math.min(5, Math.max(0, upgradeLevels.hunterPower || 0)); }
   // Price ramps $200 per gear tier: tier 1 = $200, tier 2 = $400 … tier 5 = $1000.
@@ -1032,6 +1101,9 @@
     { body: '#5a5a60', belly: '#8a8a90', head: '#4a4a50', dark: '#303034' }, // charcoal
     { body: '#e3d6bc', belly: '#f2ead6', head: '#cdbf9e', dark: '#9b8a68' }, // cream
   ];
+  // Collar colour per personality — the one readable tell for what a dog
+  // actually does. Body colour above stays a meaningless random roll.
+  const DOG_COLLARS = ['#d83b3b', '#3fbf55', '#3f7fe0']; // 0 follow, 1 patrol, 2 guard
   const DOG_SEP_R = 1.6;       // idle dogs steer apart within this range to spread out
   const DOG_SEP_WEIGHT = 0.7;  // how strongly that separation pulls vs seeking the target
   // Each dog gets one of three random personalities (0 stay-with-player,
@@ -1048,8 +1120,11 @@
     range:    [0.30, 0.40, 0.50, 0.60, 0.70, 1.00],
     speed:    [4.0, 4.5, 5.0, 5.5, 6.0, 7.5],
     fireRate: [0.75, 0.65, 0.55, 0.45, 0.35, 0.15],
-    woodFence: [0, 1, 2, 3, 4, 5],     // HP of placed wooden fences (index 0 = locked)
-    stoneWall: [0, 2, 4, 6, 8, 12],    // HP of placed stone walls (index 0 = locked)
+    // Fence/wall HP. Bumped a notch across the board — walls now crack visibly
+    // at half health and mend themselves at the end of every wave, so a little
+    // more staying power inside a single wave reads better.
+    woodFence: [0, 2, 3, 4, 6, 8],     // HP of placed wooden fences (index 0 = locked)
+    stoneWall: [0, 3, 6, 9, 12, 16],   // HP of placed stone walls (index 0 = locked)
     reloadMove: [0.80, 0.70, 0.60, 0.45, 0.35, 0.20], // move-speed penalty while reloading (max still leaves a 20% slow — never trivial)
     counter:    [0.05, 0.10, 0.20, 0.30, 0.40, 0.50], // melee counter-attack chance when hit
     sprint:     [0.25, 0.28, 0.31, 0.34, 0.37, 0.40], // run-speed bonus at a full sprint (index 0 = base)

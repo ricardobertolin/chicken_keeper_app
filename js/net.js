@@ -221,7 +221,8 @@
         // counters (guest wallets are host-authoritative — no capture there).
         if (isHost && pendingCarryMoney === 0) {
           pendingCarryMoney = passedBoss ? Math.floor(money * 0.001)
-                                         : Math.floor(runMoneyEarned * 0.01);
+                                         : Math.floor(runMoneyEarned * RESTART_CARRY_PCT);
+          pendingCarryRange = passedBoss ? 0 : Math.floor((upgradeLevels.range || 0) / 2);
         }
         restartMpGame();
         return;
@@ -387,12 +388,13 @@
     return out;
   }
   const SNAP_FIELDS = {
-    wolves:   ['x','y','size','fasterLevel','hurtT','facingLeft','alive','fox','bomb','sword','assassin','hatted','aggroT','carrying','fleeing','meleeT','meleeDir','bob','smokeT','defective','turncoat','coldT','burnT','boss','aimDir','walkT','missileWolf','missilePhase','missileChargeT','jumper','jumpT','jumpDur','hunterWolf','muzzleT','maxHp','hp','hatColor','gunColor','pup','ranged','homer','parachuting','parachuteH','parachuteSway','crawler','legPhase','sparkleT'],
+    wolves:   ['x','y','size','fasterLevel','hurtT','facingLeft','alive','fox','bomb','sword','assassin','hatted','aggroT','carrying','fleeing','meleeT','meleeDir','bob','smokeT','defective','turncoat','coldT','burnT','boss','aimDir','walkT','missileWolf','missilePhase','missileChargeT','jumper','jumpT','jumpDur','hunterWolf','muzzleT','maxHp','hp','hatColor','gunColor','pup','ranged','homer','parachuting','parachuteH','parachuteSway','crawler','legPhase','sparkleT','moonwalk','brute'],
     chickens: ['x','y','alive','facingLeft','fat','worker','rich','bob','fleeT'],
     coops:    ['x','y','level','dirtR','builtWave','shakeT','igniteT','launching','laying'],
-    fences:   ['x','y','kind','hp','hurtT'],
+    fences:   ['x','y','kind','hp','maxHp','hurtT'], // maxHp drives the half-health cracks
     farms:    ['x','y','growth','need','trampleFlash'],
-    dogs:     ['x','y','facingLeft','bob','variant'],
+    dogs:     ['x','y','facingLeft','bob','variant','personality'], // personality drives the collar colour
+
     corpses:  ['x','y','kind','t','frost','fried'],
     pellets:  ['x','y','vx','vy','r','color','trail','pierce','crit','critCol','homing','wolfHoming','rooftop'],
     smoke:    ['x','y','t','life','r'],
@@ -556,6 +558,7 @@
         // SHIFT dodge-roll is enabled in lockstep with the wolves' lunge attack.
         parryMode: parryMode,
         nightOfWolf: nightOfWolf,
+        weather: weather, // '' | 'rain' | 'snow' — guest runs its own particles
         // Host's own dash so the guest can render the hat-scatter animation.
         hostDashT: player.dashT || 0,
         hostDashX: player.dashX || 0,
@@ -726,6 +729,12 @@
     if (typeof msg.huntersLeavePending === 'boolean') huntersLeavePending = msg.huntersLeavePending;
     if (typeof msg.parryMode === 'boolean') parryMode = msg.parryMode; // host drives the experimental toggle
     if (typeof msg.nightOfWolf === 'boolean') nightOfWolf = msg.nightOfWolf;
+    if (typeof msg.weather === 'string' && msg.weather !== weather) {
+      weather = msg.weather;
+      _tileColorCache.clear(); // snow goes on/comes off the ground on the guest too
+      rainDrops.length = 0;
+      snowFlakes.length = 0;
+    }
     // Host's dash state so the guest renders the hat-scatter on the host's keeper.
     if (typeof msg.hostDashT === 'number') { player2.dashT = msg.hostDashT; player2.dashX = msg.hostDashX || 0; player2.dashY = msg.hostDashY || 0; }
     // Boss state so the guest renders the health bar + boss-cleared end screen.

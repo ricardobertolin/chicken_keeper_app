@@ -432,6 +432,14 @@
   // kind and the HP a worker chicken should restore the fence to. Cleared
   // at wave end. If another debris pile already sits on the same tile we
   // just overwrite the kind, so chained destructions don't pile up.
+  // A fence's full health. Older/synced fences may predate the maxHp field, so
+  // fall back to the current table value (which is also what a repair restores).
+  function fenceMaxHp(f) {
+    return f.maxHp
+        || (f.kind === 'stone' ? tableAt('stoneWall') : tableAt('woodFence'))
+        || (f.hp || 1);
+  }
+
   function spawnFenceDebris(fence) {
     const restoredHp = (fence.kind === 'stone'
         ? tableAt('stoneWall')
@@ -455,7 +463,7 @@
     const name = kind === 'stone' ? 'Stone wall' : 'Fence';
     if (moneyOf(builder) < cost) { exitBuildModeFor(builder); buildToast(builder, 'Need $' + cost + ' to build ' + name.toLowerCase()); return; }
     const hp = kind === 'stone' ? tableAt('stoneWall') : tableAt('woodFence');
-    fences.push({ x: target.x, y: target.y, kind: kind, hp: hp, hurtT: 0 });
+    fences.push({ x: target.x, y: target.y, kind: kind, hp: hp, maxHp: hp, hurtT: 0 });
     spendMoney(builder, cost);
     playBuild();
     buildToast(builder, name + ' placed!  -$' + cost, 0.8);
@@ -520,6 +528,30 @@
       worker,
       rich,
     });
+  }
+
+  // Top of each wave: plain birds get a small roll to grow into whichever
+  // variants the player has unlocked, so the flock keeps developing instead of
+  // being fixed at whatever each chicken happened to hatch as. A bird that is
+  // already fat/worker/rich is left alone, and the fat/worker exclusion from
+  // spawnChicken still holds (workers need to be able to move).
+  function morphChickens() {
+    const fatLvl    = upgradeLevels.fatChicken    || 0;
+    const workerLvl = upgradeLevels.workerChicken || 0;
+    const richLvl   = upgradeLevels.richChicken   || 0;
+    if (!fatLvl && !workerLvl && !richLvl) return;
+    for (const c of chickens) {
+      if (!c.alive) continue;
+      // Rich stacks with either body type, so it rolls on its own.
+      if (richLvl && !c.rich && Math.random() < CHICKEN_MORPH_CHANCE) c.rich = true;
+      if (c.fat || c.worker) continue;
+      if (Math.random() >= CHICKEN_MORPH_CHANCE) continue;
+      // Pick between the body types the player actually owns.
+      const canFat = fatLvl > 0, canWork = workerLvl > 0;
+      if (canFat && canWork)   (Math.random() < 0.5 ? c.fat = true : c.worker = true);
+      else if (canFat)         c.fat = true;
+      else if (canWork)        c.worker = true;
+    }
   }
 
   function spawnWolf(opts) {
@@ -609,7 +641,12 @@
     // flips them to turncoat: blue eye, attacks other wolves.
     const sabLvl = upgradeLevels.sabotage || 0;
     let defective = false, turncoat = false;
-    if (!assassin && !sword && sabLvl > 0) {
+    // Rain gets into everything: most of the pack wades in already confused,
+    // regardless of whether Sabotage was ever bought.
+    if (!assassin && !sword && raining() && Math.random() < RAIN_CONFUSE_CHANCE) {
+      defective = true;
+    }
+    if (!defective && !assassin && !sword && sabLvl > 0) {
       if (Math.random() < SABOTAGE_DEFECT_CHANCE[Math.min(sabLvl, 5)]) {
         defective = true;
         if (sabLvl >= 5 && Math.random() < SABOTAGE_TURNCOAT_CHANCE) {
@@ -907,6 +944,73 @@
     // (no intro toast — the parachute drop speaks for itself)
   }
 
+  // From WOLF_SCRAP_WAVE on, a slice of kills end with the wolf bursting into
+  // loose parts like a machine coming apart, instead of leaving a body behind.
+  // Returns true when it fired, so the caller skips the usual corpse.
+  function tryWolfDisassemble(w) {
+    if (w.fox || w.boss || w.thing) return false;
+    if (wave < WOLF_SCRAP_WAVE) return false;
+    if (Math.random() >= WOLF_SCRAP_CHANCE) return false;
+    const n = 8 + Math.floor(Math.random() * 5);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = rand(1.2, 4.0);
+      wolfScrap.push({
+        x: w.x, y: w.y,
+        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+        z: rand(0.2, 0.9), vz: rand(3.5, 7.5),
+        spin: Math.random() * Math.PI * 2, spinV: rand(-14, 14),
+        t: rand(2.2, 3.2),
+        kind: i % 3,                      // 0 plate, 1 strut, 2 cog
+        size: rand(0.7, 1.3) * (w.size || 1),
+      });
+    }
+    spawnSmoke(w.x, w.y, 3);
+    playWolfScrap();
+    return true;
+  }
+
+  // Scrap arcs out, bounces once off the ground, then rusts away.
+  function updateWolfScrap(dt) {
+    for (let i = wolfScrap.length - 1; i >= 0; i--) {
+      const s = wolfScrap[i];
+      s.t -= dt;
+      if (s.t <= 0) { wolfScrap.splice(i, 1); continue; }
+      s.x += s.vx * dt;
+      s.y += s.vy * dt;
+      s.vz -= 16 * dt;
+      s.z += s.vz * dt;
+      s.spin += s.spinV * dt;
+      if (s.z <= 0) {
+        s.z = 0;
+        if (s.vz < -1.2) { s.vz = -s.vz * 0.35; } // one lazy bounce
+        else { s.vz = 0; s.vx *= 0.82; s.vy *= 0.82; s.spinV *= 0.7; }
+      }
+    }
+  }
+
+  // Moonwalker: an ordinary wolf that ambles in facing entirely the wrong way.
+  // Purely a visual oddity — it hunts exactly like any other wolf, it just
+  // never turns around. drawWolf flips its sprite against its heading.
+  function spawnMoonwalkWolf() {
+    spawnWolf();
+    const w = wolves[wolves.length - 1];
+    if (!w) return;
+    w.moonwalk = true;
+  }
+
+  // Brute: ten times the health and a heavy, furious brow. Slow to bring down
+  // but otherwise a normal wolf — the scare is the health bar, not new tricks.
+  function spawnBruteWolf() {
+    spawnWolf();
+    const w = wolves[wolves.length - 1];
+    if (!w) return;
+    w.brute = true;
+    w.hp = (w.hp || 1) * BRUTE_HP_MUL;
+    w.maxHp = w.hp;
+    w.size = (w.size || 1) * 1.25; // visibly bigger so the HP is readable
+  }
+
   // Player-2 cameo: in a solo run, very rarely the blue P2 keeper wanders in,
   // mooches around, then strolls back off the map. Harmless and once per run.
   // Pick a random point near the map border (a few tiles in) so the cameo
@@ -1093,7 +1197,7 @@
   // tagged as a hunter shot so it can't friendly-fire the keeper crowd
   // (existing hunter-pellet handling already enforces that).
   function fireRooftopper(r, target) {
-    playShotgun();
+    playRooftopShot(); // its own heavy crack, not the keeper's shotgun
     const floor = r.coop.level || 0;
     const dmg = ROOFTOP_BASE_DMG * (1 + floor * ROOFTOP_DMG_PER_FLOOR);
     const ang = r.dir;
@@ -1481,8 +1585,106 @@
     }
   }
 
+  // Does `kind` fire this wave? Deliberately the same gate Night of the Wolf
+  // uses: inside the pre-50 band a capped per-wave roll (steepened by each
+  // resurrection, like the night), past 50 one pre-rolled wave per 5-wave
+  // block. Never on the boss wave, debug force included.
+  function weatherRollFor(kind) {
+    const st = weatherEvents[kind];
+    if (wave === BOSS_WAVE) return false;
+    if (st.force) { st.force = false; return true; }
+    if (wave >= WEATHER_MIN_WAVE && wave <= WEATHER_MAX_WAVE) {
+      if (st.count >= WEATHER_MAX_PER_RUN) return false;
+      return Math.random() < Math.min(1, WEATHER_PER_WAVE_CHANCE * Math.pow(2, resurrectCount));
+    }
+    if (wave > WEATHER_MAX_WAVE) {
+      const blockStart = Math.floor((wave - 1) / 5) * 5 + 1;
+      if (st.blockStart !== blockStart) {
+        st.blockStart = blockStart;
+        st.nextWave = blockStart + Math.floor(Math.random() * 5);
+      }
+      return wave === st.nextWave;
+    }
+    return false;
+  }
+
+  // Pick this wave's weather. A night wave stays clear — stacking a blizzard on
+  // top of the darkness buries the one visual cue the night is built around.
+  function rollWeather() {
+    const prev = weather;
+    weather = '';
+    if (!nightOfWolf) {
+      if (weatherRollFor('rain')) {
+        weather = 'rain';
+        weatherEvents.rain.count++;
+        toast('A downpour rolls in — the pack is shorting out!', 3.2);
+      } else if (weatherRollFor('snow')) {
+        weather = 'snow';
+        weatherEvents.snow.count++;
+        giveSnowGift();
+      }
+    }
+    if (weather !== prev) {
+      // Snow repaints every tile, so the colour cache has to go both ways.
+      _tileColorCache.clear();
+      rainDrops.length = 0;
+      snowFlakes.length = 0;
+    }
+  }
+
+  // Winter gift: a hand-up that's worth most when the player is broke, so a
+  // blizzard is a lifeline on a bad run rather than a bonus on a good one.
+  function giveSnowGift() {
+    const have = Math.max(0, moneyOf(player));
+    const t = Math.max(0, 1 - have / SNOW_GIFT_FULL_AT);
+    const gift = Math.round(SNOW_GIFT_MIN + (SNOW_GIFT_MAX - SNOW_GIFT_MIN) * t);
+    addSharedMoney(gift);
+    toast('Snowfall — a winter gift of $' + gift + '!', 3.2);
+  }
+
+  // Rain: a wolf's circuits give out and it cooks off where it stands. Hurts
+  // the pack around it and anyone standing too close.
+  function wolfShortOut(w) {
+    spawnBlast(w.x, w.y);
+    playExplosion();
+    shake = Math.max(shake, 0.26);
+    const r2 = RAIN_BLAST_R * RAIN_BLAST_R;
+    for (const o of wolves) {
+      if (!o.alive || o === w) continue;
+      if (dist2(o.x, o.y, w.x, w.y) < r2) {
+        const dx = o.x - w.x, dy = o.y - w.y, m = Math.hypot(dx, dy) || 1;
+        hurtWolf(o, RAIN_BLAST_DMG, (dx / m) * 0.35, (dy / m) * 0.35);
+      }
+    }
+    explosionHitKeepers(w.x, w.y, RAIN_BLAST_R * 0.6); // stand clear
+    w.alive = false;
+    spawnSmoke(w.x, w.y, 4);
+    checkWaveDefended(); // it removed itself — the wave may now be clear
+  }
+
+  // Per-frame weather tick: short-outs during rain, plus the screen particles.
+  function updateWeather(dt) {
+    if (raining()) {
+      for (const w of wolves) {
+        if (!w.alive || w.boss || w.parachuting) continue;
+        if (Math.random() < RAIN_SHORT_OUT_PER_SEC * dt) wolfShortOut(w);
+      }
+    }
+    updateWeatherParticles(dt);
+  }
+
   function startWave(skipCount = 1) {
     wave += skipCount;
+    // Walls are patched up between waves — chips taken last round don't carry
+    // over, so a surviving fence always starts the wave uncracked.
+    for (const f of fences) {
+      f.maxHp = fenceMaxHp(f);
+      f.hp = f.maxHp;
+    }
+    // Headstones only mark the round in which someone fell (same one-wave life
+    // as the hunters' burnt-out fireplace).
+    graves.length = 0;
+    morphChickens();
     // Prune stumps and twigs that have decayed (existed for their allotted wave count).
     for (let i = stumps.length - 1; i >= 0; i--) {
       const s = stumps[i];
@@ -1553,6 +1755,7 @@
       toast('Night of the Wolf — survive the dark!', 3.2);
       playNightOfWolfStart();
     }
+    rollWeather();
     // Hunters bill the player at the top of each wave they're present for.
     // Short pay → they pocket what's there and pack up at the end of the wave.
     if (huntersCamps.length && hunters.some(h => h.alive)) {
@@ -1710,6 +1913,26 @@
         pendingSpawns--;
         if (gameOver) return;
         spawnParachuteWolf();
+      }, spawnDelay + rand(400, 2200));
+    }
+    // Moonwalker — same rarity as the parachute drop.
+    if (wave >= MOONWALK_WAVE && Math.random() < MOONWALK_RATE) {
+      pendingSpawns++;
+      setTimeout(() => {
+        if (gen !== runGen) return;
+        pendingSpawns--;
+        if (gameOver) return;
+        spawnMoonwalkWolf();
+      }, spawnDelay + rand(400, 2200));
+    }
+    // Brute — same rarity again.
+    if (wave >= BRUTE_WAVE && Math.random() < BRUTE_RATE) {
+      pendingSpawns++;
+      setTimeout(() => {
+        if (gen !== runGen) return;
+        pendingSpawns--;
+        if (gameOver) return;
+        spawnBruteWolf();
       }, spawnDelay + rand(400, 2200));
     }
     // Missile wolf — wave 51+, an occasional siege brute that bombards coops.
@@ -2005,10 +2228,13 @@
     // parity with the pellet system, so spraying the laser into your own crew
     // mows them down. Only the bending homing-laser spares allies (it seeks
     // wolves, mirroring how homing pellets pass through hunters).
-    if (!homing && hunters.length) {
+    // Mirrors the pellet path: the beam only burns the crew when friendly fire
+    // is on, and half of the hits that do land are shrugged off.
+    if (!homing && gameOpts.friendlyFire && hunters.length) {
       for (const h of hunters) {
         if (!h.alive) continue;
         if (segmentDist2(x1, y1, x2, y2, h.x, h.y) < t2) {
+          if (Math.random() < HUNTER_DODGE_CHANCE) continue;
           h.hp -= dmg;
           h.hurtT = 0.18;
           if (h.hp <= 0) onHunterKilled(h, true); // a keeper's beam always counts as a player kill
@@ -2356,8 +2582,10 @@
     const sizeLife = sizeMattersLifeBonus(player);     // Size Matters: longer-lived shots
     const sizeBounce = (upgradeLevels.sizeMatters || 0) >= 5; // MAX: ricochet off the map edge
     const critRange = isCrit ? RELOAD_SC_CRIT_RANGE : 1;     // crit shots reach farther
-    const coldChance = COLD_HOT_CHANCE[Math.min(5, upgradeLevels.coldShot || 0)];
-    const hotChance  = COLD_HOT_CHANCE[Math.min(5, upgradeLevels.hotShot || 0)];
+    // statusPotencyMul doubles both in a blizzard (statusEffectDur does the same
+    // for how long the chill/burn lasts).
+    const coldChance = Math.min(1, COLD_HOT_CHANCE[Math.min(5, upgradeLevels.coldShot || 0)] * statusPotencyMul());
+    const hotChance  = Math.min(1, COLD_HOT_CHANCE[Math.min(5, upgradeLevels.hotShot  || 0)] * statusPotencyMul());
     const coldDur = statusEffectDur(upgradeLevels.coldShot || 0);  // 3s → 7s at max
     const hotDur  = statusEffectDur(upgradeLevels.hotShot || 0);
     // Double Helix splits into THREE tight clusters fanned left / centre / right

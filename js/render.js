@@ -20,6 +20,84 @@
     return 0;
   }
 
+  // ---- Weather particles -------------------------------------------------
+  // Both live in SCREEN space and wrap around the viewport, so they cost the
+  // same no matter how far the map has grown and never need culling.
+  const RAIN_COUNT = 190;
+  const SNOW_COUNT = 150;
+
+  function updateWeatherParticles(dt) {
+    if (raining()) {
+      while (rainDrops.length < RAIN_COUNT) {
+        rainDrops.push({ x: Math.random() * (W + 120) - 60, y: Math.random() * H,
+                         len: 7 + Math.random() * 11, spd: 620 + Math.random() * 420 });
+      }
+      for (const d of rainDrops) {
+        d.y += d.spd * dt;
+        d.x -= d.spd * 0.22 * dt; // slanted by the wind
+        if (d.y > H) { d.y = -d.len - Math.random() * 40; d.x = Math.random() * (W + 120) - 60; }
+        if (d.x < -60) d.x += W + 120;
+      }
+    } else if (rainDrops.length) rainDrops.length = 0;
+
+    if (snowing()) {
+      while (snowFlakes.length < SNOW_COUNT) {
+        snowFlakes.push({ x: Math.random() * W, y: Math.random() * H,
+                          r: 0.8 + Math.random() * 1.8, spd: 18 + Math.random() * 34,
+                          sway: 6 + Math.random() * 16, phase: Math.random() * Math.PI * 2 });
+      }
+      for (const f of snowFlakes) {
+        f.y += f.spd * dt;
+        f.phase += dt * 1.6;
+        if (f.y > H) { f.y = -4; f.x = Math.random() * W; }
+      }
+    } else if (snowFlakes.length) snowFlakes.length = 0;
+  }
+
+  function drawWeather() {
+    if (raining()) {
+      ctx.save();
+      // A cold grey wash so the whole farm reads as overcast, then the drops.
+      ctx.fillStyle = 'rgba(40, 56, 78, 0.26)';
+      ctx.fillRect(0, 0, W, H);
+      ctx.strokeStyle = 'rgba(176, 208, 236, 0.55)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (const d of rainDrops) {
+        ctx.moveTo(d.x, d.y);
+        ctx.lineTo(d.x - d.len * 0.22, d.y + d.len);
+      }
+      ctx.stroke();
+      ctx.restore();
+      return;
+    }
+    if (snowing()) {
+      ctx.save();
+      // Pale, flat daylight — the blizzard washes the colour out of everything.
+      ctx.fillStyle = 'rgba(206, 224, 240, 0.20)';
+      ctx.fillRect(0, 0, W, H);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+      for (const f of snowFlakes) {
+        const fx = f.x + Math.sin(f.phase) * f.sway;
+        ctx.beginPath();
+        ctx.arc(fx, f.y, f.r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+
+  // A cap of settled snow sitting on top of something, drawn as a squashed
+  // white ellipse. Used for tree crowns and coop roofs during a blizzard.
+  function drawSnowCap(cx, cy, rx, ry) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(248, 252, 255, 0.92)';
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ry, 0, Math.PI, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
   function render() {
     // Sky / background. Rebuilt on resize (skyGrad nulled) and whenever the
     // boss-red level moves — quantised so a smooth ramp doesn't allocate a new
@@ -48,6 +126,8 @@
     drawGround();
     drawEntities();
     drawLaserPreviews(); // red telegraph lines for locking lasers (wolf + boss)
+    if (graves.length) drawGraves();
+    if (wolfScrap.length) drawWolfScrap();
     if (bossWaveActive) drawChickenSuckers();
     if (bossBurstChickens.length) drawBossBurstChickens();
     drawBossMissiles(); // boss + missile-wolf rockets (drawn any wave)
@@ -60,6 +140,10 @@
     if (nightOfWolf) drawNightOverlay();
 
     ctx.restore();
+
+    // Rain/snow sit outside the shake transform: the weather is "on the
+    // camera", so it shouldn't jitter along with the world.
+    if (weather) drawWeather();
 
     // Boss wave: a dusk-orange wash over everything, deepening through the
     // intro, plus the boss health bar while it's actively fighting.
@@ -341,7 +425,7 @@
     // Death-screen restarts carry 1% of everything earned this run — show the
     // amount right on the button. The boss-win screen keeps its own flat
     // wallet carry and stays unlabeled.
-    const restartCarry = !isEndScr ? Math.floor(runMoneyEarned * 0.01) : 0;
+    const restartCarry = !isEndScr ? Math.floor(runMoneyEarned * RESTART_CARRY_PCT) : 0;
     let btn2Label = buddyNote ? 'REMATCH' : 'RESTART';
     if (restartCarry > 0) btn2Label += ' +$' + restartCarry;
     // The restart button grows to fit its label so the carry amount never
@@ -512,6 +596,16 @@
       r = Math.round(r + (dr - r) * dirt);
       g = Math.round(g + (dg - g) * dirt);
       b = Math.round(b + (db - b) * dirt);
+    }
+    // Blizzard: the whole field goes under snow. Blended rather than flat white
+    // so the tile-to-tile variation still shows through as drift texture.
+    // rollWeather() clears this cache whenever the weather changes, so the
+    // snow goes on and comes off cleanly.
+    if (snowing()) {
+      const SNOW = [226, 236, 246];
+      r = Math.round(r + (SNOW[0] - r) * 0.86);
+      g = Math.round(g + (SNOW[1] - g) * 0.86);
+      b = Math.round(b + (SNOW[2] - b) * 0.86);
     }
     const color = `rgb(${r},${g},${b})`;
     _tileColorCache.set(key, color);
@@ -733,6 +827,31 @@
     }
   }
 
+  // Jagged crack overlay drawn on a wall that's below half health. Seeded off
+  // the tile position so a given wall's cracks don't crawl between frames.
+  function drawFenceCracks(f, cx, cy, h) {
+    if (f.hp > fenceMaxHp(f) / 2) return;
+    const seed = Math.abs(Math.round(f.x * 73856093 + f.y * 19349663));
+    const rnd = i => (((seed >> (i % 12)) ^ (seed * (i + 3))) % 1000) / 1000;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(20, 14, 10, 0.75)';
+    ctx.lineWidth = 1.2;
+    ctx.lineCap = 'round';
+    for (let k = 0; k < 3; k++) {
+      const ox = (rnd(k * 3) - 0.5) * TILE_W * 0.5;
+      let x = cx + ox, y = cy - h * (0.25 + rnd(k * 3 + 1) * 0.5);
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      for (let s = 0; s < 3; s++) {
+        x += (rnd(k * 7 + s) - 0.5) * 6;
+        y += 2.5 + rnd(k * 5 + s) * 3;
+        ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   function drawFence(f) {
     if (f.kind === 'stone') { drawStoneFence(f); return; }
     // ---- Wood rail fence ----
@@ -786,6 +905,7 @@
         ctx.stroke();
       }
     }
+    drawFenceCracks(f, cx, cy, postH); // splits open once it's below half health
   }
 
   // A solid stone wall — blocks wolves AND bullets (see stoneFenceBlocks()).
@@ -842,6 +962,7 @@
       }
       spike(onEdge(L, B, 1, wallH)); // front corner
     }
+    drawFenceCracks(f, cx, cy, wallH); // splits open once it's below half health
   }
 
   function drawBuildPreview(builder) {
@@ -2940,6 +3061,12 @@
       ctx.lineWidth = 1;
       line(B2, PK);
     }
+    // Snow piled along the eaves during a blizzard. Drawn across the roof's
+    // lower edge rather than per roof-shape, so it reads the same on all three.
+    if (snowing() && !preview) {
+      drawSnowCap(cx, cy - topLift + 1, hw * 0.92, 3.4);
+      drawSnowCap(cx, cy - topLift - roofH * 0.45, hw * 0.5, 2.6);
+    }
     // Cryptid Radar: small satellite dishes bolted to the coop's FLOOR WALLS
     // (not the roof) on a short outward arm. Only about HALF the coops sport
     // them (stable per-coop hash); each tier adds another dish, distributed up
@@ -3381,10 +3508,103 @@
     ctx.arc(fx - 3 * s, cy - 42 * s, 3.5 * s, 0, Math.PI * 2);
     ctx.arc(fx - 2 * s, cy - 50 * s, 2.5 * s, 0, Math.PI * 2);
     ctx.fill();
+    // Snow settles along the top of the crown during a blizzard.
+    if (snowing()) {
+      drawSnowCap(fx,         cy - 50 * s, 5.4 * s, 3.2 * s);
+      drawSnowCap(fx,         cy - 44 * s, 7.2 * s, 3.0 * s);
+      drawSnowCap(fx - 5 * s, cy - 36 * s, 5.0 * s, 2.4 * s);
+      drawSnowCap(fx + 5 * s, cy - 36 * s, 5.0 * s, 2.4 * s);
+    }
   }
 
   // Standalone chicken sprite for UI (the easter-egg upgrade card). Screen-space,
   // scaled, centred on (cx, cy) — mirrors the in-world drawChicken body shape.
+  // A plain headstone where a keeper fell. Hidden behind the game-over and
+  // boss end screens — those already say what happened, and a marker under the
+  // scoreboard just reads as clutter.
+  function drawGraves() {
+    if (gameOver || endScreen) return;
+    for (const g of graves) {
+      drawShadow(g.x, g.y, 0.4);
+      const p = worldToScreen(g.x, g.y);
+      const cx = p.x, cy = p.y + TILE_H / 2;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(g.lean || 0); // settled a little crooked in the dirt
+      // Slab: a rounded-top stone.
+      ctx.fillStyle = '#8d8d96';
+      ctx.strokeStyle = '#4a4a52';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-5, 0);
+      ctx.lineTo(-5, -8);
+      ctx.arc(0, -8, 5, Math.PI, 0);
+      ctx.lineTo(5, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      // Shaded right face so it reads as stone, not paper.
+      ctx.fillStyle = 'rgba(0,0,0,0.16)';
+      ctx.beginPath();
+      ctx.moveTo(1.5, -12.5);
+      ctx.lineTo(5, -8);
+      ctx.lineTo(5, 0);
+      ctx.lineTo(1.5, 0);
+      ctx.closePath();
+      ctx.fill();
+      // "RIP"
+      ctx.fillStyle = '#3f3f47';
+      ctx.font = 'bold 5px "Lucida Console", Consolas, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('RIP', 0, -7);
+      ctx.restore();
+      // A tuft of grass at the base.
+      ctx.strokeStyle = '#3f7a3a';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(cx - 6, cy); ctx.lineTo(cx - 7.5, cy - 3);
+      ctx.moveTo(cx + 6, cy); ctx.lineTo(cx + 7.5, cy - 2.5);
+      ctx.stroke();
+    }
+  }
+
+  // Parts flung off a wolf that came apart on death — plates, struts and cogs
+  // tumbling out and settling in the grass.
+  function drawWolfScrap() {
+    for (const s of wolfScrap) {
+      const fade = Math.min(1, s.t / 0.6); // rusts away over the last breath
+      const p = worldToScreen(s.x, s.y);
+      const px = p.x, py = p.y + TILE_H / 2 - s.z * 16;
+      ctx.save();
+      ctx.globalAlpha = fade;
+      ctx.translate(px, py);
+      ctx.rotate(s.spin);
+      const sc = s.size || 1;
+      ctx.strokeStyle = '#2b2b31';
+      ctx.lineWidth = 1;
+      if (s.kind === 0) {           // hull plate
+        ctx.fillStyle = '#6f6f78';
+        ctx.fillRect(-3 * sc, -2 * sc, 6 * sc, 4 * sc);
+        ctx.strokeRect(-3 * sc, -2 * sc, 6 * sc, 4 * sc);
+      } else if (s.kind === 1) {    // strut
+        ctx.fillStyle = '#8a8a93';
+        ctx.fillRect(-4 * sc, -1 * sc, 8 * sc, 2 * sc);
+        ctx.strokeRect(-4 * sc, -1 * sc, 8 * sc, 2 * sc);
+      } else {                      // cog
+        ctx.fillStyle = '#9a7a44';
+        ctx.beginPath();
+        ctx.arc(0, 0, 2.6 * sc, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = '#5c4a28';
+        ctx.beginPath();
+        ctx.arc(0, 0, 1 * sc, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+
   // The flock FANGUS swallowed, tumbling back out as it explodes. Screen-space
   // arcs drawn with the UI chicken sprite, lifted by the entity's height and
   // spun end-over-end, with a shadow on the ground it's falling toward.
@@ -3603,8 +3823,10 @@
     // Eye.
     ctx.fillStyle = '#1a1008';
     ctx.fillRect(cx + 11 * s, cy - 15 * s, 1.8 * s, 1.8 * s);
-    // Red collar — a band crossing the neck, just behind the head.
-    ctx.strokeStyle = '#d83b3b';
+    // Collar — the band across the neck. Its colour is the dog's PERSONALITY
+    // (red follows you, green patrols, blue guards the flock); the coat colour
+    // above is a meaningless random roll, so this is the only readable tell.
+    ctx.strokeStyle = DOG_COLLARS[d.personality || 0] || DOG_COLLARS[0];
     ctx.lineWidth = 2.2 * s;
     ctx.beginPath();
     ctx.moveTo(cx + 4 * s, cy - 13 * s);
@@ -4082,9 +4304,10 @@
     const paraLift = w.parachuting ? (w.parachuteH || 0) : 0;
     const paraSway = w.parachuting ? Math.sin(w.parachuteSway || 0) * 5 : 0;
     const cx = p.x + paraSway, cy = p.y + TILE_H/2 - jumpLift - paraLift;
-    // Mirror around cx when moving left on screen
+    // Mirror around cx when moving left on screen. The moonwalker inverts the
+    // test, so it trudges along permanently facing away from where it's going.
     ctx.save();
-    if (w.facingLeft) {
+    if (w.moonwalk ? !w.facingLeft : w.facingLeft) {
       ctx.translate(cx, 0);
       ctx.scale(-1, 1);
       ctx.translate(-cx, 0);
@@ -4263,6 +4486,17 @@
     else                   eyeColor = (f > 0 ? blendToWhite([207,207,214], f) : '#cfcfd6');
     ctx.fillStyle = eyeColor;
     ctx.fillRect(cx + 11 * s, cy - 15 * s, 1.6 * s, 1.6 * s);
+    // Brute: a heavy slanted brow over the eye — the one tell that this wolf
+    // is carrying ten times the usual health.
+    if (w.brute) {
+      ctx.strokeStyle = '#1d1d22';
+      ctx.lineWidth = 2.2 * s;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(cx + 8.5 * s, cy - 18.2 * s);  // inner, low and angry
+      ctx.lineTo(cx + 13.8 * s, cy - 16.2 * s); // outer, lower still
+      ctx.stroke();
+    }
     // Night of the Wolf: paint a small bright glow over the eye so it stays
     // visible even through the darkness overlay.
     if (nightOfWolf && !w.fox) {

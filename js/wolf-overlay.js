@@ -1048,6 +1048,16 @@
     nightOfWolf = false;
     nightOfWolfCount = 0;
     nightOfWolfDebugForce = false;
+    weather = '';
+    rainDrops.length = 0;
+    snowFlakes.length = 0;
+    for (const k in weatherEvents) {
+      weatherEvents[k].count = 0;
+      weatherEvents[k].blockStart = -1;
+      weatherEvents[k].nextWave = -1;
+      weatherEvents[k].force = false;
+    }
+    _tileColorCache.clear(); // drop any snowed-over tiles
     resurrectCount = 0;
     resurrectLastWave = -99;
     bossWaveActive = false; bossPhase = ''; bossPhaseT = 0; bossSidesDone = 0;
@@ -1197,7 +1207,9 @@
     // restart instead carries 1% of everything earned during the run.
     pendingCarryMoney = passedBoss
       ? Math.floor(money * 0.001)
-      : Math.floor(runMoneyEarned * 0.01);
+      : Math.floor(runMoneyEarned * RESTART_CARRY_PCT);
+    // Silent extra on a death-restart: half the barrel length you'd earned.
+    pendingCarryRange = passedBoss ? 0 : Math.floor((upgradeLevels.range || 0) / 2);
     if (passedBoss) {
       // Coop blasts off, then a fast black wipe swaps in the fresh run. Kill any
       // wave-cleared / upgrade overlay up front so it can never flash during the
@@ -1279,6 +1291,9 @@
     chickens.length = 0;
     bossBurstChickens.length = 0;
     bossSkyFade = 1;
+    graves.length = 0;
+    wolfScrap.length = 0;
+    pendingCarryRange = 0;
     wolves.length = 0;
     pellets.length = 0;
     corpses.length = 0;

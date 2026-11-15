@@ -76,7 +76,12 @@
       toast('Carried over $' + pendingCarryMoney + ' from your last run', 2.4);
       pendingCarryMoney = 0;
     }
-    runMoneyEarned = 0; // fresh run — the 1% death-carry tracker restarts
+    // Silent barrel carry — applied after the reset, never toasted.
+    if (pendingCarryRange > 0) {
+      upgradeLevels.range = Math.min(MAX_LEVEL, pendingCarryRange);
+      pendingCarryRange = 0;
+    }
+    runMoneyEarned = 0; // fresh run — the death-carry tracker restarts
     if (!multiplayer) {
       showBuildHint(); // stays up until the player first opens build mode
     }

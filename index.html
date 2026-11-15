@@ -62,7 +62,10 @@
       <button class="menu-btn menu-btn--primary" id="btnSingle">Single Player</button>
       <button class="menu-btn" id="btnMulti">Multiplayer</button>
       <button class="menu-btn" id="btnHowTo">How to Play</button>
-      <p class="menu-version">v0.9.3 <span class="by">·  made by ricardobertolin</span></p>
+      <!-- Keep this in lockstep with VERSION in sw.js — they drifted apart once
+           (title said v0.9.3 while the cache was on v0.9.5) and the visible
+           number is the only one players can report back to you. -->
+      <p class="menu-version">v0.10.0 <span class="by">·  made by ricardobertolin</span></p>
     </section>
 
     <!-- How to play — controls -->
@@ -188,6 +191,8 @@
       <button data-debug="toggle-autocrit" id="debug-autocrit-btn">Auto reload+crit: OFF</button>
       <button data-debug="resurrect-both">Resurrect both</button>
       <button data-debug="force-night">Force Night of the Wolf</button>
+      <button data-debug="force-rain" title="Next wave is a downpour — the pack short-circuits">Force Rain</button>
+      <button data-debug="force-snow" title="Next wave is a blizzard — everything slows, cold/hot shots bite harder">Force Snow</button>
       <button data-debug="buy-all-upgrades">Buy all upgrades</button>
       <button data-debug="give-upgrade">Give upgrade (+bonus)</button>
       <button data-debug="normal-reload" title="Clear Nerd/Jock Reload — back to the normal reload">Normal Reload</button>

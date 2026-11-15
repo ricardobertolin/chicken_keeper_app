@@ -186,6 +186,8 @@
       case 'keeperHit':        playKeeperHit(); break;
       case 'cashRegister':     playCashRegister(); break;
       case 'woodChop':         playWoodChop(); break;
+      case 'wolfScrap':        playWolfScrap(); break;
+      case 'rooftopShot':      playRooftopShot(); break;
       case 'fireCrackle':      playFireCrackle(); break;
       case 'freeze':           playFreeze(); break;
       case 'radarPing':        playRadarPing(); break;
@@ -318,6 +320,80 @@
     g.gain.exponentialRampToValueAtTime(0.0001, fall + 0.36);
     osc.connect(g); g.connect(ctx.destination);
     osc.start(fall); osc.stop(fall + 0.38);
+  }
+
+  // Rooftopper rifle — a big cracking report with a long tail, deliberately
+  // louder and sharper than the keeper's shotgun so an ally shot overhead is
+  // unmistakable even in a crowded wave.
+  function playRooftopShot() {
+    queueNetSound('rooftopShot');
+    const ctx = getAudio();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    // The crack: a bright, fast noise burst through a high bandpass.
+    const dur = 0.3;
+    const sz = Math.floor(ctx.sampleRate * dur);
+    const b = ctx.createBuffer(1, sz, ctx.sampleRate);
+    const d = b.getChannelData(0);
+    for (let i = 0; i < sz; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / sz, 2.4);
+    const src = ctx.createBufferSource(); src.buffer = b;
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(2600, now);
+    bp.frequency.exponentialRampToValueAtTime(700, now + dur);
+    bp.Q.setValueAtTime(0.8, now);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.42, now);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    src.connect(bp); bp.connect(g); g.connect(ctx.destination);
+    src.start(now); src.stop(now + dur);
+    // Punch underneath so it lands with weight.
+    const osc = ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(220, now);
+    osc.frequency.exponentialRampToValueAtTime(58, now + 0.14);
+    const og = ctx.createGain();
+    og.gain.setValueAtTime(0.0001, now);
+    og.gain.exponentialRampToValueAtTime(0.3, now + 0.005);
+    og.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
+    osc.connect(og); og.connect(ctx.destination);
+    osc.start(now); osc.stop(now + 0.22);
+  }
+
+  // A wolf coming apart: metal clatter — a short burst of ringing debris.
+  function playWolfScrap() {
+    queueNetSound('wolfScrap');
+    const ctx = getAudio();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    // A handful of detuned metallic pings, scattered over a moment.
+    for (let i = 0; i < 5; i++) {
+      const off = i * 0.045 + Math.random() * 0.03;
+      const osc = ctx.createOscillator();
+      osc.type = 'square';
+      const f = 520 + Math.random() * 1400;
+      osc.frequency.setValueAtTime(f, now + off);
+      osc.frequency.exponentialRampToValueAtTime(f * 0.6, now + off + 0.12);
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass';
+      bp.frequency.setValueAtTime(f, now + off);
+      bp.Q.setValueAtTime(5, now + off);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, now + off);
+      g.gain.exponentialRampToValueAtTime(0.05, now + off + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + off + 0.16);
+      osc.connect(bp); bp.connect(g); g.connect(ctx.destination);
+      osc.start(now + off); osc.stop(now + off + 0.17);
+    }
+    // A low thunk as the frame hits the dirt.
+    const osc = ctx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(150, now);
+    osc.frequency.exponentialRampToValueAtTime(52, now + 0.17);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(0.16, now + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
+    osc.connect(g); g.connect(ctx.destination);
+    osc.start(now); osc.stop(now + 0.22);
   }
 
   // Soft fire crackle — played on the burn damage tick. Throttled globally in

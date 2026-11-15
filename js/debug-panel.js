@@ -163,6 +163,8 @@
       ['spawn-hunterwolf', 'Spawn hunter wolf',    'Spawn the hunter-wolf cryptid (keeper reskin that shoots back)'],
       ['spawn-ghostwolf',  'Spawn ghost wolf',     'Spawn a ghost wolf (vanishes silently when shot; chance grows with player deaths)'],
       ['spawn-parachute', 'Spawn parachute wolf',  'Drop a single wolf in by parachute'],
+      ['spawn-moonwalk',  'Spawn moonwalk wolf',   'Spawn the rare wolf that walks backward (faces away from its heading)'],
+      ['spawn-brute',     'Spawn brute wolf',      'Spawn the rare brute wolf (10x health, angry brow)'],
       ['spawn-p2cameo',   'Spawn buddy cameo',        'Trigger the rare Player-2 cameo walk-through'],
       ['karma-max',       'Max karma',             'Slam karma to +' + (typeof KARMA_MAX !== 'undefined' ? KARMA_MAX : 'MAX')],
       ['karma-min',       'Min karma',             'Slam karma to -' + (typeof KARMA_MAX !== 'undefined' ? KARMA_MAX : 'MAX')],
@@ -273,6 +275,10 @@
         spawnGhostWolf();
       } else if (action === 'spawn-parachute') {
         spawnParachuteWolf();
+      } else if (action === 'spawn-moonwalk') {
+        spawnMoonwalkWolf();
+      } else if (action === 'spawn-brute') {
+        spawnBruteWolf();
       } else if (action === 'spawn-p2cameo') {
         // Force the cameo even if the once-per-run flag was already spent.
         p2CameoUsed = false; p2Cameo = null;
@@ -365,6 +371,17 @@
       } else if (action === 'force-night') {
         nightOfWolfDebugForce = true;
         toast('Next wave will be a Night of the Wolf', 1.6);
+      } else if (action === 'force-rain') {
+        // A night wave outranks the weather roll, so clear it to be sure.
+        nightOfWolfDebugForce = false;
+        weatherEvents.rain.force = true;
+        weatherEvents.snow.force = false;
+        toast('Next wave will be a downpour', 1.6);
+      } else if (action === 'force-snow') {
+        nightOfWolfDebugForce = false;
+        weatherEvents.snow.force = true;
+        weatherEvents.rain.force = false;
+        toast('Next wave will be a blizzard', 1.6);
       } else if (action === 'resurrect-both') {
         // Brings BOTH keepers back. In co-op a dead keeper is a ghost; in
         // single-player a death goes straight to game-over (no ghost), so this

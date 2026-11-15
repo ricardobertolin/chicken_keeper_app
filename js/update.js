@@ -201,7 +201,7 @@
       // Flying skips fence collision entirely so the player can soar over
       // walls / fence pens for the duration.
       const flyMul = flying ? ROCKET_BOOTS_SPEED : 1;
-      const sp = player.speed * moveMul * runMul * flyMul * critBoost;
+      const sp = player.speed * moveMul * runMul * flyMul * critBoost * weatherSpeedMul();
       const pInside = fenceBlocks(player.x, player.y);
       const pStepX = player.x + mx * sp * dt;
       const pStepY = player.y + my * sp * dt;
@@ -330,6 +330,8 @@
     updateBlasts(dt);
     updateScorches(dt);
     updateTreeRustle(dt); // shake the canopy over any wolf hiding behind it
+    updateWolfScrap(dt);  // parts flung off a wolf that came apart on death
+    updateWeather(dt);    // rain short-outs + rain/snow particles
     updateFlyHats(dt);
     updateBeams(dt);
     if (!(multiplayer && !isHost)) {
