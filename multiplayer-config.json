@@ -1,0 +1,28 @@
+{
+  "turnCredentialsUrl": "",
+  "iceServers": [
+    {
+      "urls": "stun:stun.relay.metered.ca:80"
+    },
+    {
+      "urls": "turn:br.relay.metered.ca:80",
+      "username": "482571e1b840d4ef38bf4b1a",
+      "credential": "xjwuNvYdw7rA1qnt"
+    },
+    {
+      "urls": "turn:br.relay.metered.ca:80?transport=tcp",
+      "username": "482571e1b840d4ef38bf4b1a",
+      "credential": "xjwuNvYdw7rA1qnt"
+    },
+    {
+      "urls": "turn:br.relay.metered.ca:443",
+      "username": "482571e1b840d4ef38bf4b1a",
+      "credential": "xjwuNvYdw7rA1qnt"
+    },
+    {
+      "urls": "turns:br.relay.metered.ca:443?transport=tcp",
+      "username": "482571e1b840d4ef38bf4b1a",
+      "credential": "xjwuNvYdw7rA1qnt"
+    }
+  ]
+}

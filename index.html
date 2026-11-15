@@ -19477,53 +19477,90 @@
 
   // ---------- Online lobby (PeerJS) ----------
   // PeerJS is loaded on demand — not fetched until the player opens the lobby.
-  let _peerJsLoading = false;
-  const _peerJsQueue = [];
-  function requirePeerJS(cb) {
-    if (typeof Peer !== 'undefined') { cb(); return; }
-    _peerJsQueue.push(cb);
-    if (_peerJsLoading) return;
-    _peerJsLoading = true;
-    const s = document.createElement('script');
-    s.src = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js';
-    s.crossOrigin = 'anonymous';
-    s.onload = () => { _peerJsLoading = false; _peerJsQueue.splice(0).forEach(f => f()); };
-    s.onerror = () => {
-      _peerJsLoading = false;
-      _peerJsQueue.length = 0;
-      const targetId = netRole === 'guest' ? 'joinStatus' : 'hostStatus';
-      setStatus(document.getElementById(targetId), 'PeerJS failed to load (offline?).', 'bad');
-      if (netRole === 'guest') document.getElementById('btnJoinConnect').disabled = false;
-    };
-    document.head.appendChild(s);
+  let _peerJsPromise = null;
+  function requirePeerJS() {
+    if (typeof Peer !== 'undefined') return Promise.resolve();
+    if (_peerJsPromise) return _peerJsPromise;
+    _peerJsPromise = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js';
+      s.crossOrigin = 'anonymous';
+      s.onload = () => resolve();
+      s.onerror = () => {
+        _peerJsPromise = null;
+        s.remove();
+        reject(new Error('PeerJS failed to load (offline?).'));
+      };
+      document.head.appendChild(s);
+    });
+    return _peerJsPromise;
   }
   // Same broker/code scheme as the chess app — a short lobby code is hashed
   // into the host's PeerJS id; the guest connects to it. After 'open' fires
-  // all gameplay traffic is direct peer-to-peer over a data channel.
+  // gameplay traffic uses a WebRTC data channel, directly or through TURN.
   const ID_PREFIX = 'chicken-mp-v1-';
   const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   const CODE_LEN = 6;
 
-  // ICE servers for WebRTC. STUN alone only works when both players can
-  // hole-punch directly (same network); cross-network play NEEDS a TURN relay
-  // to fall back on. We used to ride on the PeerJS cloud's bundled default
-  // relay, but that's unreliable — when it's down, different-network lobbies
-  // hang forever on "Reaching host…". Supplying our own relays (port 443 also
-  // tunnels through strict firewalls) fixes that.
-  //
-  // These are free public relays. If multiplayer still hangs across networks,
-  // grab your own free credentials (50GB/mo) at https://dashboard.metered.ca
-  // and drop them in below.
-  const ICE_SERVERS = [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
-    { urls: 'turn:openrelay.metered.ca:80',                 username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:openrelay.metered.ca:443',                username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:openrelay.metered.ca:443?transport=tcp',  username: 'openrelayproject', credential: 'openrelayproject' },
-  ];
-  // How long the guest waits for the data channel to open before giving up,
-  // rather than spinning on "Reaching host…" indefinitely.
+  // Static client credentials or an HTTPS temporary-credential service, as in
+  // Stacker. Explicit settings replace PeerJS's bundled TURN defaults.
+  async function loadPeerOptions() {
+    const configResponse = await fetch('./multiplayer-config.json', {
+      cache: 'no-store', signal: AbortSignal.timeout(10000),
+    });
+    if (!configResponse.ok) throw new Error('Could not load multiplayer settings. Reload and try again.');
+    const settings = await configResponse.json();
+    if (!settings || typeof settings !== 'object') throw new Error('Invalid multiplayer settings.');
+    const endpoint = settings.turnCredentialsUrl ?? '';
+    let iceServers = settings.iceServers === undefined ? [] : settings.iceServers;
+    if (typeof endpoint !== 'string' || !Array.isArray(iceServers)) throw new Error('Invalid multiplayer settings.');
+    if (endpoint.trim() && iceServers.length) throw new Error('Choose static TURN servers or a credential service URL, not both.');
+    const relayOnly = new URLSearchParams(location.search).get('relay') === '1';
+    const config = {
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
+      iceTransportPolicy: relayOnly ? 'relay' : 'all',
+    };
+    if (!endpoint.trim() && !iceServers.length) {
+      if (relayOnly) throw new Error('Relay testing needs a configured TURN service.');
+      return { debug: 0, config };
+    }
+    if (endpoint.trim()) {
+      const endpointUrl = new URL(endpoint);
+      if (endpointUrl.protocol !== 'https:') throw new Error('The TURN credential service must use HTTPS.');
+      const response = await fetch(endpointUrl.href, {
+        method: 'POST', cache: 'no-store', credentials: 'omit',
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!response.ok) throw new Error(response.status === 429
+        ? 'Too many connection attempts. Try again in a minute.'
+        : 'The connection relay is unavailable. Please try again shortly.');
+      ({ iceServers } = await response.json());
+    }
+    if (!Array.isArray(iceServers) || !iceServers.length) throw new Error('The relay service returned no servers.');
+    let hasTurn = false;
+    for (const server of iceServers) {
+      const urls = Array.isArray(server?.urls) ? server.urls : [server?.urls];
+      if (!urls.length || urls.some(u => typeof u !== 'string' || !/^(stun|stuns|turn|turns):\S+$/.test(u))) {
+        throw new Error('The relay service returned invalid servers.');
+      }
+      if (urls.some(u => /^turns?:/.test(u))) {
+        if (typeof server.username !== 'string' || !server.username ||
+            typeof server.credential !== 'string' || !server.credential) {
+          throw new Error('The relay service returned incomplete credentials.');
+        }
+        hasTurn = true;
+      }
+    }
+    if (!hasTurn) throw new Error('The relay service returned no TURN servers.');
+    config.iceServers.push(...iceServers);
+    return { debug: 0, config };
+  }
+
+  // Each incoming or outgoing data channel gets a bounded connection attempt.
   const CONNECT_TIMEOUT_MS = 15000;
+  let netSession = 0;
+  let netConnectTimer = null;
+  let netHasRelay = false;
 
   let peer = null;
   let conn = null;
@@ -19553,20 +19590,16 @@
     if (kind === 'good') el.classList.add('is-good');
   }
 
-  function ensurePeer(customId) {
-    if (peer) { try { peer.destroy(); } catch (_) {} peer = null; }
-    if (typeof Peer === 'undefined') {
-      const targetId = netRole === 'guest' ? 'joinStatus' : 'hostStatus';
-      setStatus(document.getElementById(targetId), 'PeerJS failed to load (offline?).', 'bad');
-      return;
-    }
-    const peerOpts = { config: { iceServers: ICE_SERVERS } };
+  function ensurePeer(customId, peerOpts) {
     peer = customId ? new Peer(customId, peerOpts) : new Peer(undefined, peerOpts);
+    const session = netSession;
     peer.on('error', err => {
+      if (session !== netSession) return;
       console.warn('[Peer] error', err);
       const targetEl = netRole === 'guest'
         ? document.getElementById('joinStatus')
         : document.getElementById('hostStatus');
+      if (inMenu) teardownConnection();
       if (err.type === 'unavailable-id') {
         setStatus(targetEl, 'Lobby code already in use — try again.', 'bad');
       } else if (err.type === 'peer-unavailable') {
@@ -19581,9 +19614,56 @@
   }
 
   function teardownConnection() {
-    if (conn) { try { conn.close(); } catch (_) {} conn = null; }
-    if (peer) { try { peer.destroy(); } catch (_) {} peer = null; }
+    ++netSession;
+    clearTimeout(netConnectTimer);
+    netConnectTimer = null;
+    const oldConn = conn, oldPeer = peer;
+    conn = peer = null;
     netRole = null;
+    netHasRelay = false;
+    document.getElementById('btnJoinConnect').disabled = false;
+    if (oldConn) { try { oldConn.close(); } catch (_) {} }
+    if (oldPeer) { try { oldPeer.destroy(); } catch (_) {} }
+  }
+
+  async function prepareLobby(role) {
+    teardownConnection();
+    const session = netSession;
+    netRole = role;
+    isHost = role === 'host';
+    const target = document.getElementById(isHost ? 'hostStatus' : 'joinStatus');
+    setStatus(target, 'Loading connection settings…');
+    if (!isHost) document.getElementById('btnJoinConnect').disabled = true;
+    try {
+      const [, options] = await Promise.all([requirePeerJS(), loadPeerOptions()]);
+      if (session !== netSession) return null;
+      netHasRelay = options.config.iceServers.some(s =>
+        (Array.isArray(s.urls) ? s.urls : [s.urls]).some(u => /^turns?:/.test(u)));
+      setStatus(target, 'Connecting to broker…');
+      return { session, options };
+    } catch (e) {
+      if (session === netSession) {
+        teardownConnection();
+        setStatus(target, e.message || 'Could not load connection settings.', 'bad');
+      }
+      return null;
+    }
+  }
+
+  function watchLobbyConnection(c) {
+    conn = c;
+    const target = document.getElementById(isHost ? 'hostStatus' : 'joinStatus');
+    function fail(message) {
+      if (conn !== c || !inMenu) return;
+      teardownConnection();
+      setStatus(target, message, 'bad');
+    }
+    clearTimeout(netConnectTimer);
+    netConnectTimer = setTimeout(() => fail(netHasRelay
+      ? 'Could not connect, even through the relay. Keep the host tab open and try again.'
+      : 'Could not connect directly. This network may need a TURN relay, which is not configured.'), CONNECT_TIMEOUT_MS);
+    c.on('close', () => fail('The connection closed before the game started. Try again.'));
+    c.on('error', () => fail('The connection could not be established. Check the lobby code and try again.'));
   }
 
   // Timestamp of the last message we got from the peer. The PeerJS `close`
@@ -19599,10 +19679,13 @@
   const NET_TIMEOUT_MS = 12000;
 
   function attachConn(c) {
+    clearTimeout(netConnectTimer);
+    netConnectTimer = null;
     conn = c;
     netLastRecv = performance.now();
     netDisconnected = false;
     c.on('data', msg => {
+      if (conn !== c) return;
       netLastRecv = performance.now(); // any traffic counts as alive
       if (!msg || typeof msg !== 'object') return;
       // Either side: a peer pressed F5 to restart the run. Reset locally
@@ -19693,8 +19776,8 @@
         return;
       }
     });
-    c.on('close', () => handlePeerGone('close'));
-    c.on('error', e => { console.warn('[Conn] error', e); handlePeerGone('error'); });
+    c.on('close', () => { if (conn === c) handlePeerGone('close'); });
+    c.on('error', e => { if (conn === c) { console.warn('[Conn] error', e); handlePeerGone('error'); } });
   }
 
   // One place to react to the other player going away — runs at most once
@@ -20152,69 +20235,51 @@
     }
   }
 
-  function hostLobby() {
-    netRole = 'host';
-    isHost = true;
+  async function hostLobby() {
     const code = generateCode();
     document.getElementById('lobbyCode').textContent = code;
-    setStatus(document.getElementById('hostStatus'), 'Loading…');
     showScreen('host-wait');
-    requirePeerJS(() => {
-      setStatus(document.getElementById('hostStatus'), 'Connecting to broker…');
-      ensurePeer(ID_PREFIX + code);
-      if (!peer) return;
-      peer.on('open', () => {
-        setStatus(document.getElementById('hostStatus'), 'Waiting for the other player…');
-      });
-      peer.on('connection', incoming => {
-        if (conn && conn.open) {
-          // Lobby already full — politely refuse.
-          incoming.on('open', () => {
-            try { incoming.send({ type: 'reject', reason: 'lobby-full' }); } catch (_) {}
-            setTimeout(() => { try { incoming.close(); } catch (_) {} }, 100);
-          });
-          return;
-        }
-        incoming.on('open', () => {
-          attachConn(incoming);
-          startGame(true);
-        });
+    const prepared = await prepareLobby('host');
+    if (!prepared || prepared.session !== netSession) return;
+    const { session, options } = prepared;
+    ensurePeer(ID_PREFIX + code, options);
+    peer.on('open', () => {
+      if (session !== netSession) return;
+      setStatus(document.getElementById('hostStatus'), 'Waiting for the other player…' +
+        (netHasRelay ? '' : ' Direct connections only; some networks need a relay.'));
+    });
+    peer.on('connection', incoming => {
+      if (session !== netSession || conn) {
+        // Reserve the slot while connecting as well as during a game.
+        try { incoming.close(); } catch (_) {}
+        return;
+      }
+      watchLobbyConnection(incoming);
+      setStatus(document.getElementById('hostStatus'), 'Connecting to the other player…');
+      incoming.on('open', () => {
+        if (session !== netSession || conn !== incoming) return;
+        attachConn(incoming);
+        startGame(true);
       });
     });
   }
 
-  function joinLobby(code) {
-    netRole = 'guest';
-    isHost = false;
-    setStatus(document.getElementById('joinStatus'), 'Loading…');
-    document.getElementById('btnJoinConnect').disabled = true;
-    requirePeerJS(() => {
-      setStatus(document.getElementById('joinStatus'), 'Connecting to broker…');
-      ensurePeer(null);
-      if (!peer) { document.getElementById('btnJoinConnect').disabled = false; return; }
-      peer.on('open', () => {
-        setStatus(document.getElementById('joinStatus'), 'Reaching host…');
-        const c = peer.connect(ID_PREFIX + code, { reliable: true });
-        // If the data channel never opens (relay unreachable, host firewalled),
-        // bail out with a readable error instead of spinning here forever.
-        let settled = false;
-        const failTimer = setTimeout(() => {
-          if (settled) return;
-          settled = true;
-          setStatus(document.getElementById('joinStatus'),
-            "Couldn't reach the host (timed out). Double-check the code, or the host may be behind a strict firewall.", 'bad');
-          document.getElementById('btnJoinConnect').disabled = false;
-          teardownConnection();
-        }, CONNECT_TIMEOUT_MS);
-        c.on('open', () => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(failTimer);
-          attachConn(c);
-          setStatus(document.getElementById('joinStatus'), 'Connected!', 'good');
-          startGame(true);
-        });
-        c.on('error', e => console.warn('[Guest conn] error', e));
+  async function joinLobby(code) {
+    const prepared = await prepareLobby('guest');
+    if (!prepared || prepared.session !== netSession) return;
+    const { session, options } = prepared;
+    ensurePeer(null, options);
+    peer.on('open', () => {
+      if (session !== netSession) return;
+      setStatus(document.getElementById('joinStatus'), 'Reaching host…' +
+        (netHasRelay ? '' : ' Direct connections only; some networks need a relay.'));
+      const c = peer.connect(ID_PREFIX + code, { reliable: true });
+      watchLobbyConnection(c);
+      c.on('open', () => {
+        if (session !== netSession || conn !== c) return;
+        attachConn(c);
+        setStatus(document.getElementById('joinStatus'), 'Connected!', 'good');
+        startGame(true);
       });
     });
   }
@@ -20570,7 +20635,10 @@
   });
   // 'Back' links inside menu screens.
   document.querySelectorAll('#menu .menu-back[data-back]').forEach(btn => {
-    btn.addEventListener('click', () => showScreen(btn.dataset.back));
+    btn.addEventListener('click', () => {
+      teardownConnection();
+      showScreen(btn.dataset.back);
+    });
   });
 
   requestAnimationFrame(loop);

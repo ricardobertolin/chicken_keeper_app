@@ -1,0 +1,14 @@
+{
+  "turnCredentialsUrl": "",
+  "iceServers": [
+    {
+      "urls": [
+        "turn:YOUR-PROVIDER-HOST:3478?transport=udp",
+        "turn:YOUR-PROVIDER-HOST:3478?transport=tcp",
+        "turns:YOUR-PROVIDER-HOST:443?transport=tcp"
+      ],
+      "username": "YOUR-TURN-USERNAME",
+      "credential": "YOUR-TURN-PASSWORD"
+    }
+  ]
+}

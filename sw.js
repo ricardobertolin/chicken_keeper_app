@@ -1,7 +1,7 @@
 // Bumping VERSION is what evicts the previous cache in `activate`. It had been
 // pinned at v0.8.3 across every release since, so the old entry was never
 // purged and returning visitors kept getting that build served to them.
-const VERSION = 'chicken-keeper-v0.9.3';
+const VERSION = 'chicken-keeper-v0.9.4';
 
 // Only files index.html actually references. styles.css / app.js /
 // manifest.webmanifest / icon.svg are unused stubs and were being precached
@@ -34,6 +34,14 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
+
+  // Always load the deployed TURN settings. Do not retain credentials offline.
+  const url = new URL(req.url);
+  const multiplayerConfig = new URL('./multiplayer-config.json', self.location.href);
+  if (url.origin === multiplayerConfig.origin && url.pathname === multiplayerConfig.pathname) {
+    event.respondWith(fetch(req, { cache: 'no-store' }));
+    return;
+  }
 
   const wantsHTML = req.mode === 'navigate' ||
                     (req.headers.get('accept') || '').includes('text/html');
