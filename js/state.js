@@ -597,6 +597,12 @@
   let barrelBonusMul = 1;
   let passedBoss = false; // true once this run has cleared (or survived past) the boss
   let pendingCarryMoney = 0; // post-boss restarts carry 0.1% of the run's money (NOT doubled)
+  let runMoneyEarned = 0;    // every $ credited this run — death-screen restarts carry 1% of it
+  // Post-hit invincibility window (wolf bites / boss contact / pup nips).
+  // P2 gets an extra second so network lag can't eat the guest's dodge window.
+  const KEEPER_IFRAMES    = 2.5;
+  const KEEPER_IFRAMES_P2 = 3.5;
+  function iframesFor(k) { return k === player2 ? KEEPER_IFRAMES_P2 : KEEPER_IFRAMES; }
   let rocketLaunch = null; // post-boss restart cutscene state, or null
   let fade = null;         // black screen wipe: { t, dur, phase:'out'|'in', onBlack } or null
   // Money helpers — in separateMoney mode, money goes to whoever earned it
@@ -604,13 +610,14 @@
   function addMoney(who, amount) {
     if (debugFastMode) amount *= 5; // Fast mode: all earned income pays out 5×
     if (amount >= 5) playMoneySmall(); // coin chime for meaningful amounts only
+    if (amount > 0) runMoneyEarned += amount;
     if (!gameOpts.separateMoney || who === player) money += amount;
     else                                            money2 += amount;
   }
   // Income with no specific earner (wave reward, harvest) — split when separate.
   function addSharedMoney(amount) {
     if (debugFastMode) amount *= 5; // Fast mode: 5× income
-    if (amount > 0) playMoneySmall();
+    if (amount > 0) { playMoneySmall(); runMoneyEarned += amount; }
     if (!gameOpts.separateMoney) { money += amount; return; }
     const half = Math.floor(amount / 2);
     money  += amount - half; // P1 keeps the rounding extra

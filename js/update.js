@@ -440,28 +440,33 @@
         if (c.igniteT > 0) c.igniteT -= dt; // missile fire dies down after COOP_IGNITE_DURATION
         // The bare-earth patch around a coop slowly spreads outward as it ages.
         c.dirtR = Math.min(3.0, (c.dirtR || 0) + dt * 0.01);
+        // cap chickens by total coop count — a fat chicken eats two slots.
+        let aliveChickens = 0;
+        for (const ch of chickens) {
+          if (ch.alive) aliveChickens += ch.fat ? 2 : 1;
+        }
+        let nearby = 0;
+        for (const ch of chickens) {
+          if (!ch.alive) continue;
+          if (ch.home === c) nearby += ch.fat ? 2 : 1;
+        }
+        // Each coop holds 4 chickens, +1 extra slot per level (floor) it has.
+        let maxChickens = 0;
+        for (const cc of coops) maxChickens += 4 + (cc.level || 0);
+        maxChickens = Math.min(maxChickens, MAX_CHICKENS); // safety cap
+        const coopSlots = 4 + (c.level || 0);
+        const hasRoom = aliveChickens < maxChickens && nearby < coopSlots;
+        // Cosmetic flag: the coop gently rocks in drawCoop while a chicken is
+        // actually brewing inside (lay window open + room for the chick).
+        // Synced to the guest via the coop snapshot.
+        c.laying = coopsCanLay && hasRoom;
         if (c.spawnT <= 0) {
           // Hold the timer at zero outside the lay window — otherwise placing
           // a coop between waves burns its first cycle on the silent re-roll
           // and the next wave's 30s window can run out before it fires.
           if (!coopsCanLay) { c.spawnT = 0; continue; }
           c.spawnT = rand(CHICKEN_RESPAWN_MIN, CHICKEN_RESPAWN_MAX) * tableAt('hatchRate');
-          // cap chickens by total coop count — a fat chicken eats two slots.
-          let aliveChickens = 0;
-          for (const ch of chickens) {
-            if (ch.alive) aliveChickens += ch.fat ? 2 : 1;
-          }
-          let nearby = 0;
-          for (const ch of chickens) {
-            if (!ch.alive) continue;
-            if (ch.home === c) nearby += ch.fat ? 2 : 1;
-          }
-          // Each coop holds 4 chickens, +1 extra slot per level (floor) it has.
-          let maxChickens = 0;
-          for (const cc of coops) maxChickens += 4 + (cc.level || 0);
-          maxChickens = Math.min(maxChickens, MAX_CHICKENS); // safety cap
-          const coopSlots = 4 + (c.level || 0);
-          if (aliveChickens < maxChickens && nearby < coopSlots) spawnChicken(c);
+          if (hasRoom) spawnChicken(c);
         }
       }
 
@@ -565,6 +570,12 @@
       moneyStr = '$' + myMoney + ' (buddy $' + otherMoney + ')';
     }
     document.getElementById('stat-money').textContent = moneyStr;
+    // Mobile: the always-visible wallet readout next to the HUD toggle button
+    // (the full HUD is collapsed behind that button on phones).
+    if (isMobileMode) {
+      const mobMoney = document.getElementById('mob-money');
+      if (mobMoney) mobMoney.textContent = '$' + myMoney;
+    }
     const localLvls   = hudIsGuest && gameOpts.individualUpgrades ? upgradeLevels2 : upgradeLevels;
     const localAmmo   = hudIsGuest ? player.ammo : ammo;
     const localChamb  = hudIsGuest ? player.chambered : chambered;

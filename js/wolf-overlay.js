@@ -1192,10 +1192,12 @@
   // cutscene first (then restarts with the doubled bonus); otherwise restart now.
   function requestRestart() {
     if (rocketLaunch) return; // cutscene already running
-    // Post-boss runs carry 0.1% of the wallet into the next run (added flat after
-    // the reset, NOT scaled by the new-game-plus doubling). Captured now, before
-    // any reset wipes the money.
-    pendingCarryMoney = passedBoss ? Math.floor(money * 0.001) : 0;
+    // Captured now, before any reset wipes the money. Two carry flavours:
+    // post-boss (win) runs keep the flat 0.1% of the wallet; a death-screen
+    // restart instead carries 1% of everything earned during the run.
+    pendingCarryMoney = passedBoss
+      ? Math.floor(money * 0.001)
+      : Math.floor(runMoneyEarned * 0.01);
     if (passedBoss) {
       // Coop blasts off, then a fast black wipe swaps in the fresh run. Kill any
       // wave-cleared / upgrade overlay up front so it can never flash during the

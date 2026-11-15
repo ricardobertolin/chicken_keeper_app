@@ -446,11 +446,7 @@
     if (moneyOf(builder) < cost) { exitBuildModeFor(builder); buildToast(builder, 'Need $' + cost + ' to build coop'); return; }
     const target = getBuildTarget(builder);
     if (!target.valid) { buildToast(builder, target.reason); return; }
-    // The very first coop of the run carries a hatch hint: a bobbing egg over
-    // the roof (drawCoop) until its first chicken actually hatches, so new
-    // players learn that coops are where chickens come from.
-    coops.push({ x: target.x, y: target.y, spawnT: 3, hp: 3, builtWave: wave, level: 0, dirtR: 0,
-                 hatchHint: coopsPlaced === 0 });
+    coops.push({ x: target.x, y: target.y, spawnT: 3, hp: 3, builtWave: wave, level: 0, dirtR: 0 });
     spendMoney(builder, cost);
     playBuild();
     if (coopsPlaced === 0) buildToast(builder, 'Coop placed!  -$' + cost + ' — a chicken will hatch here!', 3.2);
@@ -475,7 +471,6 @@
   }
 
   function spawnChicken(coop, silent = false) {
-    if (coop && coop.hatchHint) coop.hatchHint = false; // first chick arrived — egg hint done
     // Bookkeeping for the wave-end bonus roll — every hatch counts so the
     // death tally is births + starting alive − ending alive.
     if (waveActive) chickensBornThisWave++;
@@ -3008,8 +3003,10 @@
         if (upgradeLevels.rust >= 5) {
           critStreak++;
           money += GOLD_PER_CRIT;
+          runMoneyEarned += GOLD_PER_CRIT;
           if (critStreak >= 10) {
             money += 10;
+            runMoneyEarned += 10;
             critStreak = 0;
           }
           playMoney();

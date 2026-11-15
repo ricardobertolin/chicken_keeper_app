@@ -483,6 +483,19 @@
     top: 14px; left: 14px;
     font-size: 18px;
   }
+  /* Wallet readout: right of the HUD toggle, always visible in-game so the
+     player sees their money without opening the full HUD panel */
+  #mob-money {
+    position: absolute;
+    top: 14px; left: 72px;
+    height: 34px; line-height: 34px;
+    padding: 0 8px;
+    color: #ffd166;
+    font: bold 14px "Lucida Console", Consolas, monospace;
+    background: rgba(0, 0, 0, 0.35);
+    border: 1px solid rgba(255, 209, 102, 0.5);
+    pointer-events: none;
+  }
   /* Alt-fire button: top-left corner of move pad (swapped from DASH) */
   #mob-alt-btn {
     width: 44px; height: 44px;

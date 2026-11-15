@@ -229,11 +229,16 @@
     const headerH = 30;
     const btnH    = 30;
     const btnGap  = 10;
+    const isEndScr = !!opts.footer; // boss end screen passes a footer string
+    // Singleplayer death also shows the RESPAWN button below the main button
+    // row — reserve its height up front so it can't be pushed offscreen on
+    // short (mobile landscape) screens.
+    const respawnReserve = (!isEndScr && !multiplayer) ? 34 : 0; // 26 btn + 8 gap
     const panelW  = showP2 ? Math.min(560, W - 32) : Math.min(420, W - 32);
     const panelH  = headerH + labels.length * rowH + 24;
     const panelX  = Math.round((W - panelW) / 2);
     // Keep stats panel from overflowing: leave room for the buttons below.
-    const panelY  = Math.min(panelTopY, H - panelH - btnH - 24);
+    const panelY  = Math.min(panelTopY, H - panelH - btnH - 24 - respawnReserve);
     ctx.fillStyle = 'rgba(15, 18, 24, 0.96)';
     ctx.fillRect(panelX, panelY, panelW, panelH);
     ctx.strokeStyle = '#ffd166';
@@ -287,14 +292,23 @@
     }
 
     // Clickable action buttons — replace the old keyboard-hint text.
-    const isEndScr = !!opts.footer; // boss end screen passes a footer string
     const btnW   = isEndScr ? 110 : 90;
     const btn1Label = isEndScr ? 'CONTINUE' : 'MENU';
-    const btn2Label = isEndScr ? 'RESTART'  : 'RESTART';
-    const totalBtnW = btnW * 2 + btnGap;
+    const buddyNote = !isEndScr && multiplayer && !isHost;
+    // Death-screen restarts carry 1% of everything earned this run — show the
+    // amount right on the button. The boss-win screen keeps its own flat
+    // wallet carry and stays unlabeled.
+    const restartCarry = !isEndScr ? Math.floor(runMoneyEarned * 0.01) : 0;
+    let btn2Label = buddyNote ? 'REMATCH' : 'RESTART';
+    if (restartCarry > 0) btn2Label += ' +$' + restartCarry;
+    // The restart button grows to fit its label so the carry amount never
+    // clips, mobile screens included; button 1 keeps the fixed width.
+    ctx.font = 'bold 13px "Lucida Console", Consolas, monospace';
+    const btn2W = Math.max(btnW, Math.ceil(ctx.measureText(btn2Label).width) + 18);
+    const totalBtnW = btnW + btnGap + btn2W;
     const btnX1  = Math.round((W - totalBtnW) / 2);
     const btnX2  = btnX1 + btnW + btnGap;
-    const btnY   = Math.min(panelY + panelH + 8, H - btnH - 6);
+    const btnY   = Math.min(panelY + panelH + 8, H - btnH - 6 - respawnReserve);
 
     // Button 1: MENU (gray) or CONTINUE (gold)
     const btn1Bg = isEndScr ? 'rgba(40,30,10,0.9)'  : 'rgba(30,30,35,0.9)';
@@ -310,13 +324,12 @@
     ctx.fillText(btn1Label, btnX1 + btnW / 2, btnY + 19);
 
     // Button 2: RESTART (green)
-    const buddyNote = !isEndScr && multiplayer && !isHost;
     ctx.fillStyle = 'rgba(10,30,15,0.9)';
-    ctx.fillRect(btnX2, btnY, btnW, btnH);
+    ctx.fillRect(btnX2, btnY, btn2W, btnH);
     ctx.strokeStyle = '#7fdc7f'; ctx.lineWidth = 2;
-    ctx.strokeRect(btnX2, btnY, btnW, btnH);
+    ctx.strokeRect(btnX2, btnY, btn2W, btnH);
     ctx.fillStyle = '#7fdc7f';
-    ctx.fillText(buddyNote ? 'REMATCH' : btn2Label, btnX2 + btnW / 2, btnY + 19);
+    ctx.fillText(btn2Label, btnX2 + btn2W / 2, btnY + 19);
 
     // Multiplayer note (tiny, above buttons)
     if (!isEndScr && multiplayer && isHost && guestWantsRestart) {
@@ -363,9 +376,9 @@
     // Store rects for mouse/touch hit-testing.
     const baseRects = isEndScr
       ? { continue: { x: btnX1, y: btnY, w: btnW, h: btnH },
-          restart:  { x: btnX2, y: btnY, w: btnW, h: btnH } }
+          restart:  { x: btnX2, y: btnY, w: btn2W, h: btnH } }
       : { menu:     { x: btnX1, y: btnY, w: btnW, h: btnH },
-          restart:  { x: btnX2, y: btnY, w: btnW, h: btnH } };
+          restart:  { x: btnX2, y: btnY, w: btn2W, h: btnH } };
     if (resurrBtn) baseRects.resurrect = resurrBtn;
     gameOverBtnRects = baseRects;
 
@@ -2066,6 +2079,7 @@
       toast('The witch hat saves you — *poof*', 1.8);
     } else if (color === LEPRECHAUN_HAT_COLOR) {
       money += LEPRECHAUN_PAYOUT;
+      runMoneyEarned += LEPRECHAUN_PAYOUT;
       playMoney();
       toast('Lucky hat!  Jackpot — +$' + LEPRECHAUN_PAYOUT, 1.8);
     }
@@ -2183,11 +2197,19 @@
     // Skipped during dash: drawDashHats() renders them scattered in screen space.
     const HAT_STEP = 5;
     if ((player.dashT || 0) <= 0) {
+      // Post-hit invincibility cue — the hat stack goes translucent and
+      // flickers while the wolfHitT window runs, so the i-frames are readable.
+      const iframesOn = (player.wolfHitT || 0) > 0 && !player.ghost;
+      if (iframesOn) {
+        ctx.save();
+        ctx.globalAlpha *= 0.25 + (Math.floor(Date.now() / 90) % 2) * 0.4;
+      }
       for (let i = 0; i < playerHats; i++) {
         const by = cy - 34 + crouchYAdd - i * HAT_STEP;
         const baseHat = isGuestSelf ? GUEST_HAT_COLOR : (hatColors[i] || '#5a3825');
         drawHat(cx, by, baseHat, hurt, i === playerHats - 1);
       }
+      if (iframesOn) ctx.restore();
     }
     // Legs — alternate lifting while walking. When crouched, swap to a
     // proper one-knee kneeling pose: back knee resting on the ground with
@@ -2425,11 +2447,18 @@
     const fallbackHat = isHost ? GUEST_HAT_COLOR : '#5a3825';
     // Skipped during buddy's dash — drawDashHats() renders them in screen space.
     if ((player2.dashT || 0) <= 0) {
+      // Same post-hit invincibility flicker as player1 (wolfHitT is synced).
+      const iframesOn2 = (player2.wolfHitT || 0) > 0 && !player2.ghost;
+      if (iframesOn2) {
+        ctx.save();
+        ctx.globalAlpha *= 0.25 + (Math.floor(Date.now() / 90) % 2) * 0.4;
+      }
       for (let i = 0; i < hatCount; i++) {
         const by = cy - 34 + crouchYAdd2 - i * HAT_STEP;
         const baseHat = haveColors ? (player2.hatColors[i] || fallbackHat) : fallbackHat;
         drawHat(cx, by, baseHat, hurt, i === hatCount - 1);
       }
+      if (iframesOn2) ctx.restore();
     }
     // Legs — crouched pose mirrors player1's bent-knee stance; otherwise
     // alternate the normal walking peg legs.
@@ -2571,7 +2600,11 @@
     if (c.launching && !preview && !launching) return; // hidden in the world pass
     const p = worldToScreen(c.x, c.y);
     // Missile-strike shudder — jitter the whole coop sideways while shakeT runs.
-    const jitter = (c.shakeT > 0) ? (Math.random() - 0.5) * c.shakeT * 14 : 0;
+    let jitter = (c.shakeT > 0) ? (Math.random() - 0.5) * c.shakeT * 14 : 0;
+    // Brooding wobble — a soft side-to-side rock while a chicken is forming
+    // inside (replaces the old egg-on-roof hint). Phase offset per coop so
+    // neighbouring coops don't rock in lockstep.
+    if (c.laying && !preview) jitter += Math.sin(Date.now() * 0.012 + c.x * 7 + c.y * 13) * 1.2;
     const cx = p.x + jitter;
     const cy = p.y + TILE_H / 2 - (launching ? launchRiseY : 0); // lift it as it takes off
 
@@ -2970,36 +3003,6 @@
           ctx.ellipse(cx + off, baseY - 4, 1.3, 3.4 * flick, 0, 0, Math.PI * 2);
           ctx.fill();
         }
-      }
-      ctx.restore();
-    }
-    // First-coop hatch hint — a bobbing, cracking egg over the fresh coop so
-    // the player knows a chicken is on the way. Cleared by spawnChicken() the
-    // moment the first chick hatches out.
-    if (c.hatchHint && !preview && !launching) {
-      ctx.save();
-      ctx.globalAlpha = coopBaseAlpha;
-      const bob = Math.sin(Date.now() * 0.004) * 2.5;
-      const ex = cx;
-      const ey = cy - floors * wallH - roofH - 14 + bob;
-      ctx.fillStyle = '#fffbe8';
-      ctx.strokeStyle = '#2a2a30';
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.ellipse(ex, ey, 4.5, 6, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      // Zig-zag crack so it reads "about to hatch", not just an egg.
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(ex - 3, ey + 1); ctx.lineTo(ex - 1, ey - 1);
-      ctx.lineTo(ex + 1, ey + 1); ctx.lineTo(ex + 3, ey - 1);
-      ctx.stroke();
-      // Three ticking dots underneath, lighting up in sequence.
-      const step = Math.floor(Date.now() / 350) % 3;
-      for (let i = 0; i < 3; i++) {
-        ctx.fillStyle = i === step ? '#ffd166' : 'rgba(255,255,255,0.35)';
-        ctx.fillRect(ex - 5 + i * 4, ey + 9, 2, 2);
       }
       ctx.restore();
     }

@@ -216,6 +216,13 @@
       // wave 1 in the same lobby.
       if (msg.type === 'restart') {
         if (typeof msg.tier === 'number') restartBonusTier = msg.tier;
+        // A buddy-initiated restart skips this client's requestRestart, so the
+        // host captures the money carry here before the reset wipes the
+        // counters (guest wallets are host-authoritative — no capture there).
+        if (isHost && pendingCarryMoney === 0) {
+          pendingCarryMoney = passedBoss ? Math.floor(money * 0.001)
+                                         : Math.floor(runMoneyEarned * 0.01);
+        }
         restartMpGame();
         return;
       }
@@ -382,7 +389,7 @@
   const SNAP_FIELDS = {
     wolves:   ['x','y','size','fasterLevel','hurtT','facingLeft','alive','fox','bomb','sword','assassin','hatted','aggroT','carrying','fleeing','meleeT','meleeDir','bob','smokeT','defective','turncoat','coldT','burnT','boss','aimDir','walkT','missileWolf','missilePhase','missileChargeT','jumper','jumpT','jumpDur','hunterWolf','muzzleT','maxHp','hp','hatColor','gunColor','pup','ranged','homer','parachuting','parachuteH','parachuteSway','crawler','legPhase','sparkleT'],
     chickens: ['x','y','alive','facingLeft','fat','worker','rich','bob','fleeT'],
-    coops:    ['x','y','level','dirtR','builtWave','shakeT','igniteT','launching','hatchHint'],
+    coops:    ['x','y','level','dirtR','builtWave','shakeT','igniteT','launching','laying'],
     fences:   ['x','y','kind','hp','hurtT'],
     farms:    ['x','y','growth','need','trampleFlash'],
     dogs:     ['x','y','facingLeft','bob','variant'],
@@ -418,6 +425,7 @@
         host: {
           x: player.x, y: player.y, dir: player.dir, moving: !!player.moving,
           walkT: player.walkT, hats: playerHats, hurtT: player.hurtT,
+          wolfHitT: player.wolfHitT || 0, // i-frame window — drives the hat flicker on the guest
           ghost: !!player.ghost, // host can now ghost too — sync the flag
           dying: !!player.dying, // mid-fall before the ghost — guest mirrors it
           karma: player.karma,    // per-player karma drives the shirt tint
@@ -438,7 +446,8 @@
           // Dance stun (host-only mechanic) so the guest sees the host jig.
           danceT: player.danceT || 0, danceAnimT: player.danceAnimT || 0,
         },
-        guest: { hats: player2.hats, hurtT: player2.hurtT, ghost: player2.ghost, dying: !!player2.dying },
+        guest: { hats: player2.hats, hurtT: player2.hurtT, wolfHitT: player2.wolfHitT || 0,
+                 ghost: player2.ghost, dying: !!player2.dying },
         // Player2's authoritative weapon state, so the guest can render its
         // own gun and the host can show it to the guest with the right look.
         guestWeapon: {
@@ -475,6 +484,7 @@
         guestUpgrades: gameOpts.individualUpgrades ? Object.assign({}, upgradeLevels2) : null,
         gameOpts: { friendlyFire: gameOpts.friendlyFire, separateMoney: gameOpts.separateMoney, individualUpgrades: gameOpts.individualUpgrades },
         money2: money2,
+        runMoneyEarned: runMoneyEarned, // run earnings — guest shows the 1% carry on its REMATCH button
         guestUpgradeOptions: gameOpts.individualUpgrades ? upgradeOptions2.map(o => ({ id: o.id, title: o.title, desc: o.desc() })) : null,
         guestUpgradePicked: !!upgradePicked2,
         // Mirror the host's overlay state so the guest's render matches.
@@ -572,6 +582,7 @@
       // Host's hat count drives how player2 is drawn on the guest.
       if (typeof msg.host.hats === 'number') player2.hats = msg.host.hats;
       if (typeof msg.host.hurtT === 'number') player2.hurtT = msg.host.hurtT;
+      if (typeof msg.host.wolfHitT === 'number') player2.wolfHitT = msg.host.wolfHitT;
       // Weapon animation timers — drive gun spin / muzzle flash / melee arc.
       player2.reloadT = msg.host.reloadT || 0;
       player2.jamT = msg.host.jamT || 0;
@@ -610,6 +621,7 @@
     if (msg.guestUpgrades) Object.assign(upgradeLevels2, msg.guestUpgrades);
     if (msg.gameOpts) Object.assign(gameOpts, msg.gameOpts);
     if (typeof msg.money2 === 'number') money2 = msg.money2;
+    if (typeof msg.runMoneyEarned === 'number') runMoneyEarned = msg.runMoneyEarned;
     // Host's player1 chamber/reload/ammo — both as globals (for legacy code)
     // and onto player2 (which on the guest represents the host's keeper).
     if (typeof msg.chambered === 'boolean') { chambered = msg.chambered; player2.chambered = msg.chambered; }
@@ -669,6 +681,7 @@
         while (hatColors.length < playerHats) hatColors.push('#5a3825');
       }
       if (typeof msg.guest.hurtT === 'number') player.hurtT = msg.guest.hurtT;
+      if (typeof msg.guest.wolfHitT === 'number') player.wolfHitT = msg.guest.wolfHitT;
       if (typeof msg.guest.dying === 'boolean') {
         if (msg.guest.dying && !player.dying) player.downT = 0; // restart the fall
         player.dying = msg.guest.dying;

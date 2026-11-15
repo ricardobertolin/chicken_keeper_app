@@ -341,6 +341,7 @@
     target.bulletHitT = 0.18;          // ~one blast window
     shake = Math.max(shake, 0.18);
     target.hurtT = 0.22;
+    playKeeperHit();
     breakLastStand(target); // a hit drops the keeper out of the Last Stand pose
     if (keeperDodgesHatLoss(target)) return; // hidden dodge — kept the hat
     if (target === player) {
@@ -369,6 +370,7 @@
     target.bulletHitT = 0.18;
     shake = Math.max(shake, 0.18);
     target.hurtT = 0.22;
+    playKeeperHit();
     breakLastStand(target); // a hit drops the keeper out of the Last Stand pose
     if (keeperDodgesHatLoss(target)) return; // hidden dodge — kept the hat
     if (target === player) {
@@ -805,9 +807,10 @@
   function pupBiteKeeper(keeper) {
     if ((keeper.flightT || 0) > 0 || keeper.lastStandStealth) return;
     if (keeper.wolfHitT > 0) return; // still in the shared bite cooldown
-    keeper.wolfHitT = 2.0;
+    keeper.wolfHitT = iframesFor(keeper);
     keeper.hurtT = 0.22;
     shake = Math.max(shake, 0.16);
+    playKeeperHit();
     breakLastStand(keeper);
     if (keeperDodgesHatLoss(keeper)) return; // hidden dodge — kept the hat
     if (keeper === player) {

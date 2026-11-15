@@ -141,8 +141,9 @@
   // FANGUS always hurts — there's no slipping through it unscathed.
   function bossTouchHit(k) {
     k.hurtT = 0.22;
-    k.wolfHitT = 2.0;
+    k.wolfHitT = iframesFor(k);
     shake = Math.max(shake, 0.24);
+    playKeeperHit();
     breakLastStand(k);
     if (keeperDodgesHatLoss(k)) return; // hidden dodge — kept the hat
     if (k === player) {
@@ -861,9 +862,10 @@
     if (k.ghost || k.dying) return;
     if ((k.flightT || 0) > 0 || k.lastStandStealth) return; // airborne / cloaked slips it
     if ((k.wolfHitT || 0) > 0) return;                      // shared bite-cooldown
-    k.wolfHitT = 2.0;
+    k.wolfHitT = iframesFor(k);
     shake = Math.max(shake, 0.3);
     k.hurtT = 0.22;
+    playKeeperHit();
     breakLastStand(k);
     if (keeperDodgesHatLoss(k)) return; // hidden dodge — kept the hat
     if (k === player) {
@@ -1203,9 +1205,10 @@
             } else if (player.wolfHitT > 0) {
               if (!gameOver && Math.random() < tableAt('counter')) meleeCounter(w);
             } else {
-              player.wolfHitT = 2.0;
+              player.wolfHitT = iframesFor(player);
               shake = 0.25;
               player.hurtT = 0.22;
+              playKeeperHit();
               breakLastStand(player); // a bite knocks you out of the Last Stand pose
               if (keeperDodgesHatLoss(player)) {
                 // hidden dodge — kept the hat
@@ -1229,9 +1232,10 @@
             } else if (player2.wolfHitT > 0) {
               // No damage this tick — still in the pack-bite cooldown.
             } else {
-              player2.wolfHitT = 2.0;
+              player2.wolfHitT = iframesFor(player2);
               shake = 0.18;
               player2.hurtT = 0.22;
+              playKeeperHit();
               breakLastStand(player2); // a bite knocks P2 out of the Last Stand pose
               if (!keeperDodgesHatLoss(player2)) { // hidden dodge — kept the hat
                 player2.hats--;
@@ -1851,6 +1855,13 @@
       player.ghost = true;
       player.deaths = (player.deaths || 0) + 1;
       cancelReloadMinigame(); // drop any in-progress nerd/jock reload
+      // Dying mid-reload must drop the whole reload state too, or the ghost
+      // is stuck "reloading" (bar sweeping, HUD frozen) until revived.
+      reloadingT = 0;
+      player.reloadingT = 0;
+      player.skillCheckActive = false;
+      player.skillCheckNeedsRelease = false;
+      player.jamT = 0;
       playerHats = 0;
       hatColors.length = 0;
       if (gameOpts.separateMoney) { money2 += money; money = 0; }
@@ -1858,6 +1869,12 @@
     } else if (who === player2) {
       player2.ghost = true;
       player2.deaths = (player2.deaths || 0) + 1;
+      // Same mid-reload cleanup as P1 — these flags are snapshot-synced, so
+      // clearing them here also clears the stuck reload bar on the guest.
+      player2.reloadingT = 0;
+      player2.skillCheckActive = false;
+      player2.skillCheckNeedsRelease = false;
+      player2.jamT = 0;
       player2.hats = 0;
       if (gameOpts.separateMoney) { money += money2; money2 = 0; }
       toast('Buddy fell — wandering as a ghost! Their money is now yours.', 3.2);
@@ -1989,6 +2006,14 @@
     player.ghost = false;
     player.hurtT = 2.5;
     player.wolfHitT = 2.5;
+    // Death may have landed mid-reload — drop the leftover reload state so
+    // the revived keeper doesn't come back with a stuck skill-check bar.
+    cancelReloadMinigame();
+    reloadingT = 0;
+    player.reloadingT = 0;
+    player.skillCheckActive = false;
+    player.skillCheckNeedsRelease = false;
+    player.jamT = 0;
   }
 
   // The player's shirt is base blue, but karma slowly tints it: good karma

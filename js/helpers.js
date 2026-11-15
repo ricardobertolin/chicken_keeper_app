@@ -1055,7 +1055,7 @@
       id: 'cash',
       title: 'Pocket Money',
       desc() { return 'Get cash — take $' + cashReward(); },
-      apply() { money += cashReward(); },
+      apply() { const r = cashReward(); money += r; runMoneyEarned += r; },
     };
   }
 

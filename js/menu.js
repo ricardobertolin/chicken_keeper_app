@@ -64,10 +64,19 @@
     // Post-boss carryover: add the flat 0.1% from the last run AFTER every reset
     // (so it isn't caught by the new-game-plus doubling), then consume it.
     if (pendingCarryMoney > 0) {
-      money += pendingCarryMoney;
+      // Separate-money co-op splits the carry across both wallets (P1 keeps
+      // the rounding extra, same as addSharedMoney); shared pot otherwise.
+      if (multiplayer && gameOpts.separateMoney) {
+        const half = Math.floor(pendingCarryMoney / 2);
+        money  += pendingCarryMoney - half;
+        money2 += half;
+      } else {
+        money += pendingCarryMoney;
+      }
       toast('Carried over $' + pendingCarryMoney + ' from your last run', 2.4);
       pendingCarryMoney = 0;
     }
+    runMoneyEarned = 0; // fresh run — the 1% death-carry tracker restarts
     if (!multiplayer) {
       showBuildHint(); // stays up until the player first opens build mode
     }

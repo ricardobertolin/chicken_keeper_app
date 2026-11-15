@@ -41,6 +41,7 @@
       case 'chickenPop':       playChickenPop(); break;
       case 'waveStart':        playWaveStart(); break;
       case 'keeperDeath':      playKeeperDeath(); break;
+      case 'keeperHit':        playKeeperHit(); break;
       case 'radarPing':        playRadarPing(); break;
       case 'rocketBoots':      playRocketBoots(); break;
       case 'critical':         playCritical(); break;
@@ -70,6 +71,40 @@
       osc.connect(g); g.connect(ctx.destination);
       osc.start(now + off); osc.stop(now + off + 0.1);
     });
+  }
+
+  // A keeper took a hit — a short "oof": a pitch-dropping triangle "ow" over a
+  // muffled body-blow thud. Distinct from the longer keeper-death sting.
+  // Net-synced so both players hear either keeper getting chewed.
+  function playKeeperHit() {
+    queueNetSound('keeperHit');
+    const ctx = getAudio();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(320, now);
+    osc.frequency.exponentialRampToValueAtTime(110, now + 0.14);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(0.14, now + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+    osc.connect(g); g.connect(ctx.destination);
+    osc.start(now); osc.stop(now + 0.17);
+    // Low-pass noise burst underneath for the body of the blow.
+    const dur = 0.09;
+    const sz = Math.floor(ctx.sampleRate * dur);
+    const b = ctx.createBuffer(1, sz, ctx.sampleRate);
+    const d = b.getChannelData(0);
+    for (let i = 0; i < sz; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / sz);
+    const src = ctx.createBufferSource(); src.buffer = b;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(500, now);
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.18, now);
+    ng.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    src.connect(lp); lp.connect(ng); ng.connect(ctx.destination);
+    src.start(now); src.stop(now + dur);
   }
 
   // Parry Mode: a soft airy whoosh when the keeper dodge-rolls. Local-only
