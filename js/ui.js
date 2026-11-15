@@ -299,6 +299,16 @@
   // ---------- Wire up the menu buttons ----------
   // (The upgrade tree is deliberately NOT on the title menu — it tracks a live
   // run's progression, and showing the whole ladder up front spoils it.)
+  // Every menu button / lobby toggle gets the same tiny click tick. Bound in
+  // the capture phase on the menu root so it fires for buttons added later and
+  // never has to be repeated on each individual handler below.
+  const menuRoot = document.getElementById('menu');
+  if (menuRoot) {
+    menuRoot.addEventListener('click', e => {
+      if (e.target.closest('button')) playUiClick();
+    }, true);
+  }
+
   document.getElementById('btnSingle').addEventListener('click', () => startGame(false));
   document.getElementById('btnMulti').addEventListener('click', () => {
     setStatus(document.getElementById('onlineStatus'), '');

@@ -30,6 +30,15 @@
   // Mobile uses 1:1 art→CSS pixel ratio so the map viewport matches desktop scale.
   const PIXEL = isMobileMode ? 1 : 2;
 
+  // Overlay borders are authored in art pixels, but desktop upscales the canvas
+  // 2× (PIXEL=2) while mobile draws 1:1 — so an identical art-pixel stroke ends
+  // up physically HALF as thick on a phone. The colour values are the same on
+  // both, but a 1px accent line against a dark panel reads washed-out next to
+  // the desktop's 2px block, which is why the upgrade cards looked "different
+  // colours" on mobile. Scale UI line widths so they land at the same on-screen
+  // weight everywhere.
+  function uiLineW(w) { return w * (2 / PIXEL); }
+
   if (isMobileMode) {
     const howtoList = document.getElementById('howto-list');
     if (howtoList) {

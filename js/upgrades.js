@@ -660,6 +660,7 @@
     if (option.affordable && !option.affordable()) { playCantBuy(); return; }
     const _hatPricePaid = option.id === 'buyHat' ? hatPrice : 0; // capture before apply() changes it
     applyPickedUpgrade(option);
+    playCashRegister(); // ka-ching — every pick is a "purchase"
     upgradePicked = true;
     toast(option.id === 'cash' ? 'Picked up $10'
         : option.id === 'chicken' ? 'Bock bock bagawk!'

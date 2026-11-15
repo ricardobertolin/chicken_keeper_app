@@ -1749,16 +1749,56 @@
     }
   }
 
+  // Wave over: every surviving possessed wolf (blue eye) flips a coin. Heads
+  // it burns out and detonates where it stands; tails it sticks around and
+  // fights alongside the keeper through the next wave too. Host-authoritative
+  // — the guest just sees the result through the wolf snapshot.
+  // Returns a short note for the wave-end recap toast (which is a single slot,
+  // so the counts ride along with the payout line instead of clobbering it).
+  function resolveTurncoats() {
+    if (multiplayer && !isHost) return '';
+    let kept = 0, blew = 0;
+    for (const w of wolves) {
+      if (!w.alive || !w.turncoat) continue;
+      if (Math.random() < 0.5) { explodeTurncoat(w); blew++; }
+      else                     { kept++; }
+    }
+    let note = '';
+    if (blew > 0) note += '  ' + blew + ' possessed burned out';
+    if (kept > 0) note += '  ' + kept + ' possessed stayed';
+    return note;
+  }
+
+  // A possessed wolf going up: a real blast that tears into any wolf nearby.
+  // It's an ally, so unlike a pup it never knocks the keeper's hat off.
+  function explodeTurncoat(w) {
+    spawnBlast(w.x, w.y);
+    playExplosion();
+    shake = Math.max(shake, 0.28);
+    const r2 = PUP_EXPLODE_R * PUP_EXPLODE_R;
+    for (const o of wolves) {
+      if (!o.alive || o === w || o.turncoat) continue;
+      if (dist2(o.x, o.y, w.x, w.y) < r2) {
+        const dx = o.x - w.x, dy = o.y - w.y, m = Math.hypot(dx, dy) || 1;
+        hurtWolf(o, PUP_EXPLODE_DMG, (dx / m) * 0.35, (dy / m) * 0.35);
+      }
+    }
+    w.alive = false;
+  }
+
   function checkWaveDefended() {
     if (!waveActive) return;
     if (bossWaveActive) return; // the boss fight ends on its own terms (bossTick)
     if (pendingSpawns > 0) return;
-    // Count live wolves explicitly (splice may not have run yet this frame)
+    // Count live wolves explicitly (splice may not have run yet this frame).
+    // Turncoats fight FOR the keeper, so they don't hold the wave open — the
+    // player shouldn't have to execute their own ally to finish a round.
     let live = 0;
-    for (const w of wolves) if (w.alive && !w.dpsDummy) live++; // debug dummy never blocks the wave
+    for (const w of wolves) if (w.alive && !w.dpsDummy && !w.turncoat) live++; // debug dummy never blocks the wave
     if (live > 0) return;
 
     waveActive = false;
+    const turncoatNote = resolveTurncoats();
     if (advancedOilWaves > 0) advancedOilWaves--; // Advanced Oil lasts a single round
 
     // Each surviving chicken pays $1 (fat ones pay more); the shot-chicken
@@ -1830,13 +1870,13 @@
     addSharedMoney(payReward + payFarm);
     if (payReward > 0) {
       const note = penalty > 0 ? '  (-$' + penalty + ' for ' + totalShot + ' shot' + (totalShot > 1 ? 's' : '') + ')' : '';
-      toast('Wave ' + wave + ' defended!  +$' + payReward + ' (' + aliveChickens + ' chickens)' + note + farmNote2 + hunterNote, 2.2);
+      toast('Wave ' + wave + ' defended!  +$' + payReward + ' (' + aliveChickens + ' chickens)' + note + farmNote2 + hunterNote + turncoatNote, 2.2);
     } else if (penalty > 0) {
-      toast('Wave ' + wave + ' defended! Payout lost — ' + totalShot + ' chicken' + (totalShot > 1 ? 's' : '') + ' shot' + farmNote2 + hunterNote, 2.2);
+      toast('Wave ' + wave + ' defended! Payout lost — ' + totalShot + ' chicken' + (totalShot > 1 ? 's' : '') + ' shot' + farmNote2 + hunterNote + turncoatNote, 2.2);
     } else if (payFarm > 0) {
-      toast('Wave ' + wave + ' defended!' + farmNote2 + hunterNote, 2.2);
+      toast('Wave ' + wave + ' defended!' + farmNote2 + hunterNote + turncoatNote, 2.2);
     } else {
-      toast('Wave ' + wave + ' defended! No chickens — no income' + hunterNote, 2.2);
+      toast('Wave ' + wave + ' defended! No chickens — no income' + hunterNote + turncoatNote, 2.2);
     }
     if (nightSurvived) {
       toast('Night of the Wolf survived — payout doubled!', 3.2);

@@ -316,7 +316,7 @@
     const btn1Tx = isEndScr ? '#ffd166'              : '#fff';
     ctx.fillStyle = btn1Bg;
     ctx.fillRect(btnX1, btnY, btnW, btnH);
-    ctx.strokeStyle = btn1Br; ctx.lineWidth = 2;
+    ctx.strokeStyle = btn1Br; ctx.lineWidth = uiLineW(2);
     ctx.strokeRect(btnX1, btnY, btnW, btnH);
     ctx.fillStyle = btn1Tx;
     ctx.textAlign = 'center';
@@ -326,7 +326,7 @@
     // Button 2: RESTART (green)
     ctx.fillStyle = 'rgba(10,30,15,0.9)';
     ctx.fillRect(btnX2, btnY, btn2W, btnH);
-    ctx.strokeStyle = '#7fdc7f'; ctx.lineWidth = 2;
+    ctx.strokeStyle = '#7fdc7f'; ctx.lineWidth = uiLineW(2);
     ctx.strokeRect(btnX2, btnY, btn2W, btnH);
     ctx.fillStyle = '#7fdc7f';
     ctx.fillText(btn2Label, btnX2 + btn2W / 2, btnY + 19);
@@ -351,13 +351,13 @@
       if (canResurrect) {
         ctx.fillStyle = 'rgba(60,8,8,0.92)';
         ctx.fillRect(rBtnX, rBtnY, rBtnW, rBtnH);
-        ctx.strokeStyle = '#cc2222'; ctx.lineWidth = 2;
+        ctx.strokeStyle = '#cc2222'; ctx.lineWidth = uiLineW(2);
         ctx.strokeRect(rBtnX, rBtnY, rBtnW, rBtnH);
         ctx.fillStyle = '#ff6060';
       } else {
         ctx.fillStyle = 'rgba(30,30,30,0.75)';
         ctx.fillRect(rBtnX, rBtnY, rBtnW, rBtnH);
-        ctx.strokeStyle = '#555'; ctx.lineWidth = 2;
+        ctx.strokeStyle = '#555'; ctx.lineWidth = uiLineW(2);
         ctx.strokeRect(rBtnX, rBtnY, rBtnW, rBtnH);
         ctx.fillStyle = '#666';
       }
@@ -1015,7 +1015,7 @@
       ctx.fillStyle = hovered ? 'rgba(255, 209, 102, 0.24)' : 'rgba(255, 255, 255, 0.08)';
       ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
       ctx.strokeStyle = accent2 || (hovered ? '#ffd166' : 'rgba(255,255,255,0.18)');
-      ctx.lineWidth = 2;
+      ctx.lineWidth = uiLineW(2);
       ctx.strokeRect(rect.x + 1, rect.y + 1, rect.w - 2, rect.h - 2);
       // Easter-egg chicken filler — just the chicken, no text.
       if (option.id === 'chicken') {
@@ -1135,7 +1135,7 @@
     // immediately reads this as the surprise second pick, not the normal one.
     const isBonus = !!bonusUpgradeAvailable;
     ctx.strokeStyle = isBonus ? '#5fd06a' : '#ffd166';
-    ctx.lineWidth = isBonus ? 3 : 2;
+    ctx.lineWidth = uiLineW(isBonus ? 3 : 2);
     ctx.strokeRect(panelX + 1, panelY + 1, panelW - 2, panelH - 2);
 
     ctx.fillStyle = isBonus ? '#5fd06a' : '#fff';
@@ -1202,7 +1202,7 @@
                     :            'rgba(255, 255, 255, 0.08)';
       ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
       ctx.strokeStyle = (isLast || colored) ? accent : (hovered ? '#ffd166' : 'rgba(255,255,255,0.18)');
-      ctx.lineWidth = isMetaverse ? 3 : 2;
+      ctx.lineWidth = uiLineW(isMetaverse ? 3 : 2);
       if (isMetaverse) { ctx.save(); ctx.shadowColor = accent; ctx.shadowBlur = 14 + 6 * Math.sin(Date.now() / 140); }
       ctx.strokeRect(rect.x + 1, rect.y + 1, rect.w - 2, rect.h - 2);
       if (isMetaverse) ctx.restore();

@@ -42,6 +42,7 @@
       case 'waveStart':        playWaveStart(); break;
       case 'keeperDeath':      playKeeperDeath(); break;
       case 'keeperHit':        playKeeperHit(); break;
+      case 'cashRegister':     playCashRegister(); break;
       case 'radarPing':        playRadarPing(); break;
       case 'rocketBoots':      playRocketBoots(); break;
       case 'critical':         playCritical(); break;
@@ -71,6 +72,76 @@
       osc.connect(g); g.connect(ctx.destination);
       osc.start(now + off); osc.stop(now + off + 0.1);
     });
+  }
+
+  // Shop "ka-CHING" — an old cash register: a bright two-bell chime over a
+  // wooden drawer clunk, then a little coin shimmer. Played when an upgrade is
+  // bought in the wave-cleared menu. Net-queued so the buddy hears the sale.
+  function playCashRegister() {
+    queueNetSound('cashRegister');
+    const ctx = getAudio();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    // Two struck bells a fifth apart — the "ka-CHING".
+    [[0, 1050], [0.045, 1570]].forEach(([off, freq]) => {
+      // Each bell is a pair of detuned partials so it rings rather than beeps.
+      [1, 2.76].forEach((mult, i) => {
+        const osc = ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq * mult, now + off);
+        const g = ctx.createGain();
+        const peak = i === 0 ? 0.13 : 0.045;
+        g.gain.setValueAtTime(0.0001, now + off);
+        g.gain.exponentialRampToValueAtTime(peak, now + off + 0.006);
+        g.gain.exponentialRampToValueAtTime(0.0001, now + off + 0.55);
+        osc.connect(g); g.connect(ctx.destination);
+        osc.start(now + off); osc.stop(now + off + 0.6);
+      });
+    });
+    // Wooden drawer clunk underneath the first bell.
+    const dur = 0.11;
+    const sz = Math.floor(ctx.sampleRate * dur);
+    const b = ctx.createBuffer(1, sz, ctx.sampleRate);
+    const d = b.getChannelData(0);
+    for (let i = 0; i < sz; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / sz, 2);
+    const src = ctx.createBufferSource(); src.buffer = b;
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(380, now);
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.22, now);
+    ng.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    src.connect(lp); lp.connect(ng); ng.connect(ctx.destination);
+    src.start(now); src.stop(now + dur);
+    // Coin shimmer tail — three quick high blips skipping upward.
+    [0.13, 0.19, 0.25].forEach((off, i) => {
+      const osc = ctx.createOscillator();
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(2300 + i * 480, now + off);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, now + off);
+      g.gain.exponentialRampToValueAtTime(0.022, now + off + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + off + 0.05);
+      osc.connect(g); g.connect(ctx.destination);
+      osc.start(now + off); osc.stop(now + off + 0.06);
+    });
+  }
+
+  // Tiny UI tick for buttons/taps — purely local feedback so the menus and the
+  // mobile pad feel responsive. Deliberately quiet and very short.
+  function playUiClick() {
+    const ctx = getAudio();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(880, now);
+    osc.frequency.exponentialRampToValueAtTime(1500, now + 0.025);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(0.035, now + 0.003);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.045);
+    osc.connect(g); g.connect(ctx.destination);
+    osc.start(now); osc.stop(now + 0.05);
   }
 
   // A keeper took a hit — a short "oof": a pitch-dropping triangle "ow" over a

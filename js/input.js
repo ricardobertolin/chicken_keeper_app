@@ -354,6 +354,13 @@
 
     mobHud.style.display = 'block';
 
+    // Audible tap feedback on the virtual gamepad buttons (not the sticks —
+    // those fire continuously). Capture phase so it runs ahead of the
+    // per-button handlers regardless of how they stop propagation.
+    mobHud.addEventListener('touchstart', e => {
+      if (e.target.closest('.mob-btn')) playUiClick();
+    }, { capture: true, passive: true });
+
     const PAD_R      = 60;   // pad radius (half of 120 px)
     const KNOB_R     = 36;   // max knob travel
     const DEAD       = 0.25; // normalised movement deadzone
@@ -635,6 +642,17 @@
 
       requestAnimationFrame(syncMobState);
     }
-    requestAnimationFrame(syncMobState);
+    // Don't start the loop yet. This file is only the 3rd of the js/ scripts,
+    // and the browser can render a frame in the gap while a later one is still
+    // downloading — syncMobState would then run before state.js has executed
+    // and blow up on `gameOver` (a top-level `let` that doesn't exist until
+    // that script runs). DOMContentLoaded fires only after every parser-
+    // blocking script in the body has executed, so it's the right gate.
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded',
+        () => requestAnimationFrame(syncMobState), { once: true });
+    } else {
+      requestAnimationFrame(syncMobState);
+    }
   })();
 
