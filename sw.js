@@ -1,16 +1,34 @@
 // Bumping VERSION is what evicts the previous cache in `activate`. It had been
 // pinned at v0.8.3 across every release since, so the old entry was never
 // purged and returning visitors kept getting that build served to them.
-const VERSION = 'chicken-keeper-v0.9.4';
+const VERSION = 'chicken-keeper-v0.9.5';
 
-// Only files index.html actually references. styles.css / app.js /
-// manifest.webmanifest / icon.svg are unused stubs and were being precached
-// for nothing.
+// Only files index.html actually references. app.js / manifest.webmanifest /
+// icon.svg are unused stubs and are not precached. The game script is split
+// into the js/ files below — bump VERSION whenever any of them changes, or
+// returning players keep the cached build.
 const ASSETS = [
   './',
   './index.html',
+  './styles.css',
   './manifest.json',
   './wolf-icon.png',
+  './js/boot.js',
+  './js/audio.js',
+  './js/input.js',
+  './js/state.js',
+  './js/helpers.js',
+  './js/upgrades.js',
+  './js/spawning.js',
+  './js/combat.js',
+  './js/boss.js',
+  './js/update.js',
+  './js/render.js',
+  './js/wolf-overlay.js',
+  './js/debug-panel.js',
+  './js/menu.js',
+  './js/net.js',
+  './js/ui.js',
 ];
 
 self.addEventListener('install', (event) => {
@@ -27,9 +45,9 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// The whole game is one HTML file, so treating it like a static asset meant a
-// cache hit pinned the player to whatever build they first loaded — a new
-// deploy could never reach them. HTML is therefore network-first (fall back to
+// Treating the HTML like a static asset meant a cache hit pinned the player
+// to whatever build they first loaded — a new deploy could never reach them.
+// HTML is therefore network-first (fall back to
 // the cache only when offline); everything else stays cache-first for speed.
 self.addEventListener('fetch', (event) => {
   const req = event.request;

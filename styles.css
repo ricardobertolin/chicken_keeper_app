@@ -1,75 +1,717 @@
-:root {
-  color-scheme: dark;
-  --bg: #0b1020;
-  --fg: #e7ecff;
-  --muted: #97a3c7;
-  --card: #131a33;
-  --accent: #5b8cff;
-}
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: #1a1a1a;
+    overflow: hidden;
+    touch-action: none;
+    /* Chunky monospace face — matches the low-res pixel canvas. */
+    font-family: 'Lucida Console', 'Consolas', 'Courier New', monospace;
+    color: #fff;
+    user-select: none;
+    /* Try to suppress font smoothing so text reads as crisp pixels. */
+    -webkit-font-smoothing: none;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: geometricPrecision;
+  }
+  /* Toggleable full-screen pixelation. Heavy — re-rasterises everything
+     each frame the canvas updates — so it lives behind a debug switch. */
+  body.pixelate-all { filter: url(#pixelate); }
+  #game {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+    cursor: crosshair;
+    image-rendering: pixelated;
+    image-rendering: -moz-crisp-edges;
+    image-rendering: crisp-edges;
+  }
+  #hud {
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    background: rgba(0,0,0,0.55);
+    padding: 12px 16px;
+    border-radius: 0;
+    font-size: 18px;
+    line-height: 1.55;
+    pointer-events: none;
+    letter-spacing: 1px;
+  }
+  #hud b { color: #ffd166; }
+  #hud .stat { display: inline-block; min-width: 60px; }
+  #hud .dim, #hud .dim b, #hud .dim .stat { color: #7a7a7a; }
+  #help {
+    /* Hidden — the in-game key cheatsheet was cluttering the corner.
+       Re-enable by removing display:none below. */
+    display: none;
+    position: fixed;
+    bottom: 12px;
+    left: 12px;
+    background: rgba(0,0,0,0.55);
+    padding: 10px 14px;
+    border-radius: 0;
+    font-size: 12px;
+    line-height: 1.6;
+    pointer-events: none;
+    max-width: 320px;
+  }
+  #help kbd {
+    display: inline-block;
+    padding: 1px 6px;
+    background: #333;
+    border: 1px solid #555;
+    border-radius: 0;
+    font-family: monospace;
+    font-size: 11px;
+  }
+  #toast {
+    position: fixed;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(15, 18, 24, 0.92);
+    border: 3px solid #ffd166;
+    padding: 18px 32px;
+    border-radius: 0;
+    font-size: 18px;
+    letter-spacing: 1px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  #toast.show { opacity: 1; }
 
-* { box-sizing: border-box; }
+  /* Persistent starter hint — sits at the bottom and stays put until the
+     player first opens build mode with E. Separate from the transient
+     toast so gameplay toasts never wipe it. */
+  #buildhint {
+    position: fixed;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(15, 18, 24, 0.92);
+    border: 3px solid #ffd166;
+    padding: 14px 28px;
+    border-radius: 0;
+    font-size: 18px;
+    letter-spacing: 1px;
+    color: #ffd166;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s;
+    animation: buildhint-pulse 1.2s ease-in-out infinite;
+  }
+  #buildhint.show { opacity: 1; }
+  #buildhint kbd {
+    display: inline-block;
+    padding: 1px 7px;
+    background: #333;
+    border: 1px solid #ffd166;
+    border-radius: 0;
+    font-family: inherit;
+    color: #fff;
+  }
+  @keyframes buildhint-pulse {
+    0%, 100% { transform: translateX(-50%) scale(1); }
+    50%      { transform: translateX(-50%) scale(1.04); }
+  }
 
-html, body {
-  margin: 0;
-  height: 100%;
-  background: radial-gradient(1200px 800px at 20% -10%, #1a2350 0%, var(--bg) 60%) fixed;
-  color: var(--fg);
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-  -webkit-font-smoothing: antialiased;
-}
+  /* DEBUG PANEL — remove for production */
+  #debug {
+    position: fixed;
+    top: 12px;
+    right: 12px;
+    background: rgba(0,0,0,0.6);
+    padding: 10px 12px;
+    border-radius: 0;
+    font-size: 17px;
+    z-index: 10;
+    max-width: 280px;
+    max-height: calc(100vh - 24px);
+    overflow-y: auto;
+  }
+  #debug-toggle {
+    background: #ff6b6b;
+    color: #fff;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 0;
+    cursor: pointer;
+    font-weight: bold;
+    font-family: inherit;
+    font-size: 16px;
+  }
+  #debug-body { margin-top: 8px; display: none; }
+  #debug.open #debug-body { display: block; }
+  #debug .debug-row {
+    /* Stack vertically — each row is a label + a list of buttons. */
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #333;
+  }
+  #debug .debug-row:last-child { border-bottom: none; margin-bottom: 0; }
+  #debug .debug-label {
+    color: #ffd166;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 2px;
+  }
+  /* Per-tier sub-header inside the Upgrades list — dimmer + a divider line so
+     each unlock-wave group reads as its own block. */
+  #debug .debug-tier {
+    color: #8fcaff;
+    font-weight: bold;
+    font-size: 12px;
+    letter-spacing: 1px;
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid #2c3a4a;
+  }
+  #debug .debug-tier:first-of-type { margin-top: 2px; }
+  #debug button[data-debug] {
+    display: block;
+    width: 100%;
+    background: #2a2a2a;
+    color: #fff;
+    border: 1px solid #555;
+    border-radius: 0;
+    padding: 6px 10px;
+    font-size: 16px;
+    cursor: pointer;
+    font-family: inherit;
+    text-align: left;
+  }
+  #debug button[data-debug]:hover { background: #444; }
 
-.shell {
-  min-height: 100%;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-}
+  /* ── Title menu ─────────────────────────────────────────────────────────
+     Styled to feel like the in-game upgrade/pause panels: same dark fill,
+     gold border, system-ui font. The body underneath stays the live world,
+     so the menu reads as a pause-overlay rather than a title screen. */
+  #menu {
+    position: fixed;
+    inset: 0;
+    /* Light dim so the game map shows clearly behind the card. */
+    background: rgba(0, 0, 0, 0.42);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 20;
+  }
+  #menu .menu-card {
+    text-align: center;
+    padding: 28px 36px 24px 36px;
+    background: rgba(15, 18, 24, 0.96);
+    /* Double border + flat ring — no soft shadow, keeps the pixel edge. */
+    border: 4px solid #ffd166;
+    outline: 4px solid #1a1a1a;
+    min-width: 320px;
+  }
+  /* Subtle blur + contrast bump only kicks in when the global pixelate
+     toggle is on, so flipping it off leaves the menu perfectly crisp. */
+  body.pixelate-all #menu .menu-card {
+    filter: blur(0.15px) contrast(1.15);
+  }
+  #menu .menu-title {
+    font-size: 30px;
+    font-weight: bold;
+    color: #ffd166;
+    margin: 0 0 4px 0;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+  #menu .title-chick {
+    display: inline-block;
+    margin: 0 10px;
+    font-size: 26px;
+    vertical-align: middle;
+  }
+  #menu .menu-version {
+    margin-top: 18px;
+    font-size: 13px;
+    color: #ffd166;
+    letter-spacing: 2px;
+  }
+  #menu .menu-version .by {
+    color: #d9c89a;
+  }
+  #menu .menu-sub {
+    font-size: 15px;
+    color: #d7d7d7;
+    margin: 0 0 22px 0;
+    letter-spacing: 1px;
+  }
+  #menu .menu-btn {
+    display: block;
+    width: 240px;
+    margin: 8px auto;
+    padding: 11px 16px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #fff;
+    border: 3px solid rgba(255, 255, 255, 0.22);
+    border-radius: 0;
+    font-family: inherit;
+    font-size: 16px;
+    cursor: pointer;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+  #menu .menu-btn:hover {
+    background: rgba(255, 209, 102, 0.24);
+    border-color: #ffd166;
+  }
+  #menu .menu-btn--primary {
+    border-color: #ffd166;
+  }
+  #menu .menu-hint {
+    margin-top: 18px;
+    font-size: 13px;
+    color: #9aa0a8;
+    line-height: 1.7;
+    letter-spacing: 1px;
+  }
+  #menu .howto-list {
+    list-style: none;
+    margin: 16px 0 0 0;
+    padding: 0;
+    text-align: center;
+  }
+  #menu .howto-list li {
+    display: flex;
+    justify-content: center;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 12px;
+    font-size: 13px;
+    color: #d9c89a;
+    line-height: 1.6;
+    letter-spacing: 0.5px;
+  }
+  #menu .howto-keys {
+    white-space: nowrap;
+  }
+  #menu .howto-list kbd {
+    display: inline-block;
+    padding: 1px 6px;
+    background: #333;
+    border: 1px solid #555;
+    border-radius: 0;
+    font-family: monospace;
+    font-size: 11px;
+    color: #fff;
+  }
+  #menu .menu-screen { display: none; }
+  #menu .menu-screen.is-active { display: block; }
+  #menu .menu-back {
+    background: none;
+    border: none;
+    color: #ffd166;
+    font-family: inherit;
+    font-size: 15px;
+    cursor: pointer;
+    padding: 0;
+    margin: 0 0 12px 0;
+    align-self: flex-start;
+  }
+  #menu .menu-back:hover { text-decoration: underline; }
+  #menu .menu-input {
+    display: block;
+    width: 220px;
+    margin: 6px auto 12px auto;
+    padding: 10px 14px;
+    background: #1a1a1a;
+    color: #ffd166;
+    border: 3px solid #ffd166;
+    font-family: inherit;
+    font-size: 26px;
+    letter-spacing: 4px;
+    text-align: center;
+    text-transform: uppercase;
+    border-radius: 0;
+    outline: none;
+  }
+  #menu .lobby-code {
+    font-family: inherit;
+    font-size: 34px;
+    letter-spacing: 8px;
+    color: #ffd166;
+    background: #1a1a1a;
+    border: 3px dashed #ffd166;
+    padding: 12px 18px;
+    margin: 6px 0 10px 0;
+    user-select: text;
+  }
+  #menu .status {
+    margin-top: 10px;
+    font-size: 14px;
+    color: #d9c89a;
+    min-height: 1.2em;
+  }
+  #menu .status.is-bad  { color: #ff7676; }
+  #menu .status.is-good { color: #7fdc7f; }
+  #menu .lobby-opts {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 8px auto 12px auto;
+    width: 240px;
+  }
+  #menu .lobby-opt {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: rgba(255,255,255,0.06);
+    color: #fff;
+    border: 2px solid rgba(255,255,255,0.18);
+    border-radius: 0;
+    font-family: inherit;
+    font-size: 13px;
+    cursor: pointer;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+  }
+  #menu .lobby-opt:hover { border-color: #ffd166; }
+  #menu .lobby-opt[data-on="1"] { border-color: #ffd166; background: rgba(255,209,102,0.14); }
+  #menu .lobby-opt[data-on="1"] .lobby-opt-val { color: #ffd166; }
+  #menu .lobby-opt-label { color: #d9c89a; }
+  #menu .lobby-opt-val { color: #9aa0a8; font-weight: bold; }
+  body.in-menu #hud,
+  body.in-menu #help,
+  body.in-menu #buildhint,
+  body.in-menu #debug,
+  body.in-menu #mob-hud { display: none; }
 
-.card {
-  background: var(--card);
-  border: 1px solid rgba(255,255,255,0.06);
-  border-radius: 20px;
-  padding: 32px;
-  max-width: 420px;
-  width: 100%;
-  text-align: center;
-  box-shadow: 0 30px 60px rgba(0,0,0,0.45);
-}
+  /* ── Mobile virtual gamepad ──────────────────────────────────────────────── */
+  #mob-hud {
+    display: none;
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 50;
+  }
+  .mob-pad {
+    position: absolute;
+    width: 120px; height: 120px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.07);
+    border: 2px solid rgba(255,255,255,0.22);
+    pointer-events: all;
+    touch-action: none;
+    box-sizing: border-box;
+    transition: border-color 0.12s, background 0.12s;
+  }
+  .mob-pad.active {
+    background: rgba(220,40,40,0.18);
+    border-color: rgba(255,80,80,0.70);
+  }
+  .mob-knob {
+    position: absolute;
+    width: 48px; height: 48px;
+    top: 50%; left: 50%;
+    transform: translate(-50%,-50%);
+    background: transparent;
+    border: none;
+    pointer-events: none;
+    box-sizing: border-box;
+    image-rendering: pixelated;
+    image-rendering: crisp-edges;
+  }
+  #mob-move-pad { bottom: 20px; left: 20px; }
+  #mob-aim-pad  { bottom: 20px; right: 15px; }
+  .mob-btn {
+    position: absolute;
+    pointer-events: all;
+    touch-action: none;
+    border: 2px solid rgba(255,255,255,0.35);
+    font-family: 'Lucida Console','Consolas','Courier New',monospace;
+    font-weight: bold;
+    letter-spacing: 1px;
+    color: #fff;
+    background: rgba(0,0,0,0.55);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    border-radius: 0;
+    font-size: 12px;
+    transition: opacity 0.2s;
+  }
+  /* Centre cluster: centered horizontally, bottom-level with the sticks */
+  #mob-center-cluster {
+    position: absolute;
+    bottom: 28px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: row;
+    gap: 4px;
+    align-items: center;
+    pointer-events: none;
+  }
+  /* Buttons inside the cluster use flex layout, not absolute positioning */
+  #mob-center-cluster .mob-btn {
+    position: static;
+    pointer-events: all;
+  }
+  #mob-build-btn {
+    width: 52px; height: 52px;
+    background: rgba(30,80,180,0.70);
+    border-color: #8fcaff;
+    font-size: 10px;
+    border-radius: 50%;
+  }
+  #mob-scr-l, #mob-scr-r {
+    width: 40px; height: 40px;
+    font-size: 16px;
+  }
+  /* Pause: top-right */
+  #mob-pause {
+    width: 50px; height: 34px;
+    top: 14px; right: 14px;
+  }
+  /* HUD info toggle: top-left */
+  #mob-hud-toggle {
+    width: 50px; height: 34px;
+    top: 14px; left: 14px;
+    font-size: 18px;
+  }
+  /* Alt-fire button: top-left corner of move pad (swapped from DASH) */
+  #mob-alt-btn {
+    width: 44px; height: 44px;
+    left: 10px; bottom: 132px;
+    font-size: 11px; letter-spacing: 0;
+    border-radius: 50%;
+    opacity: 0.15;
+    transition: opacity 0.3s;
+  }
+  /* Dash button: top-right corner of aim pad (swapped from ALT) */
+  #mob-dash-btn {
+    width: 44px; height: 44px;
+    right: 10px; bottom: 132px;
+    font-size: 11px; letter-spacing: 0;
+    border-radius: 50%;
+  }
 
-.logo img {
-  border-radius: 18px;
-  display: block;
-  margin: 0 auto 12px;
-}
+  /* ---------- Upgrade tree overlay ----------
+     A full-screen scrolling map of every upgrade, top (wave 1) to bottom
+     (wave 51). Opened from the title menu and from the pause panel, so it
+     deliberately sits above both (#menu is z-index 20). */
+  /* Dimmed backdrop; the tree itself is a window centred inside it, not a
+     full-screen takeover — the game stays visible around the edges. */
+  #skilltree {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.68);
+    color: #fff;
+    font-family: "Lucida Console", Consolas, monospace;
+  }
+  #skilltree.is-open { display: flex; }
+  #skilltree .st-window {
+    display: flex;
+    flex-direction: column;
+    width: 560px;
+    max-width: calc(100vw - 32px);
+    /* Capped so the tier rows wrap onto more lines and the body scrolls,
+       rather than the window growing to fit everything. */
+    height: 460px;
+    max-height: calc(100vh - 32px);
+    background: rgba(15, 18, 24, 0.98);
+    border: 3px solid #ffd166;
+    outline: 3px solid #1a1a1a;
+  }
+  #skilltree .st-head {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    padding: 10px 14px;
+    border-bottom: 2px solid #ffd166;
+  }
+  #skilltree .st-title {
+    font-size: 16px;
+    font-weight: bold;
+    color: #ffd166;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+  #skilltree .st-count {
+    font-size: 14px;
+    color: #fff;
+    letter-spacing: 1px;
+    padding: 2px 9px;
+    border: 2px solid rgba(255, 209, 102, 0.5);
+  }
+  #skilltree .st-count b { color: #ffd166; }
+  #skilltree .st-close {
+    margin-left: auto;
+    padding: 5px 13px;
+    background: rgba(255, 255, 255, 0.08);
+    color: #ffd166;
+    border: 2px solid #ffd166;
+    font-family: inherit;
+    font-size: 13px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    cursor: pointer;
+  }
+  #skilltree .st-close:hover { background: rgba(255, 209, 102, 0.24); }
 
-h1 {
-  margin: 8px 0 4px;
-  font-size: 1.5rem;
-  letter-spacing: -0.01em;
-}
-
-.tag {
-  margin: 0 0 16px;
-  color: var(--accent);
-  font-weight: 600;
-  font-size: 0.95rem;
-}
-
-.hint {
-  color: var(--muted);
-  font-size: 0.95rem;
-  margin: 0 0 18px;
-}
-
-code {
-  background: rgba(255,255,255,0.07);
-  padding: 1px 6px;
-  border-radius: 6px;
-  font-size: 0.88em;
-}
-
-.status {
-  font-size: 0.82rem;
-  color: var(--muted);
-  margin: 0;
-}
+  /* Scroll container — the tree starts at the top and runs downward. */
+  #skilltree .st-body {
+    flex: 1 1 auto;
+    position: relative;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 14px 14px 28px 14px;
+  }
+  /* Blocky scrollbar to match the pixel art — hard edges, no rounding.
+     Deliberately NO `scrollbar-width` / `scrollbar-color` here: Chrome 121+
+     honours those standard properties INSTEAD of the ::-webkit-scrollbar
+     rules below and paints its own rounded thumb, which is what made this
+     look round. Leaving them out keeps the square custom scrollbar. */
+  #skilltree .st-body::-webkit-scrollbar {
+    width: 14px;
+    background: #0e1116;
+  }
+  #skilltree .st-body::-webkit-scrollbar-track {
+    background: #0e1116;
+    border-left: 2px solid #2a2f38;
+    border-radius: 0;
+  }
+  #skilltree .st-body::-webkit-scrollbar-thumb {
+    background: #ffd166;
+    /* Dark inset ring reads as a chunky pixel block rather than a bar. */
+    border: 2px solid #1a1a1a;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  #skilltree .st-body::-webkit-scrollbar-thumb:hover { background: #ffdd8a; }
+  #skilltree .st-body::-webkit-scrollbar-thumb:active { background: #e8b94a; }
+  /* Square off the leftovers so nothing rounds at the ends. */
+  #skilltree .st-body::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+  #skilltree .st-body::-webkit-scrollbar-corner { background: #0e1116; }
+  #skilltree .st-links {
+    position: absolute;
+    top: 0; left: 0;
+    pointer-events: none;
+    overflow: visible;
+  }
+  #skilltree .st-tiers { position: relative; }
+  #skilltree .st-tier { margin: 0 0 26px 0; }
+  #skilltree .st-tier-label {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 10px 0;
+    font-size: 14px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #ffd166;
+  }
+  #skilltree .st-tier-label span.st-tier-sub {
+    font-size: 12px;
+    letter-spacing: 1px;
+    text-transform: none;
+    color: #9aa0a8;
+  }
+  #skilltree .st-tier-label::after {
+    content: '';
+    flex: 1 1 auto;
+    height: 2px;
+    background: rgba(255, 209, 102, 0.28);
+  }
+  #skilltree .st-tier.is-locked .st-tier-label { color: #6a7078; }
+  #skilltree .st-tier.is-locked .st-tier-label::after { background: rgba(255, 255, 255, 0.10); }
+  #skilltree .st-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  /* Cards are OPAQUE on purpose: the connector lines are painted underneath
+     them, and a translucent card would let those lines show through its face
+     and read as if they were cutting across the card. */
+  #skilltree .st-node {
+    position: relative;
+    width: 136px;
+    padding: 6px 8px 7px 8px;
+    background: #14181f;
+    border: 2px solid #6a7078;
+    color: #6a7078;
+  }
+  #skilltree .st-node-name {
+    font-size: 13px;
+    font-weight: bold;
+    color: #fff;
+    line-height: 1.2;
+  }
+  /* Sealed tier placeholder — spans the row, names nothing. */
+  #skilltree .st-sealed {
+    width: 100%;
+    border-style: dashed;
+    border-color: #4a5058;
+    text-align: center;
+    color: #6a7078;
+    font-size: 12px;
+    letter-spacing: 3px;
+    padding: 7px 8px;
+  }
+  #skilltree .st-node-foot {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 5px;
+    font-size: 10px;
+    letter-spacing: 1px;
+    min-height: 10px;
+  }
+  #skilltree .st-pips { display: flex; gap: 3px; }
+  #skilltree .st-pip {
+    width: 10px; height: 10px;
+    border: 2px solid currentColor;
+    opacity: 0.35;
+  }
+  #skilltree .st-pip.is-on { background: currentColor; opacity: 1; }
+  #skilltree .st-node-state { margin-left: auto; text-transform: uppercase; }
+  /* State colouring — the border, pips and status text all share it. Kept
+     opaque (pre-blended over the card background) so the connector lines
+     underneath stay hidden behind the card. */
+  #skilltree .st-node.is-maxed   { border-color: #5fd0ff; color: #5fd0ff; background: #1b2a35; }
+  #skilltree .st-node.is-owned   { border-color: #6fd09a; color: #6fd09a; background: #1c292a; }
+  #skilltree .st-node.is-open    { border-color: #ffd166; color: #ffd166; background: #292925; }
+  /* Past the cap — matches the purple the upgrade card uses for a maxed
+     Longer Barrel, so the two screens agree. */
+  #skilltree .st-node.is-over    { border-color: #b06fff; color: #b06fff; background: #241b33; }
+  #skilltree .st-node.is-over .st-node-name { color: #d9bcff; }
+  /* The either/or half that was given up: greyed out, still readable. */
+  #skilltree .st-node.is-pairlocked { border-color: #3f444c; color: #5c6068; background: #101319; }
+  #skilltree .st-node.is-pairlocked .st-node-name { color: #767c85; }
+  #skilltree .st-node.is-pairlocked .st-pip { opacity: 0.25; }
+  #skilltree .st-node.is-blocked { border-color: #ff9d4d; color: #ff9d4d; }
+  #skilltree .st-node.is-locked  { border-color: #4a5058; color: #5c6068; }
+  #skilltree .st-node.is-locked .st-node-name,
+  #skilltree .st-node.is-blocked .st-node-name { color: #c8ccd2; }
+  #skilltree .st-node.is-supply { border-style: dashed; }
+  #skilltree .st-empty {
+    padding: 40px 0;
+    text-align: center;
+    color: #9aa0a8;
+    font-size: 13px;
+  }
+  @media (max-width: 560px) {
+    #skilltree .st-node { width: calc(50% - 5px); }
+    #skilltree .st-title { font-size: 14px; }
+    #skilltree .st-body { padding: 10px 10px 24px 10px; }
+  }
