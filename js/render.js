@@ -144,9 +144,11 @@
       // the two events can't co-occur anyway (no weather on the boss wave).
       const s = (snowKey / 20) * (1 - f);
       skyGrad = ctx.createLinearGradient(0, 0, 0, H);
-      skyGrad.addColorStop(0,   mixHex(mixHex('#7ec7ff', '#6e0f08', f), '#cfe0ee', s * 0.55)); // blue  → blood sky → pale overcast
-      skyGrad.addColorStop(0.6, mixHex(mixHex('#bfe6a8', '#c23a1b', f), '#dfe9f2', s * 0.80)); // haze  → ember band → snow haze
-      skyGrad.addColorStop(1,   mixHex(mixHex('#5fa15a', '#5e2113', f), '#dce6f0', s * 0.86)); // grass → scorched → snowed-in land
+      // Inner blend MUST be mixToHex — mixHex returns rgb(), which can't be
+      // parsed as hex by a second pass (see the note on mixHex).
+      skyGrad.addColorStop(0,   mixHex(mixToHex('#7ec7ff', '#6e0f08', f), '#cfe0ee', s * 0.55)); // blue  → blood sky → pale overcast
+      skyGrad.addColorStop(0.6, mixHex(mixToHex('#bfe6a8', '#c23a1b', f), '#dfe9f2', s * 0.80)); // haze  → ember band → snow haze
+      skyGrad.addColorStop(1,   mixHex(mixToHex('#5fa15a', '#5e2113', f), '#dce6f0', s * 0.86)); // grass → scorched → snowed-in land
     }
     ctx.fillStyle = skyGrad;
     ctx.fillRect(0, 0, W, H);
@@ -237,6 +239,14 @@
 
     // Unlock banner — under the pause / upgrade panels, over the world.
     if (!upgradeMode && !gameOver && !endScreen) drawUnlockNotice();
+
+    // Knowledge Scroll parchment. Sits above the world but under the pause and
+    // game-over panels, so neither ends up half-covered by a hint. When it
+    // isn't on screen its click target has to go with it, or a click would
+    // land on a rect left over from the last time it was drawn — in co-op the
+    // phase stays open while the buddy picks, which is exactly such a frame.
+    if (scrollNote && !upgradeMode && !endScreen) drawScrollNote();
+    else scrollNoteRect = null;
 
     if (paused) {
       drawPauseWindow();
@@ -1414,10 +1424,11 @@
                    : option.id === 'bribeWolves'? '#c9a23a' // gold-brown — Bribe Wolves
                    : option.id === 'metaverse' ? ('hsl(' + Math.floor((Date.now() / 8) % 360) + ',90%,65%)') // shimmering rainbow — Metaverse
                    : option.id === 'goldenChicken' ? '#ffd23f' // yellow — Golden Chicken
+                   : option.id === 'scroll' ? '#e8dcb5'   // parchment — Knowledge Scroll
                    : goldTier               ? '#ffd23f'   // yellow — golden-gun (Rusty Springs max)
                    : isLast                 ? '#5fd0ff'   // blue   — final level
                    :                          '#ffd166';  // gold   — standard
-      const colored = rangeMaxed || option.id === 'cash' || option.id === 'buyHat' || option.id === 'hatPack' || option.id === 'resurrect' || option.id === 'sword' || option.id === 'hunters' || option.id === 'hunterPower' || option.id === 'hunterCaravan' || option.id === 'weaponOil' || option.id === 'advancedOil' || option.id === 'bribeWolves' || option.id === 'metaverse' || option.id === 'goldenChicken' || goldTier;
+      const colored = rangeMaxed || option.id === 'cash' || option.id === 'buyHat' || option.id === 'hatPack' || option.id === 'resurrect' || option.id === 'sword' || option.id === 'hunters' || option.id === 'hunterPower' || option.id === 'hunterCaravan' || option.id === 'weaponOil' || option.id === 'advancedOil' || option.id === 'bribeWolves' || option.id === 'metaverse' || option.id === 'goldenChicken' || option.id === 'scroll' || goldTier;
       // First pick of an exclusive upgrade permanently disables its counterpart
       // — unless the Metaverse has dissolved the locks.
       const locksOut = (!metaverseOn() && count === 0 && LOCKS_OUT[option.id]) || null;

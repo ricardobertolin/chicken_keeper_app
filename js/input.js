@@ -79,6 +79,15 @@
       if (e.key === '3') { selectUpgrade(2); return; }
       return;
     }
+    // Knowledge Scroll parchment is up. Enter and Escape are the only two keys
+    // taken, and neither does anything else mid-wave (Escape would open the
+    // pause menu, which is what the player means by "put the scroll down"), so
+    // nothing is stolen from the keeper's controls.
+    if (scrollNote && (e.key === 'Enter' || e.key === 'Escape')) {
+      e.preventDefault();
+      dismissScrollNote();
+      return;
+    }
     if (e.key === 'Escape') {
       if (paused) { togglePause(); return; }
       if (!gameOver) togglePause();
@@ -211,7 +220,8 @@
     player.skillCheckNeedsRelease = false;
     buildMode = false; player.buildMode = false;
     playReloadJam(); // reuse the "stuck" thunk
-    toast('Your feet got tangled — bust a move!', 1.8);
+    // No toast: the keeper visibly breaks into a jig and the thunk already
+    // sells it. Naming the easter egg out loud took the discovery out of it.
   }
   canvas.addEventListener('mousemove', e => {
     const r = canvas.getBoundingClientRect();
@@ -252,6 +262,13 @@
         pauseTab = pauseTab === 'status' ? 'upgrades' : 'status';
         pauseUpgradeScroll = 0;
       }
+      return;
+    }
+    // Clicking the parchment itself rolls it up. Only hits inside the panel
+    // count: a scroll is read between waves, and taking the player's first
+    // click anywhere on screen would lose the hint to a stray aim-click.
+    if (scrollNote && scrollNoteHit(mouse.x, mouse.y)) {
+      dismissScrollNote();
       return;
     }
     mouse.down = true;
@@ -584,6 +601,13 @@
           }
         }
         return false;
+      }
+      // Tapping the Knowledge Scroll parchment rolls it up — mobile has no
+      // Enter key, so without this the hint could only ever time out.
+      if (scrollNote && scrollNoteHit(cx, cy)) {
+        e.preventDefault();
+        dismissScrollNote();
+        return;
       }
       if (paused && pauseBtnRects) {
         if (hitTest(pauseBtnRects, {

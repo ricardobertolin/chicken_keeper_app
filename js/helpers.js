@@ -5,13 +5,31 @@
   }
   function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
   // Blend two #rrggbb colours. t=0 → a, t=1 → b.
-  function mixHex(a, b, t) {
+  // Blend two #rrggbb colours by t, as [r, g, b].
+  function mixRGB(a, b, t) {
     const pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16);
     const ch = sh => {
       const ca = (pa >> sh) & 255, cb = (pb >> sh) & 255;
       return Math.round(ca + (cb - ca) * t);
     };
-    return 'rgb(' + ch(16) + ',' + ch(8) + ',' + ch(0) + ')';
+    return [ch(16), ch(8), ch(0)];
+  }
+  // Canvas-ready blend. NOTE the return is an `rgb()` string, which every
+  // canvas colour slot accepts but the hex reader above does NOT: nesting
+  // mixHex inside itself parsed "gb(126,199,255)" as hex, got NaN, and
+  // `NaN >> 16` is 0 — so a nested blend came out pure black with no error
+  // raised at all. That is what turned the whole sky black. Use mixToHex for
+  // the inner blend of a two-stage mix.
+  function mixHex(a, b, t) {
+    const c = mixRGB(a, b, t);
+    return 'rgb(' + c[0] + ',' + c[1] + ',' + c[2] + ')';
+  }
+  // Same blend, returning #rrggbb so the result can be fed back in and mixed
+  // again (sky = base → boss red → snow).
+  function mixToHex(a, b, t) {
+    const c = mixRGB(a, b, t);
+    const h = v => v.toString(16).padStart(2, '0');
+    return '#' + h(c[0]) + h(c[1]) + h(c[2]);
   }
   function rand(a, b) { return a + Math.random() * (b - a); }
 
@@ -1056,6 +1074,32 @@
           if (player.ghost) reviveKeeper(player);
           else              reviveKeeper(player2);
         },
+      },
+      {
+        // Knowledge Scroll — the one card in the pool that buys no power at
+        // all. It reads out a piece of farm lore (js/hints.js) on a parchment
+        // overlay, never the same one twice in a session.
+        //
+        // The `bonusUpgradeAvailable` term is what makes it bonus-only: that
+        // flag is set just before the third screen builds its picks and
+        // cleared again in maybeFinishUpgradePhase, so the scroll is invisible
+        // to the two guaranteed picks and can never cost the player real
+        // progression. It also takes no money, which matters — the bonus round
+        // swaps out options that would lock a broke player in.
+        id: 'scroll',
+        title: 'Knowledge Scroll',
+        available() {
+          return wave >= SCROLL_UNLOCK_WAVE
+              && bonusUpgradeAvailable
+              && hintsLeft() > 0;
+        },
+        desc() {
+          const left = hintsLeft();
+          return left === 1
+            ? 'The last secret on the farm — read it'
+            : 'Read a farm secret (' + left + ' of ' + GAME_HINTS.length + ' unread)';
+        },
+        apply() { readKnowledgeScroll(); },
       },
     ];
   }

@@ -14,6 +14,7 @@ The game was one 20k-line index.html. It is now split into classic scripts that 
 | `js/audio.js` | Web Audio synthesized sound effects and music |
 | `js/input.js` | Isometric projection, keyboard/mouse/touch input |
 | `js/state.js` | Game state variables, wave-50 boss state |
+| `js/hints.js` | Knowledge Scroll: the hint table, the no-repeat bag, the parchment overlay |
 | `js/helpers.js` | Shared helper functions |
 | `js/upgrades.js` | Skill tree, "new upgrades unlocked" notice |
 | `js/spawning.js` | Wave/enemy/pickup spawning |
@@ -31,4 +32,8 @@ The game was one 20k-line index.html. It is now split into classic scripts that 
 
 ## Service worker
 
-`sw.js` precaches the js/ files cache-first. Bump `VERSION` in sw.js on every release or returning players keep the old build. HTML is network-first.
+`sw.js` precaches the js/ files cache-first. Bump `VERSION` in sw.js on every release or returning players keep the old build. Keep it in step with the title-screen label (`.menu-version` in index.html). A new js/ file has to be added to the `ASSETS` list too. HTML is network-first.
+
+## Knowledge Scroll hints
+
+`js/hints.js` holds `GAME_HINTS`, the lines the Knowledge Scroll upgrade reads out. Nothing hardcodes how many there are, so lines can be added or cut freely. `HINTS.md` at the repo root is the published copy of that list and is generated from the array, so edit `js/hints.js` and regenerate. `tests/hints.test.mjs` pins the uniqueness, the no-repeat bag, and the bonus-pick/wave-51 gate.

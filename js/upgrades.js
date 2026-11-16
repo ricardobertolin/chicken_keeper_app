@@ -105,6 +105,11 @@
     { id: 'bribeWolves',   tier: 51, max: 1, supply: true, note: 'Pay the pack off for one lighter wave',
       held: () => bribePrice > 300 ? 'next costs $' + bribePrice : null },
     { id: 'metaverse',     tier: 51, max: 1, note: 'Dissolves every either/or lock — buy both sides' },
+    // Only ever offered on the bonus (third) pick, so the note says so — the
+    // tree is where a player goes to work out why they've never seen a card.
+    { id: 'scroll',        tier: 51, max: 1, supply: true,
+      note: 'Farm lore, one scroll at a time — bonus pick only',
+      held: () => hintsRead.size ? hintsRead.size + '/' + GAME_HINTS.length + ' read' : null },
   ];
   const SKILL_TREE_BY_ID = (() => {
     const m = Object.create(null);
@@ -619,9 +624,11 @@
     const personal = makeP2PersonalOptions();
     // Nerd/Jock reloads are a local-keeper-only gag (their apply() pokes P1's
     // ladder and the mini-game only runs for the host keeper), so keep them out
-    // of the guest's pool.
+    // of the guest's pool. Knowledge Scroll is out for the same reason: the
+    // guest's pick is applied ON THE HOST, so its parchment would open on the
+    // host's screen and the guest would spend a pick on nothing.
     return getUpgradePool()
-      .filter(opt => opt.id !== 'nerdReload' && opt.id !== 'jockReload')
+      .filter(opt => opt.id !== 'nerdReload' && opt.id !== 'jockReload' && opt.id !== 'scroll')
       .map(opt => personal[opt.id] || opt);
   }
   function makeP2CashOption() {
@@ -660,6 +667,9 @@
     upgradePicked = true;
     toast(option.id === 'cash' ? 'Picked up $10'
         : option.id === 'chicken' ? 'Bock bock bagawk!'
+        // The scroll puts its own parchment up — a toast over the top of it
+        // would just be the same beat twice.
+        : option.id === 'scroll' ? 'You unroll the scroll…'
         : option.id === 'buyHat' ? ('Bought a hat!  -$' + _hatPricePaid)
         : option.id === 'dog' ? (
             upgradeLevels.dog === 0 ? 'The dogs retire — they head home'

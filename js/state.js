@@ -881,6 +881,13 @@
   let nightOfWolfDebugForce = false; // debug toggle — next startWave becomes a night wave
   // ---------- Wave-50 boss fight ----------
   const BOSS_WAVE = 50;
+  // Knowledge Scroll (js/hints.js): endless-waves only, and only ever offered
+  // on the third (bonus) pick screen. By wave 51 the run has nothing left to
+  // teach the hard way, and a card that spends a pick on lore rather than
+  // power belongs on the pick the player was handed for free. Declared here
+  // rather than up with the other pick-screen state because it reads
+  // BOSS_WAVE, which is initialised on the line above.
+  const SCROLL_UNLOCK_WAVE = BOSS_WAVE + 1;
   const BOSS_INTRO_DELAY = 2.6;   // seconds of dusk-shift + shaking before it appears
   const BOSS_HP = 2000;           // HP per side (it's beaten 4 times) — cut by a third from 3000
   const BOSS_MAX_DPS = 65;        // cap on damage it can take per second (anti-melt, like player i-frames)

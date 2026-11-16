@@ -85,7 +85,7 @@
     // An explicit opt.unlockWave wins if one is ever added. Upgrades with no
     // wave gate fall into the "Start" tier.
     const NAMED_UNLOCK_WAVES = {
-      FAT_UNLOCK_WAVE, FARM_UNLOCK_WAVE, MINE_UNLOCK_WAVE,
+      FAT_UNLOCK_WAVE, FARM_UNLOCK_WAVE, MINE_UNLOCK_WAVE, SCROLL_UNLOCK_WAVE,
     };
     function upgradeUnlockWave(opt) {
       if (typeof opt.unlockWave === 'number') return opt.unlockWave;
@@ -106,7 +106,10 @@
     // button (not shown here); Wolf's Blade lives in Spawns & Tools.
     const TOOL_UPGRADE_IDS = new Set(['resurrect', 'sword', 'nerdReload', 'jockReload']);
     // Repeatable / single-use buys get their own Consumables row.
-    const CONSUMABLE_UPGRADE_IDS = new Set(['buyHat', 'hatPack', 'weaponOil', 'advancedOil', 'hunters', 'hunterPower', 'hunterCaravan', 'bribeWolves']);
+    // 'scroll' lives here rather than in the tier list: it's a repeatable read,
+    // and its available() is bonus-pick-gated, so a tier button would be the
+    // only way to ever test it outside a bonus screen.
+    const CONSUMABLE_UPGRADE_IDS = new Set(['buyHat', 'hatPack', 'weaponOil', 'advancedOil', 'hunters', 'hunterPower', 'hunterCaravan', 'bribeWolves', 'scroll']);
 
     function makeUpgradeButton(opt) {
       const btn = document.createElement('button');
@@ -522,6 +525,13 @@
             playHuntersArrive();
             toast('Hunter camp(s) relocated', 0.8);
           }
+          return;
+        }
+        if (id === 'scroll') {
+          // Handled here so Fast mode's 5× loop doesn't burn five hints out of
+          // the bag to show one parchment. Bypasses available(), which is
+          // bonus-pick gated — reaching it any other way isn't possible.
+          readKnowledgeScroll();
           return;
         }
         // Helper: apply an upgrade from a given pool to the given level object.

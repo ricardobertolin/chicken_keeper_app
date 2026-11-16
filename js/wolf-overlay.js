@@ -1361,6 +1361,10 @@
     }
     comboKills = 0; comboT = 0; comboFloat = null;
     ghostWolfChance = 0;
+    // A scroll still being read when the run ends would hang over the fresh
+    // farm. The read-set itself is deliberately NOT cleared — "no repeats" is
+    // scoped to the page session, so a new run keeps handing out new hints.
+    scrollNote = null; scrollNoteRect = null;
     coops.length = 0;
     chickens.length = 0;
     bossBurstChickens.length = 0;

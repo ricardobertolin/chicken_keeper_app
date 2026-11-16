@@ -20,6 +20,11 @@
         updateRocketLaunch(dt); // post-boss restart cutscene (ticks even when frozen)
         updateFade(dt);         // black screen wipe — ticks even when frozen
       }
+      // Knowledge Scroll parchment. Ticks on both roles (it's local UI on
+      // whoever read it) and outside the frozen-sim guard, or it could never
+      // time out while the world is held. Held over a pause, though: pausing
+      // to finish reading a hint shouldn't be what loses it.
+      if (!paused) updateScrollNote(dt);
       // Refresh player1's weapon-mirror on the player object so the keeper-draw
       // helpers can read everything from one place.
       syncP1Weapon();
@@ -542,8 +547,11 @@
 
       // The timer is paused while a wave is active, before the first coop is placed,
       // or when debug wave auto-start is paused. Also suspended during the
-      // menu demo so the ambient backdrop never spawns wolves.
-      if (!inMenu && !waveActive && !waveAutoStartPaused && (wave > 0 || coops.length > 0)) {
+      // menu demo so the ambient backdrop never spawns wolves, and while a
+      // Knowledge Scroll is open so the hint isn't buried under the next wave
+      // starting (the parchment caps its own lifetime, so this can't stall).
+      if (!inMenu && !waveActive && !waveAutoStartPaused && !scrollNoteHoldsWave()
+          && (wave > 0 || coops.length > 0)) {
         waveTimer -= dt;
         // Fast mode jumps 5 waves per clear so the run rockets forward (the wave
         // you just cleared still paid its normal 5× payout via addSharedMoney).
