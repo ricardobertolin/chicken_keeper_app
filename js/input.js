@@ -27,22 +27,56 @@
   // ---------- Input ----------
   const keys = {};
   const mouse = { x: 0, y: 0, down: false };
-  // Rolling buffer of the last few letters typed — matched against
-  // DEBUG_PHRASE to reveal the debug panel. Sticks around once unlocked.
+  // Rolling buffer of the last few characters typed, matched against every
+  // cheat phrase. DEBUG_PHRASE reveals the panel; robot1/2/3 summon a robot
+  // ally at that mark.
+  //
+  // DIGITS COUNT. The original buffer flushed on anything that wasn't a letter,
+  // which no phrase ending in a number could ever get past.
   let debugUnlocked = false;
   let debugTypedBuffer = '';
+  const ROBOT_PHRASES = { robot1: 1, robot2: 2, robot3: 3 };
+  // Buffer only needs to be as long as the longest phrase we match.
+  const TYPED_BUFFER_LEN = Math.max(
+    DEBUG_PHRASE.length,
+    ...Object.keys(ROBOT_PHRASES).map(s => s.length)
+  );
   function trackDebugPhrase(key) {
     if (!DEBUG) return;
-    // Only letters count; everything else flushes the buffer.
-    if (!/^[a-zA-Z]$/.test(key)) { debugTypedBuffer = ''; return; }
-    debugTypedBuffer = (debugTypedBuffer + key.toLowerCase()).slice(-DEBUG_PHRASE.length);
-    if (debugTypedBuffer === DEBUG_PHRASE) {
+    // Letters and digits accumulate; anything else (space, Enter, a movement
+    // key) flushes, so a phrase has to be typed as one run of characters.
+    if (!/^[a-zA-Z0-9]$/.test(key)) { debugTypedBuffer = ''; return; }
+    debugTypedBuffer = (debugTypedBuffer + key.toLowerCase()).slice(-TYPED_BUFFER_LEN);
+    if (debugTypedBuffer.endsWith(DEBUG_PHRASE)) {
       debugTypedBuffer = '';            // consume so it takes a fresh re-type to toggle again
       debugUnlocked = !debugUnlocked;   // typing the phrase again hides it
       const dbg = document.getElementById('debug');
       if (dbg) dbg.style.display = debugUnlocked ? '' : 'none';
       toast(debugUnlocked ? 'Debug panel unlocked' : 'Debug panel hidden', 1.4);
+      return;
     }
+    for (const phrase in ROBOT_PHRASES) {
+      if (!debugTypedBuffer.endsWith(phrase)) continue;
+      debugTypedBuffer = '';
+      requestRobot(ROBOT_PHRASES[phrase]);
+      return;
+    }
+  }
+  // Summon a robot at mark `mk`. The world is the host's, so a guest asks for
+  // one over the existing debug-action channel and gets it back in the next
+  // snapshot — which is what makes the phrase work in multiplayer.
+  function requestRobot(mk) {
+    if (inMenu || gameOver || !gameStarted) return;
+    if (multiplayer && !isHost) {
+      if (conn && conn.open) {
+        try { conn.send({ type: 'debug-action', action: 'spawn-robot-' + mk }); } catch (_) {}
+        toast('Requested an MK-' + mk + ' from the host…', 1.4);
+      }
+      return;
+    }
+    const r = spawnRobot(mk);
+    toast(r ? 'MK-' + mk + ' online' : 'Robot bay full (' + ROBOT_MAX_ACTIVE + ' active)', 1.6);
+    if (r) toastGuest('An MK-' + mk + ' joined the farm', 1.6);
   }
   window.addEventListener('keydown', e => {
     // Title/lobby menu is up — let inputs (join code) work, but no game keys.

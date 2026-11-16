@@ -167,6 +167,9 @@
       ['spawn-ghostwolf',  'Spawn ghost wolf',     'Spawn a ghost wolf (vanishes silently when shot; chance grows with player deaths)'],
       ['spawn-parachute', 'Spawn parachute wolf',  'Drop a single wolf in by parachute'],
       ['spawn-soldier',   'Spawn soldier chicken', 'Spawn a helmeted TNT chicken that charges the nearest wolf and detonates'],
+      ['spawn-robot-1',   'Robot ally MK-1',       'Summon a rusted MK-1 robot ally (dumbest aim, closest-target AI) — same as typing robot1'],
+      ['spawn-robot-2',   'Robot ally MK-2',       'Summon a gray MK-2 robot ally (better aim, weighs up threats) — same as typing robot2'],
+      ['spawn-robot-3',   'Robot ally MK-3',       'Summon a black MK-3 robot ally (sharpest aim, reads the whole board) — same as typing robot3'],
       ['spawn-crate',     'Drop supply crate',     'Airdrop a wartime supply crate — shoot it open for ordnance, hats or live cargo'],
       ['spawn-moonwalk',  'Spawn moonwalk wolf',   'Spawn the rare wolf that walks backward (faces away from its heading)'],
       ['spawn-brute',     'Spawn brute wolf',      'Spawn the rare brute wolf (10x health, angry brow)'],
@@ -280,6 +283,13 @@
         spawnGhostWolf();
       } else if (action === 'spawn-parachute') {
         spawnParachuteWolf();
+      } else if (action === 'spawn-robot-1' || action === 'spawn-robot-2' || action === 'spawn-robot-3') {
+        // Also the landing point for a GUEST's typed robot1/2/3 — net.js turns a
+        // forwarded debug-action into a synthetic click on this very handler.
+        const mk = parseInt(action.slice(-1), 10);
+        const rb = spawnRobot(mk);
+        toast(rb ? 'MK-' + mk + ' online' : 'Robot bay full (' + ROBOT_MAX_ACTIVE + ' active)', 1.6);
+        if (rb) toastGuest('An MK-' + mk + ' joined the farm', 1.6);
       } else if (action === 'spawn-soldier') {
         // Bypasses the crate entirely so the rush-and-detonate behaviour can be
         // watched without waiting on a drop and a payload roll.

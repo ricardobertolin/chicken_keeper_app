@@ -745,6 +745,9 @@
     // front of the coop body without leaking over neighbouring tiles.
     for (const r of rooftoppers) if (r.alive)
       items.push({ depth: r.x + r.y + 0.05, draw: () => drawRooftopper(r) });
+    // Robot allies sort in with the keepers — they're the same size and stand
+    // on the same ground.
+    for (const r of robots) items.push({ depth: r.x + r.y, draw: () => drawRobot(r) });
     items.push({ depth: player.x + player.y, draw: () => drawPlayer() });
     if (player2.active) {
       items.push({ depth: player2.x + player2.y, draw: () => drawPlayer2() });
@@ -3912,6 +3915,163 @@
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 12px "Lucida Console", Consolas, monospace';
       ctx.fillText('!', cx - 3, cy - 22);
+    }
+  }
+
+  // A robot ally. Deliberately built on the KEEPER's proportions — same 0.9
+  // scale, same body box at cy-25 and head at cy-30 — so it reads as "another
+  // player 2" at a glance and only resolves into a machine up close: boxed
+  // head, antenna, plated torso, piston legs. The chassis colour is the mark
+  // (MK-1 salvage rust, MK-2 factory gray, MK-3 blacked out) and the eyes are
+  // the same icy blue pulse a possessed/turncoat wolf has.
+  function drawRobot(r) {
+    const pal = ROBOT_PALETTE[r.mk] || ROBOT_PALETTE[1];
+    const p = worldToScreen(r.x, r.y);
+    const cx = p.x;
+    const cy = p.y + TILE_H / 2;
+    drawShadow(r.x, r.y, 0.3);
+    const hurt = (r.hurtT || 0) > 0;
+    const plate = hurt ? '#ff6a5a' : pal.plate;
+    ctx.save();
+    const PLAYER_SCALE = 0.9; // matches drawPlayer2 so the two read as a pair
+    ctx.translate(cx, cy);
+    ctx.scale(PLAYER_SCALE, PLAYER_SCALE);
+    ctx.translate(-cx, -cy);
+    // Topple on destruction — the same fall the keepers and hunters use.
+    if (r.dying) {
+      const f = Math.min(1, (r.downT || 0) / ROBOT_FALL_DUR);
+      const ease = 1 - (1 - f) * (1 - f);
+      ctx.translate(cx, cy - 2);
+      ctx.rotate(ease * 1.48);
+      ctx.translate(-cx, -(cy - 2));
+    }
+    // Spin-up wobble while booting, then a walk bob.
+    const booting = (r.bootT || 0) > 0;
+    const bob = booting ? Math.sin((r.walkT || 0) * 6) * 0.8
+                        : Math.sin((r.walkT || 0) * 0.5) * 0.7;
+    if (r.facingLeft) {
+      ctx.translate(cx, 0);
+      ctx.scale(-1, 1);
+      ctx.translate(-cx, 0);
+    }
+    const bodyY = cy - 25 + bob;
+    // Piston legs — two struts with a knee block, swinging on the walk clock.
+    const leg = Math.sin((r.walkT || 0) * 0.5) * 2.6;
+    ctx.strokeStyle = pal.shade;
+    ctx.lineWidth = 3.2;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(cx - 3, cy - 9);
+    ctx.lineTo(cx - 3 - leg * 0.5, cy - 2);
+    ctx.moveTo(cx + 3, cy - 9);
+    ctx.lineTo(cx + 3 + leg * 0.5, cy - 2);
+    ctx.stroke();
+    // Feet pads.
+    ctx.fillStyle = pal.shade;
+    ctx.fillRect(cx - 6 - leg * 0.5, cy - 2.5, 6, 2.4);
+    ctx.fillRect(cx + 0.5 + leg * 0.5, cy - 2.5, 6, 2.4);
+    // Torso — a plated box with a lighter chest panel and two bolts.
+    ctx.fillStyle = plate;
+    roundedRect(cx - 7, bodyY, 14, 17, 2);
+    ctx.fillStyle = hurt ? '#ffb0a0' : pal.trim;
+    ctx.fillRect(cx - 4.5, bodyY + 3, 9, 7);
+    ctx.fillStyle = pal.shade;
+    ctx.fillRect(cx - 4.5, bodyY + 11, 9, 2);
+    ctx.fillStyle = pal.bolt;
+    ctx.fillRect(cx - 6, bodyY + 1.5, 1.6, 1.6);
+    ctx.fillRect(cx + 4.4, bodyY + 1.5, 1.6, 1.6);
+    // Mark pips stamped on the chest — one bar per mark, so you can tell an
+    // MK-2 from an MK-3 even in the dark where the chassis colour is lost.
+    ctx.fillStyle = pal.bolt;
+    for (let i = 0; i < r.mk; i++) ctx.fillRect(cx - 3.5 + i * 2.6, bodyY + 5, 1.6, 3);
+    // Head — a boxed skull with a visor slot rather than a face.
+    const headY = cy - 30 + bob;
+    ctx.fillStyle = plate;
+    roundedRect(cx - 5.5, headY - 5, 11, 10, 2);
+    ctx.fillStyle = pal.shade;
+    ctx.fillRect(cx - 4.5, headY - 2.4, 9, 4.4); // visor recess
+    // Antenna with a tip light.
+    ctx.strokeStyle = pal.trim;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx + 3.5, headY - 5);
+    ctx.lineTo(cx + 5.5, headY - 11);
+    ctx.stroke();
+    // Eyes — the icy blue pulse a turncoat wolf has, so a possessed machine
+    // reads as the same kind of thing. Dimmer while it's still booting.
+    const pulse = 0.65 + 0.35 * Math.sin(Date.now() * 0.006 + (r.x - r.y) * 0.4);
+    const eg = Math.round(120 + 70 * pulse);
+    const eb = Math.round(180 + 60 * pulse);
+    const eye = 'rgb(40,' + eg + ',' + eb + ')';
+    ctx.save();
+    if (booting) ctx.globalAlpha = 0.35 + 0.4 * Math.abs(Math.sin((r.walkT || 0) * 4));
+    // Bloom first so the lenses sit inside a glow.
+    ctx.globalCompositeOperation = 'lighter';
+    const g = ctx.createRadialGradient(cx, headY, 0, cx, headY, 9);
+    g.addColorStop(0, 'rgba(90,200,255,0.55)');
+    g.addColorStop(1, 'rgba(60,170,255,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(cx - 9, headY - 9, 18, 18);
+    ctx.restore();
+    ctx.save();
+    if (booting) ctx.globalAlpha = 0.45 + 0.4 * Math.abs(Math.sin((r.walkT || 0) * 4));
+    ctx.fillStyle = eye;
+    ctx.fillRect(cx - 3.4, headY - 1.4, 2.6, 2.4);
+    ctx.fillRect(cx + 1.0, headY - 1.4, 2.6, 2.4);
+    ctx.fillStyle = pal.bolt;
+    ctx.fillRect(cx + 5, headY - 12.4, 1.8, 1.8); // antenna tip light
+    ctx.restore();
+    // Arm cannon, aimed along r.dir. Unmirrored locally so the world-space
+    // angle still applies when the chassis is facing left (same treatment the
+    // rooftopper's rifle gets).
+    ctx.save();
+    if (r.facingLeft) {
+      ctx.translate(cx, 0);
+      ctx.scale(-1, 1);
+      ctx.translate(-cx, 0);
+    }
+    const shoulderY = bodyY + 6;
+    ctx.translate(cx, shoulderY);
+    ctx.rotate(r.dir || 0);
+    ctx.fillStyle = pal.shade;
+    ctx.fillRect(-3, -2.6, 7, 5.2);          // shoulder housing
+    ctx.fillStyle = hurt ? '#ff8a7a' : pal.trim;
+    ctx.fillRect(3, -1.8, 13, 3.6);          // barrel
+    ctx.fillStyle = pal.shade;
+    ctx.fillRect(12, -2.6, 2.4, 5.2);        // muzzle brake
+    if ((r.muzzleT || 0) > 0) {
+      ctx.fillStyle = 'rgba(126,203,255,0.85)';
+      ctx.beginPath();
+      ctx.arc(17, 0, 3.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+    ctx.restore();
+    // Status tag above the head: the mark, a plating bar, and the training bar
+    // once it has learned anything. Drawn outside the mirror/scale transform so
+    // the text is never flipped or stretched.
+    if (!r.dying) {
+      const tagY = cy - 42;
+      ctx.save();
+      ctx.font = 'bold 8px "Lucida Console", Consolas, monospace';
+      ctx.textAlign = 'center';
+      ctx.fillStyle = 'rgba(126,203,255,0.95)';
+      ctx.fillText('MK-' + r.mk, cx, tagY);
+      // Plating bar.
+      const bw = 18, frac = Math.max(0, r.hp) / (r.maxHp || 1);
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(cx - bw / 2, tagY + 2, bw, 2.4);
+      ctx.fillStyle = frac > 0.5 ? '#6fd3ff' : frac > 0.25 ? '#ffd166' : '#ff6a5a';
+      ctx.fillRect(cx - bw / 2, tagY + 2, bw * frac, 2.4);
+      // Training bar — only once there is something to show.
+      const sk = robotSkill(r.mk);
+      if (sk > 0) {
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(cx - bw / 2, tagY + 5.4, bw, 1.8);
+        ctx.fillStyle = '#9dffbe';
+        ctx.fillRect(cx - bw / 2, tagY + 5.4, bw * sk, 1.8);
+      }
+      ctx.restore();
     }
   }
 

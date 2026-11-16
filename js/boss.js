@@ -2398,6 +2398,10 @@
           const hunterKill = p.shooter === 'hunter';
           const shooter = p.shooter === 2 ? player2 : player;
           if (!hunterKill) shooter.kills = (shooter.kills || 0) + 1;
+          // A robot's kill still credits the keeper who built it, and the
+          // robot learns from it — that's the "training" in MK-n (see
+          // robotCreditKill / robotTraining).
+          if (p.shooter === 'robot') robotCreditKill(p.robotRef);
           onWolfKilled(w, shooter);
           // Late-game wolves sometimes fly apart instead of leaving a body.
       if (!w.thing && !tryWolfDisassemble(w)) corpses.push({ x: w.x, y: w.y, kind: w.fox ? 'fox' : 'wolf', t: 5 });
@@ -2431,7 +2435,11 @@
     // allies. Wolf and fox rounds still clip them either way. (Hunters have no
     // hat stack, so this only ever costs them HP.)
     const keeperShot = p.shooter === 1 || p.shooter === 2;
-    const canHitHunters = !keeperShot || gameOpts.friendlyFire;
+    // A robot round never touches the crew. The whole premise of the thing is
+    // that it knows friend from foe, and an ally that mows down your hunters
+    // would be a liability rather than a feature.
+    const robotShot = p.shooter === 'robot';
+    const canHitHunters = (!keeperShot || gameOpts.friendlyFire) && !robotShot;
     if (p.shooter !== 'hunter' && !p.homing && canHitHunters && hunters.length) {
       for (const h of hunters) {
         if (!h.alive) continue;
@@ -2478,6 +2486,18 @@
         applyWolfBulletHit(player2);
         return false;
       }
+      // Robot allies are a legitimate target for the pack's gunners — without
+      // this a ranged wolf would shoot straight through the chassis and the
+      // only thing that could ever destroy a robot would be being swarmed.
+      for (const r of robots) {
+        if (!r.alive) continue;
+        if (dist2(p.x, p.y, r.x, r.y) < 0.22) {
+          r.hp -= ROBOT_BULLET_DMG;
+          r.hurtT = 0.16;
+          if (r.hp <= 0) destroyRobot(r);
+          return false;
+        }
+      }
       for (const c of chickens) {
         if (!c.alive) continue;
         if (c.savedT > 0) continue; // grace window after a wolf-snatch rescue
@@ -2491,6 +2511,10 @@
       }
       return true;
     }
+    // Robot rounds stop here: they've already had their shot at the wolves and
+    // must not reach a keeper, a hunter or the flock. Returning true keeps the
+    // pellet alive so it flies on through and expires naturally.
+    if (robotShot) return true;
     // Friendly fire — pellets can knock hats off the OTHER keeper.
     if (gameOpts.friendlyFire && player2.active) {
       if (p.shooter !== 1 && !player.ghost &&

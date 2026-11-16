@@ -1,6 +1,43 @@
   // ---------- Update ----------
   const TARGET_FRAME_MS = 16; // cap at ~62fps; skips render on 90/120Hz screens
   let last = performance.now();
+
+  // A frame error used to be logged and nothing more. render() is the LAST
+  // call in the frame, so anything that throws there leaves update() having
+  // already run: the sim keeps advancing and sounds keep playing while the
+  // canvas is never painted. The result looks like the game froze with audio
+  // still going, repeats sixty times a second, and says nothing on screen —
+  // which is exactly as undiagnosable as it sounds.
+  //
+  // So: surface the first one, in the DOM (not the canvas — the canvas may be
+  // the thing that's broken), and leave it up. A ReferenceError almost always
+  // means mismatched script versions, which locally means a stale cache, so
+  // that case gets told what to do about it.
+  let frameErrorShown = false;
+  function showFrameError(err) {
+    try {
+      const box = document.createElement('div');
+      box.id = 'frame-error';
+      box.style.cssText = [
+        'position:fixed', 'left:50%', 'top:50%', 'transform:translate(-50%,-50%)',
+        'z-index:99999', 'max-width:min(560px,90vw)', 'background:rgba(20,8,8,0.96)',
+        'border:3px solid #ff5a5a', 'color:#ffd9d9', 'padding:18px 22px',
+        'font:13px/1.5 "Lucida Console",Consolas,monospace', 'white-space:pre-wrap',
+      ].join(';');
+      const stale = err instanceof ReferenceError;
+      box.textContent =
+        'The frame loop threw — the world is still running but nothing can draw.\n\n'
+        + (err && err.message ? err.message : String(err)) + '\n\n'
+        + (stale
+            ? 'A ReferenceError here means the loaded scripts disagree about what '
+              + 'exists. Testing locally that is almost always a stale cache: '
+              + 'hard-refresh with Ctrl+Shift+R.'
+            : 'Full stack is in the console (F12).');
+      document.body.appendChild(box);
+    } catch (_) {
+      /* If even this fails the console log below is all we have. */
+    }
+  }
   function loop(now) {
     if (now - last < TARGET_FRAME_MS) { requestAnimationFrame(loop); return; }
     const dt = Math.min(0.05, (now - last) / 1000);
@@ -47,6 +84,9 @@
       render();
     } catch (err) {
       console.error('[loop] frame error — skipped, loop kept alive:', err);
+      // Once only: a render error repeats every frame, and sixty identical
+      // panels a second would be worse than the silence it replaces.
+      if (!frameErrorShown) { frameErrorShown = true; showFrameError(err); }
     }
     requestAnimationFrame(loop);
   }
@@ -502,6 +542,9 @@
       radarScan(dt);
       for (const d of dogs) updateDog(d, dt);
       for (const h of hunters) updateHunter(h, dt);
+      // Robot allies — host-authoritative, same as the hunter crew.
+      for (const r of robots) updateRobot(r, dt);
+      tickRobotWrecks();
       tickHunterDeaths(dt);
       for (const r of rooftoppers) updateRooftopper(r, dt);
       // Fireplace smoke: an active camp puffs frequently, the extinct fire pit

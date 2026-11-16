@@ -79,7 +79,11 @@
         lit = (l2.softBullet >= 5) || (l2.hardBullet >= 5);
       }
       if (!lit) continue;
-      const color = isWolf ? [255, 80, 60] : [255, 230, 160];
+      // A robot round throws the same icy blue its muzzle and eyes do, so an
+      // MK firing in the dark reads as the machine and not as a keeper.
+      const color = isWolf ? [255, 80, 60]
+                  : p.shooter === 'robot' ? [120, 200, 255]
+                  : [255, 230, 160];
       lights.push({ x: p.x, y: p.y, r: 28, color });
     }
     for (const b of blasts) {
@@ -1369,6 +1373,10 @@
     // pending war-footing notice.
     supplyCrates.length = 0;
     wartimeNoticeT = 0;
+    // Robot allies go with the run, and so does what they learned — training
+    // is per-run progress, not a permanent unlock.
+    robots.length = 0;
+    for (const k in robotTraining) robotTraining[k] = 0;
     coops.length = 0;
     chickens.length = 0;
     bossBurstChickens.length = 0;

@@ -689,6 +689,264 @@
     c.bob += dt * ((c.flutterT || 0) > 0 ? 22 : Math.hypot(c.vx, c.vy) > 0.1 ? 12 : 2);
   }
 
+  // ---- Robot allies (MK-1 / MK-2 / MK-3) ----------------------------------
+  // Summoned by typing robot1/2/3 or from the debug panel. Host-authoritative:
+  // the guest sees them through the snapshot and never ticks them, same as the
+  // hunter crew.
+  //
+  // The deal is deliberately the inverse of the hunter wolf — that one is a
+  // wolf wearing a keeper's silhouette, this is a keeper silhouette on the
+  // player's side. It fights and does nothing else: no building, no pickups,
+  // no upgrade picks, no coop interaction.
+  function spawnRobot(mk, atX, atY) {
+    const m = clamp(Math.round(mk) || 1, 1, ROBOT_MAX_MK);
+    if (robots.filter(r => r.alive).length >= ROBOT_MAX_ACTIVE) return null;
+    // Materialises a step off the keeper's shoulder by default.
+    const bx = atX !== undefined ? atX : player.x + rand(-1.4, 1.4);
+    const by = atY !== undefined ? atY : player.y + rand(-1.4, 1.4);
+    const r = {
+      mk: m,
+      x: clamp(bx, -HALF_MAP + 2, HALF_MAP - 2),
+      y: clamp(by, -HALF_MAP + 2, HALF_MAP - 2),
+      vx: 0, vy: 0,
+      hp: ROBOT_HP[m], maxHp: ROBOT_HP[m],
+      alive: true, dying: false, downT: 0,
+      facingLeft: false, walkT: 0, dir: 0,
+      hurtT: 0, attackT: rand(0.2, 0.6), muzzleT: 0,
+      bootT: ROBOT_BOOT_T,       // spin-up before it starts acting
+      thinkT: 0, roamTX: bx, roamTY: by,
+      kills: 0,
+    };
+    robots.push(r);
+    playRobotBoot();
+    return r;
+  }
+
+  // What this robot should be shooting. The mark decides how much thought goes
+  // into the choice: ROBOT_SMART 0 takes whatever is nearest, and the higher
+  // marks score the field so they go for the wolf that is actually about to
+  // cost the player something.
+  function robotPickTarget(r) {
+    const smart = ROBOT_SMART[r.mk];
+    const reach = ROBOT_RANGE[r.mk] + 6; // it will walk a little way to engage
+    let best = null, bestScore = -Infinity;
+    for (const w of wolves) {
+      if (!w.alive || w.parachuting) continue;
+      if (w.invulnT > 0) continue;
+      const d2w = dist2(r.x, r.y, w.x, w.y);
+      if (d2w > reach * reach) continue;
+      if (smart === 0) {
+        // MK-1: closest thing that moves. No judgement at all.
+        if (-d2w > bestScore) { bestScore = -d2w; best = w; }
+        continue;
+      }
+      // Distance is the baseline, then the threats get weighted up.
+      let score = -Math.sqrt(d2w);
+      if (w.carrying) score += 14;              // making off with a chicken
+      if (w.fox) score += 6;                    // foxes are quick and expensive
+      if (smart >= 2) {
+        // MK-3 also reads the board: wolves bearing down on the flock or on a
+        // keeper outrank a wolf that is merely nearby, and it leaves the boss
+        // alone while anything else is still standing (its pellets barely
+        // dent FANGUS and the pack is what actually kills you).
+        const nc = nearestChickenTo(w.x, w.y);
+        if (nc && dist2(nc.x, nc.y, w.x, w.y) < 9) score += 8;
+        const nk = nearestKeeper(w.x, w.y);
+        if (nk && dist2(nk.x, nk.y, w.x, w.y) < 9) score += 5;
+        if (w.boss) score -= 20;
+        if (w.hp !== undefined && w.maxHp) score += (1 - w.hp / w.maxHp) * 4; // finish the wounded
+      }
+      if (score > bestScore) { bestScore = score; best = w; }
+    }
+    return best;
+  }
+  // Nearest live chicken to a point — used by the MK-3's threat scoring.
+  function nearestChickenTo(x, y) {
+    let best = null, bd = Infinity;
+    for (const c of chickens) {
+      if (!c.alive) continue;
+      const d = dist2(c.x, c.y, x, y);
+      if (d < bd) { bd = d; best = c; }
+    }
+    return best;
+  }
+
+  function updateRobot(r, dt) {
+    if (!r.alive) {
+      // Scrap-fall: a short topple before the chassis is spliced out.
+      if (r.dying) {
+        r.downT = (r.downT || 0) + dt;
+        if (r.downT >= ROBOT_FALL_DUR) r.dead = true;
+      }
+      return;
+    }
+    if (r.hurtT > 0) r.hurtT = Math.max(0, r.hurtT - dt);
+    if (r.muzzleT > 0) r.muzzleT = Math.max(0, r.muzzleT - dt);
+    if (r.attackT > 0) r.attackT -= dt;
+    // Spin-up: it stands there humming for a beat after being summoned, which
+    // also stops a fresh robot from instantly volleying into a wolf's face.
+    if (r.bootT > 0) {
+      r.bootT -= dt;
+      r.walkT += dt * 2;
+      return;
+    }
+    // Wolves mauling the chassis. Handled HERE rather than by teaching the
+    // pack a new target type: wolf AI is dense enough already, and a robot
+    // that merely gets chewed on while it stands in the scrum behaves close
+    // enough to the real thing without touching any of it.
+    let mauled = 0;
+    for (const w of wolves) {
+      if (!w.alive || w.parachuting) continue;
+      if (dist2(w.x, w.y, r.x, r.y) < ROBOT_HURT_R * ROBOT_HURT_R) mauled++;
+    }
+    if (mauled > 0) {
+      r.hp -= ROBOT_HURT_DPS * mauled * dt;
+      r.hurtT = 0.12;
+      if (r.hp <= 0) { destroyRobot(r); return; }
+    }
+
+    const target = robotPickTarget(r);
+    const spd = ROBOT_SPEED[r.mk];
+    if (target) {
+      const dx = target.x - r.x, dy = target.y - r.y;
+      const m = Math.hypot(dx, dy) || 1;
+      r.dir = Math.atan2(dy, dx);
+      r.facingLeft = (dx - dy) < 0;
+      const stand = ROBOT_STANDOFF[r.mk];
+      // Hold a shooter's distance: close in when out of range, back off when
+      // something gets inside the standoff. The higher marks keep their
+      // spacing more tightly, which is most of why they survive longer.
+      let mvx = 0, mvy = 0;
+      if (m > stand + 0.6) { mvx = (dx / m) * spd; mvy = (dy / m) * spd; }
+      else if (m < stand - 0.3) { mvx = -(dx / m) * spd; mvy = -(dy / m) * spd; }
+      else if (ROBOT_SMART[r.mk] >= 1) {
+        // Strafe around the target instead of standing still — a stationary
+        // robot gets surrounded.
+        mvx = -(dy / m) * spd * 0.55;
+        mvy = (dx / m) * spd * 0.55;
+      }
+      r.vx = mvx; r.vy = mvy;
+      robotStep(r, dt);
+      if (r.attackT <= 0 && m <= ROBOT_RANGE[r.mk]) {
+        r.attackT = robotFireCd(r);
+        robotFire(r, target);
+      }
+      return;
+    }
+    // Nothing to shoot: patrol the flock. It parks near the chickens it is
+    // meant to be protecting rather than wandering off to the treeline.
+    r.thinkT -= dt;
+    if (r.thinkT <= 0) {
+      r.thinkT = rand(ROBOT_THINK_MIN, ROBOT_THINK_MAX);
+      const anchor = nearestChickenTo(r.x, r.y)
+        || (coops.length ? coops[Math.floor(Math.random() * coops.length)] : player);
+      r.roamTX = clamp(anchor.x + rand(-3, 3), -HALF_MAP + 2, HALF_MAP - 2);
+      r.roamTY = clamp(anchor.y + rand(-3, 3), -HALF_MAP + 2, HALF_MAP - 2);
+    }
+    const rdx = r.roamTX - r.x, rdy = r.roamTY - r.y;
+    const rm = Math.hypot(rdx, rdy) || 1;
+    if (rm > 0.4) {
+      r.vx = (rdx / rm) * spd * 0.5;
+      r.vy = (rdy / rm) * spd * 0.5;
+      r.facingLeft = (rdx - rdy) < 0;
+      robotStep(r, dt);
+    } else {
+      r.vx = 0; r.vy = 0;
+      r.walkT += dt * 2; // idle hum
+    }
+  }
+  // Movement step. Robots respect fences the way wolves do — they're too big
+  // and too dumb to climb, and letting them phase through walls would make a
+  // walled pen pointless.
+  function robotStep(r, dt) {
+    moveWithFences(r, dt);
+    r.x = clamp(r.x, -HALF_MAP + 1, HALF_MAP - 1);
+    r.y = clamp(r.y, -HALF_MAP + 1, HALF_MAP - 1);
+    r.walkT += dt * 11;
+  }
+
+  // One volley. Pellets carry shooter 'robot', which updatePellet treats as an
+  // ALLY round: it damages wolves, and passes harmlessly through chickens,
+  // hunters and keepers (a robot has target discrimination — that's the whole
+  // point of the thing).
+  function robotFire(r, target) {
+    const ang = Math.atan2(target.y - r.y, target.x - r.x);
+    const err = robotAimErr(r);
+    const count = ROBOT_PELLETS[r.mk];
+    const spread = ROBOT_SPREAD[r.mk];
+    const dmg = ROBOT_DMG[r.mk];
+    // One wobble applied to the whole cone, so a bad roll misses as a volley
+    // rather than averaging itself out across the pellets.
+    const aim = ang + rand(-err, err);
+    for (let i = 0; i < count; i++) {
+      const t = count > 1 ? (i / (count - 1)) * 2 - 1 : 0;
+      const a = aim + t * spread + rand(-0.03, 0.03);
+      const sp = 14;
+      pellets.push({
+        x: r.x + Math.cos(aim) * 0.45, y: r.y + Math.sin(aim) * 0.45,
+        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+        life: 0.62, dmg, pierce: 1, hit: null, spareChance: 0,
+        r: 2.0, color: '#7ecbff', trail: true, shooter: 'robot',
+        robotMk: r.mk, robotRef: r,
+      });
+    }
+    r.muzzleT = 0.09;
+    playRobotShot();
+  }
+  // Credit a robot for a kill and let it learn from it. Called from the wolf
+  // death path when the killing pellet came from a robot.
+  function robotCreditKill(r) {
+    if (!r) return;
+    r.kills = (r.kills || 0) + 1;
+    const before = robotSkill(r.mk);
+    robotTraining[r.mk] = Math.min(1, (robotTraining[r.mk] || 0) + ROBOT_TRAIN_PER_KILL);
+    // Announce each quarter crossed so the training is legible without a UI.
+    const after = robotSkill(r.mk);
+    const step = 0.25;
+    if (Math.floor(after / step) > Math.floor(before / step)) {
+      const pct = Math.round(after * 100);
+      toast('MK-' + r.mk + ' combat data: ' + pct + '% trained', 1.6);
+      toastGuest('MK-' + r.mk + ' combat data: ' + pct + '% trained', 1.6);
+      playUnlockChime();
+    }
+  }
+  function destroyRobot(r) {
+    if (!r.alive) return;
+    r.alive = false;
+    r.dying = true;
+    r.downT = 0;
+    r.hp = 0;
+    spawnBlast(r.x, r.y);
+    spawnSmoke(r.x, r.y, 10);
+    playExplosion();
+    shake = Math.max(shake, 0.3);
+    // Comes apart into the same metal debris a disassembling wolf leaves — it
+    // IS a machine. Same shape tryWolfDisassemble pushes, so drawWolfScrap
+    // renders it without knowing where it came from.
+    const n = 10 + Math.floor(Math.random() * 5);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = rand(1.2, 4.2);
+      wolfScrap.push({
+        x: r.x, y: r.y,
+        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+        z: rand(0.2, 0.9), vz: rand(3.5, 7.5),
+        spin: Math.random() * Math.PI * 2, spinV: rand(-14, 14),
+        t: rand(2.2, 3.2),
+        kind: i % 3,
+        size: rand(0.8, 1.4),
+      });
+    }
+    playWolfScrap();
+    toast('MK-' + r.mk + ' destroyed', 1.6);
+    toastGuest('MK-' + r.mk + ' destroyed', 1.6);
+  }
+  // Prune toppled chassis once the fall animation has played out. No corpse is
+  // left behind — the scrap thrown by destroyRobot IS the wreckage.
+  function tickRobotWrecks() {
+    for (let i = robots.length - 1; i >= 0; i--) if (robots[i].dead) robots.splice(i, 1);
+  }
+
   // ---- Soldier chicken ----------------------------------------------------
   // Helmet, a bundle of TNT, and no survival instinct whatsoever. Picks the
   // nearest wolf, runs it down, and lights the fuse once it's close enough.

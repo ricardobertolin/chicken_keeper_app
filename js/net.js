@@ -409,6 +409,9 @@
     // Wartime supply crates. para/paraH/paraSway carry the descent so the drop
     // animates on the guest; hp/hurtT drive the splits and the hit flash.
     supplyCrates: ['x','y','hp','maxHp','hurtT','para','paraH','paraSway','landT'],
+    // Robot allies. mk drives the chassis colour and the mark pips; bootT and
+    // muzzleT drive the spin-up flicker and the muzzle flash.
+    robots:   ['x','y','mk','hp','maxHp','hurtT','facingLeft','walkT','dir','alive','dying','downT','bootT','muzzleT'],
     // Laser / hit-scan beams (player, wolf, boss — incl. bending & ricochet
     // segments) so the guest sees every beam flash.
     beams:    ['x1','y1','x2','y2','t','life','color','yOff','thick'],
@@ -528,6 +531,8 @@
         scorches: snapList(scorches, SNAP_FIELDS.scorches),
         rooftoppers: snapList(rooftoppers, SNAP_FIELDS.rooftoppers),
         supplyCrates: snapList(supplyCrates, SNAP_FIELDS.supplyCrates),
+        robots:   snapList(robots,   SNAP_FIELDS.robots),
+        robotTraining: robotTraining,
         beams:    snapList(beams,    SNAP_FIELDS.beams),
         hunters:  snapList(hunters,  SNAP_FIELDS.hunters),
         huntersCamps: snapList(huntersCamps, SNAP_FIELDS.huntersCamps),
@@ -726,6 +731,10 @@
     if (msg.scorches) replaceArray(scorches, msg.scorches);
     if (msg.rooftoppers) replaceArray(rooftoppers, msg.rooftoppers);
     if (msg.supplyCrates) replaceArray(supplyCrates, msg.supplyCrates);
+    if (msg.robots) replaceArray(robots, msg.robots);
+    // Training is a plain per-mark map, not an entity list — copy the values so
+    // the guest's robot tags show the same trained percentage the host sees.
+    if (msg.robotTraining) for (const k in robotTraining) robotTraining[k] = msg.robotTraining[k] || 0;
     if (msg.beams)  replaceArray(beams,  msg.beams);
     if (msg.hunters) replaceArray(hunters, msg.hunters);
     if (msg.huntersCamps) replaceArray(huntersCamps, msg.huntersCamps);

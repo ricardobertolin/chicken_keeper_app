@@ -34,6 +34,18 @@ The game was one 20k-line index.html. It is now split into classic scripts that 
 
 `sw.js` precaches the js/ files cache-first. Bump `VERSION` in sw.js on every release or returning players keep the old build. Keep it in step with the title-screen label (`.menu-version` in index.html). A new js/ file has to be added to the `ASSETS` list too. HTML is network-first.
 
+## Robot allies (MK-1 / MK-2 / MK-3)
+
+Summoned by typing `robot1` / `robot2` / `robot3` in-game, or from the debug panel's Spawns & Tools row. They only ever fight — no building, no pickups, no upgrade picks.
+
+- Every stat table in state.js is indexed `[_, mk1, mk2, mk3]`, so index 0 is unused and a robot's stats are a straight lookup on `r.mk`. The mark **is** the intelligence: `ROBOT_AIM_ERR` and `ROBOT_SMART` are the real differences.
+- **Host-authoritative.** A guest typing the phrase forwards a `debug-action` (`spawn-robot-N`) over the existing channel, which net.js turns into a synthetic click on the debug handler. That's what makes the phrase work in multiplayer.
+- Pellets carry `shooter: 'robot'`, treated as **ally fire** in `updatePellet`: damages wolves, passes through keepers, hunters and the flock. Adding a new shooter kind means auditing every `p.shooter` branch in boss.js.
+- Wolf AI is untouched. Robots take contact damage in their own update loop and from ranged-wolf bullets, rather than being taught to the pack as a new target type.
+- `robotTraining` is held **per mark**, not per unit, so rebuilding a destroyed MK-2 keeps what the last one learned. Reset by `resetWorld`.
+
+Covered by `tests/robots.test.mjs`, which also lifts the typed-phrase matcher out of input.js by text (input.js can't be loaded whole — its top level wires DOM listeners).
+
 ## Wartime effort (boss wave)
 
 FANGUS arriving puts the farm on a war footing, spread across a few files:

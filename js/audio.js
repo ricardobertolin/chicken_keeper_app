@@ -219,6 +219,8 @@
       case 'parachuteDrop':    playParachuteDrop(); break;
       case 'crateLand':        playCrateLand(); break;
       case 'fuseHiss':         playFuseHiss(); break;
+      case 'robotBoot':        playRobotBoot(); break;
+      case 'robotShot':        playRobotShot(); break;
       case 'rooftopShot':      playRooftopShot(); break;
       case 'fireCrackle':      playFireCrackle(); break;
       case 'freeze':           playFreeze(); break;
@@ -463,6 +465,76 @@
     ng.gain.exponentialRampToValueAtTime(0.0001, at + dur);
     src.connect(lp2); lp2.connect(ng); ng.connect(ctx.destination);
     src.start(at); src.stop(at + dur);
+  }
+
+  // ---- Robot allies -------------------------------------------------------
+  // Boot-up: a rising synth sweep with a servo whine, so a summoned MK reads
+  // as a machine coming online rather than a thing that just appeared.
+  function playRobotBoot() {
+    queueNetSound('robotBoot');
+    const ctx = getAudio();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    // Power-on sweep.
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(90, now);
+    osc.frequency.exponentialRampToValueAtTime(520, now + 0.5);
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(600, now);
+    lp.frequency.exponentialRampToValueAtTime(3200, now + 0.5);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(0.11, now + 0.07);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.62);
+    osc.connect(lp); lp.connect(g); g.connect(ctx.destination);
+    osc.start(now); osc.stop(now + 0.65);
+    // Two confirmation blips once it's up.
+    [0.56, 0.68].forEach((at, i) => {
+      const b = ctx.createOscillator();
+      b.type = 'sine';
+      b.frequency.setValueAtTime(i === 0 ? 880 : 1320, now + at);
+      const bg = ctx.createGain();
+      bg.gain.setValueAtTime(0.0001, now + at);
+      bg.gain.exponentialRampToValueAtTime(0.08, now + at + 0.015);
+      bg.gain.exponentialRampToValueAtTime(0.0001, now + at + 0.1);
+      b.connect(bg); bg.connect(ctx.destination);
+      b.start(now + at); b.stop(now + at + 0.12);
+    });
+  }
+  // The arm cannon: a tight electric crack, clearly not the keeper's shotgun.
+  function playRobotShot() {
+    queueNetSound('robotShot');
+    const ctx = getAudio();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(1500, now);
+    osc.frequency.exponentialRampToValueAtTime(260, now + 0.09);
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(1800, now);
+    bp.Q.setValueAtTime(1.4, now);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(0.13, now + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+    osc.connect(bp); bp.connect(g); g.connect(ctx.destination);
+    osc.start(now); osc.stop(now + 0.14);
+    // Short noise transient so it has some snap on small speakers.
+    const dur = 0.07;
+    const sz = Math.floor(ctx.sampleRate * dur);
+    const b = ctx.createBuffer(1, sz, ctx.sampleRate);
+    const d = b.getChannelData(0);
+    for (let i = 0; i < sz; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / sz, 2.5);
+    const src = ctx.createBufferSource(); src.buffer = b;
+    const hp = ctx.createBiquadFilter(); hp.type = 'highpass';
+    hp.frequency.setValueAtTime(1600, now);
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.10, now);
+    ng.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    src.connect(hp); hp.connect(ng); ng.connect(ctx.destination);
+    src.start(now); src.stop(now + dur);
   }
 
   // ---- Wartime supply drops ----------------------------------------------

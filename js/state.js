@@ -387,6 +387,10 @@
   const holes   = [];   // {x,y} — scorched craters left by detonated mines; cleared next wave
   const scorches = [];  // {x,y,t,life,r} — temporary scorch marks any explosion burns into the grass
   const rooftoppers = []; // {x,y,coop,fireT,dir,facingLeft,alive} — sniper allies stationed on coop roofs
+  // Robot allies — keeper-shaped combat drones summoned by typing robot1/2/3
+  // (or from the debug panel). They only ever FIGHT: no building, no pickups,
+  // no upgrade picks. Host-authoritative like the hunters.
+  const robots = [];
   // Air-dropped supply crates. {x,y,hp,maxHp,hurtT,para,paraT,paraH,paraSway,landT}
   // While `para` is set the crate is still under its canopy and can't be shot;
   // once down it just sits there until something breaks it open. Deliberately
@@ -1051,6 +1055,57 @@
   const CRATE_PAYLOAD_HATS = 0.20;  // a hat pack
   // ...the remaining 0.55 is live cargo (chickens).
   const CRATE_SOLDIER_CHANCE = 0.45; // per bird in a live-cargo crate
+
+  // ---------- Robot allies (MK-1 / MK-2 / MK-3) ----------
+  // A keeper-shaped drone that fights and nothing else — the same deal the
+  // hunter wolf has, inverted. Three marks, and the mark IS the intelligence:
+  // every number below is indexed [_, mk1, mk2, mk3] so index 0 is unused and
+  // a robot's stats are a straight table lookup on its mark.
+  const ROBOT_MAX_MK = 3;
+  const ROBOT_HP        = [0, 14, 22, 34];     // plating — wolves wear it down on contact
+  const ROBOT_SPEED     = [0, 2.6, 3.1, 3.6];  // tiles/sec
+  const ROBOT_FIRE_CD   = [0, 1.15, 0.80, 0.50]; // seconds between volleys
+  const ROBOT_PELLETS   = [0, 3, 4, 6];        // pellets per volley
+  const ROBOT_SPREAD    = [0, 0.34, 0.26, 0.18]; // radians, half-cone
+  const ROBOT_DMG       = [0, 1.0, 1.4, 1.9];  // per pellet
+  const ROBOT_RANGE     = [0, 7, 9, 11];       // tiles it will open fire at
+  const ROBOT_STANDOFF  = [0, 2.2, 2.8, 3.4];  // tiles it tries to keep from its target
+  // Aim wobble in radians. This is the real difference between the marks: an
+  // MK-1 sprays, an MK-3 puts the cone where it means to.
+  const ROBOT_AIM_ERR   = [0, 0.20, 0.10, 0.035];
+  // How sharp its decisions are. An MK-1 shoots whatever is closest; the
+  // higher marks weigh up what actually needs shooting (see robotPickTarget).
+  const ROBOT_SMART     = [0, 0, 1, 2];
+  const ROBOT_HURT_R    = 0.85;   // tiles — a wolf this close is mauling the robot
+  const ROBOT_HURT_DPS  = 4.5;    // plating lost per second of contact
+  const ROBOT_THINK_MIN = 0.5;    // seconds between re-picking a roam target
+  const ROBOT_THINK_MAX = 1.6;
+  const ROBOT_MAX_ACTIVE = 4;     // how many can be on the field at once
+  const ROBOT_BULLET_DMG = 3.5;   // plating lost to one ranged-wolf round
+  const ROBOT_BOOT_T = 0.9;       // spin-up hum before it starts acting
+  const ROBOT_FALL_DUR = 0.5;     // topple animation before the chassis is pruned
+  // Chassis palettes. MK-1 is salvage, MK-2 is factory steel, MK-3 is the
+  // blacked-out one. Eyes are the same icy blue on all three.
+  const ROBOT_PALETTE = [
+    null,
+    { plate: '#8a5a32', shade: '#5f3c1e', trim: '#b4793f', bolt: '#d9a05a' }, // MK-1 rusted
+    { plate: '#9aa0a8', shade: '#6b7178', trim: '#c3c9d1', bolt: '#e4e8ee' }, // MK-2 gray
+    { plate: '#2c2f36', shade: '#171a1f', trim: '#454a54', bolt: '#7b8290' }, // MK-3 black
+  ];
+  // "Maybe can be trained": a robot learns across the run. Every wolf it
+  // finishes tightens its aim and trims its reload, up to ROBOT_TRAIN_CAP of
+  // the gap. Training is held PER MARK rather than per unit, so rebuilding a
+  // destroyed MK-2 doesn't throw away what the last one learned.
+  const robotTraining = { 1: 0, 2: 0, 3: 0 };
+  const ROBOT_TRAIN_PER_KILL = 0.035; // skill gained per wolf it puts down
+  const ROBOT_TRAIN_CAP = 0.75;       // most of the aim error it can train away
+  function robotSkill(mk) { return Math.min(1, robotTraining[mk] || 0); }
+  function robotAimErr(r) {
+    return ROBOT_AIM_ERR[r.mk] * (1 - robotSkill(r.mk) * ROBOT_TRAIN_CAP);
+  }
+  function robotFireCd(r) {
+    return ROBOT_FIRE_CD[r.mk] * (1 - robotSkill(r.mk) * 0.30);
+  }
 
   // Soldier chicken: helmet, a bundle of TNT, and no survival instinct. Rushes
   // the nearest wolf and detonates. Only ever arrives in a crate (or the debug
