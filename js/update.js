@@ -479,11 +479,17 @@
           // a coop between waves burns its first cycle on the silent re-roll
           // and the next wave's 30s window can run out before it fires.
           if (!coopsCanLay) { c.spawnT = 0; continue; }
-          c.spawnT = rand(CHICKEN_RESPAWN_MIN, CHICKEN_RESPAWN_MAX) * tableAt('hatchRate');
+          // Wartime effort: with FANGUS on the field the coops run +50% faster
+          // (the multiplier divides the interval — see wartimeHatchMul).
+          c.spawnT = rand(CHICKEN_RESPAWN_MIN, CHICKEN_RESPAWN_MAX)
+                   * tableAt('hatchRate') * wartimeHatchMul();
           if (hasRoom) spawnChicken(c);
         }
       }
 
+      // Wartime airlift — the drop roll and the crates already in the air.
+      updateSupplyDrops(dt);
+      updateSupplyCrates(dt);
       // Entities
       for (const c of chickens) updateChicken(c, dt);
       for (const w of wolves) updateWolf(w, dt);

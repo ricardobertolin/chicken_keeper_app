@@ -1365,6 +1365,10 @@
     // farm. The read-set itself is deliberately NOT cleared — "no repeats" is
     // scoped to the page session, so a new run keeps handing out new hints.
     scrollNote = null; scrollNoteRect = null;
+    // Wartime airlift state — crates in the air or on the grass, and the
+    // pending war-footing notice.
+    supplyCrates.length = 0;
+    wartimeNoticeT = 0;
     coops.length = 0;
     chickens.length = 0;
     bossBurstChickens.length = 0;

@@ -717,6 +717,10 @@
     // walks in front of one that's nearer the camera instead of the headstone
     // always being painted over the top of everyone.
     for (const g of graves) items.push({ depth: g.x + g.y, draw: () => drawGrave(g) });
+    // Supply crates sort like any standing prop. An airborne one is lifted on
+    // screen but keeps its LANDING depth, the same way a parachuting wolf
+    // does, so it slots correctly into the scene the moment it touches down.
+    for (const cr of supplyCrates) items.push({ depth: cr.x + cr.y, draw: () => drawSupplyCrate(cr) });
     for (const dm of dummies) items.push({ depth: dm.x + dm.y, draw: () => drawDummy(dm) });
     for (const st of statues) items.push({ depth: st.x + st.y, draw: () => drawStatue(st) });
     for (const c of chickens) {
@@ -3837,6 +3841,60 @@
       ctx.fillStyle = '#a07a08';
       ctx.fillRect(cx + 4.4, cy - 18, 1.2, 3);
     }
+    // Soldier chicken: olive helmet, chin strap, and a bundle of TNT strapped
+    // across the body. Drawn after the legs so the webbing sits over them.
+    if (c.soldier) {
+      const fuse = (c.fuseT || 0) > 0;
+      // TNT bundle — three sticks slung on the near flank.
+      ctx.fillStyle = '#9c2b20';
+      ctx.fillRect(cx - 5.5, cy - 8.5, 2.2, 6);
+      ctx.fillRect(cx - 3.0, cy - 9.0, 2.2, 6);
+      ctx.fillRect(cx - 0.5, cy - 8.5, 2.2, 6);
+      ctx.fillStyle = '#e8d8a8'; // paper label bands
+      ctx.fillRect(cx - 5.5, cy - 6.6, 7.2, 1.1);
+      // Webbing strap over the shoulder.
+      ctx.strokeStyle = '#4a3a22';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(cx - 6, cy - 9.5);
+      ctx.lineTo(cx + 3.5, cy - 5.5);
+      ctx.stroke();
+      // Fuse cord curling up off the bundle, with a spark once it's lit.
+      ctx.strokeStyle = '#2a2a2a';
+      ctx.lineWidth = 0.9;
+      ctx.beginPath();
+      ctx.moveTo(cx - 3.0, cy - 9.0);
+      ctx.quadraticCurveTo(cx - 5, cy - 13, cx - 2.5, cy - 15);
+      ctx.stroke();
+      if (fuse) {
+        // Sputtering spark at the fuse tip, flickering off the bob clock.
+        const fl = 1.2 + Math.abs(Math.sin(c.bob * 2.2)) * 1.4;
+        ctx.fillStyle = '#ffe066';
+        ctx.beginPath();
+        ctx.arc(cx - 2.5, cy - 15, fl, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = 'rgba(255,140,40,0.55)';
+        ctx.beginPath();
+        ctx.arc(cx - 2.5, cy - 15, fl * 1.9, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      // Helmet — olive dome over the comb, with a brim and a chin strap.
+      ctx.fillStyle = '#4a5a30';
+      ctx.beginPath();
+      ctx.arc(cx + 5, cy - 14.6, 4.2, Math.PI, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillRect(cx + 0.6, cy - 14.8, 8.6, 1.4);
+      // Lighter crest down the middle so the dome reads as curved.
+      ctx.fillStyle = '#5f7340';
+      ctx.fillRect(cx + 4.4, cy - 18.2, 1.3, 3.4);
+      ctx.strokeStyle = '#2f2a18';
+      ctx.lineWidth = 0.9;
+      ctx.beginPath();
+      ctx.moveTo(cx + 1.4, cy - 13.6);
+      ctx.lineTo(cx + 3.4, cy - 10.4);
+      ctx.stroke();
+    }
     // Rich chicken: small black top hat with a ribbon.
     if (c.rich) {
       ctx.fillStyle = '#111';
@@ -3855,6 +3913,124 @@
       ctx.font = 'bold 12px "Lucida Console", Consolas, monospace';
       ctx.fillText('!', cx - 3, cy - 22);
     }
+  }
+
+  // An air-dropped supply crate. Floats in under a canopy, then sits on the
+  // grass taking damage until it bursts. Stencilled with a chicken so there's
+  // never any doubt whose war effort this is.
+  function drawSupplyCrate(cr) {
+    const lift = cr.para ? (cr.paraH || 0) : 0;
+    const sway = cr.para ? Math.sin(cr.paraSway || 0) * 5 : 0;
+    const p = worldToScreen(cr.x, cr.y);
+    const cx = p.x + sway;
+    const groundY = p.y + TILE_H / 2;
+    const cy = groundY - lift;
+    // Shadow stays on the ground and tightens as the crate comes down, so the
+    // drop reads as height rather than the crate just sliding up the screen.
+    const shrink = cr.para ? 1 - (lift / PARACHUTE_START_H) * 0.55 : 1;
+    drawShadow(cr.x, cr.y, 0.4 * shrink);
+    // Settle squash on touchdown.
+    const settle = cr.landT > 0 ? (cr.landT / CRATE_LAND_DUST) : 0;
+    const W2 = 11, HGT = 13 * (1 - settle * 0.25);
+    const top = cy - HGT;
+    const hurt = (cr.hurtT || 0) > 0;
+    // Crate body — front face plus a lid top so it reads as a box in iso.
+    ctx.fillStyle = hurt ? '#c08a4a' : '#9a6c33';
+    ctx.fillRect(cx - W2, top, W2 * 2, HGT);
+    ctx.fillStyle = hurt ? '#d8a05c' : '#b98246'; // lid catches the light
+    ctx.beginPath();
+    ctx.moveTo(cx - W2, top);
+    ctx.lineTo(cx, top - 5);
+    ctx.lineTo(cx + W2, top);
+    ctx.lineTo(cx, top + 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#5a3a18';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(cx - W2 + 0.5, top + 0.5, W2 * 2 - 1, HGT - 1);
+    // Plank banding across the front.
+    ctx.fillStyle = '#7a5426';
+    ctx.fillRect(cx - W2, top + HGT * 0.33, W2 * 2, 1.4);
+    ctx.fillRect(cx - W2, top + HGT * 0.72, W2 * 2, 1.4);
+    // Chicken stencil, painted on the front face in flaking white.
+    ctx.save();
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = '#f2f2ea';
+    const sx = cx, sy = top + HGT * 0.52;
+    ctx.beginPath();                                   // body
+    ctx.ellipse(sx - 0.5, sy, 3.6, 2.8, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();                                   // head
+    ctx.arc(sx + 2.6, sy - 2.8, 1.9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillRect(sx - 2.2, sy + 2.4, 1, 2);            // legs
+    ctx.fillRect(sx + 0.6, sy + 2.4, 1, 2);
+    ctx.fillStyle = '#e0533a';                         // comb + beak
+    ctx.beginPath();
+    ctx.arc(sx + 2.2, sy - 4.6, 0.9, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(sx + 4.3, sy - 2.8);
+    ctx.lineTo(sx + 6.1, sy - 2.2);
+    ctx.lineTo(sx + 4.3, sy - 1.8);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+    // Damage: splits opening up across the planks as the HP drops.
+    const dmg = 1 - Math.max(0, cr.hp) / (cr.maxHp || CRATE_HP);
+    if (dmg > 0.01 && !cr.para) {
+      ctx.strokeStyle = 'rgba(40, 24, 10, 0.8)';
+      ctx.lineWidth = 1.1;
+      const cracks = Math.min(3, 1 + Math.floor(dmg * 3));
+      for (let k = 0; k < cracks; k++) {
+        // Fixed offsets rather than a per-frame random, so the splits stay put.
+        const ox = (k - 1) * 6;
+        ctx.beginPath();
+        ctx.moveTo(cx + ox, top + 2);
+        ctx.lineTo(cx + ox + 2, top + HGT * 0.45);
+        ctx.lineTo(cx + ox - 1, top + HGT * 0.8);
+        ctx.stroke();
+      }
+    }
+    if (!cr.para) return;
+    // Canopy above a descending crate, with rigging down to the lid corners.
+    const topY = cy - HGT - 30;
+    ctx.strokeStyle = 'rgba(235,235,235,0.9)';
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(cx - W2 + 1, top - 2); ctx.lineTo(cx - 16, topY + 1);
+    ctx.moveTo(cx + W2 - 1, top - 2); ctx.lineTo(cx + 16, topY + 1);
+    ctx.moveTo(cx, top - 4);          ctx.lineTo(cx, topY);
+    ctx.stroke();
+    // Olive-and-cream panelled dome — the supply drop's own livery, distinct
+    // from the pack's red-and-white chutes.
+    const cw = 17, ch = 11;
+    ctx.fillStyle = '#5d6b36';
+    ctx.beginPath();
+    ctx.ellipse(cx, topY, cw, ch, 0, Math.PI, Math.PI * 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#e8e2c8';
+    ctx.beginPath();
+    ctx.moveTo(cx - cw * 0.34, topY);
+    ctx.lineTo(cx - cw * 0.34, topY - ch * 0.9);
+    ctx.lineTo(cx, topY - ch);
+    ctx.lineTo(cx, topY);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#5d6b36';
+    ctx.beginPath();
+    ctx.moveTo(cx + cw * 0.34, topY);
+    ctx.lineTo(cx + cw * 0.34, topY - ch * 0.9);
+    ctx.lineTo(cx + cw * 0.68, topY - ch * 0.48);
+    ctx.lineTo(cx + cw * 0.68, topY);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#3a4420';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.ellipse(cx, topY, cw, ch, 0, Math.PI, Math.PI * 2);
+    ctx.stroke();
   }
 
   // A friendly guard dog — tan coat, floppy ear, red collar, perky tail.

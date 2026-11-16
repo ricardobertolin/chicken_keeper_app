@@ -166,6 +166,8 @@
       ['spawn-hunterwolf', 'Spawn hunter wolf',    'Spawn the hunter-wolf cryptid (keeper reskin that shoots back)'],
       ['spawn-ghostwolf',  'Spawn ghost wolf',     'Spawn a ghost wolf (vanishes silently when shot; chance grows with player deaths)'],
       ['spawn-parachute', 'Spawn parachute wolf',  'Drop a single wolf in by parachute'],
+      ['spawn-soldier',   'Spawn soldier chicken', 'Spawn a helmeted TNT chicken that charges the nearest wolf and detonates'],
+      ['spawn-crate',     'Drop supply crate',     'Airdrop a wartime supply crate — shoot it open for ordnance, hats or live cargo'],
       ['spawn-moonwalk',  'Spawn moonwalk wolf',   'Spawn the rare wolf that walks backward (faces away from its heading)'],
       ['spawn-brute',     'Spawn brute wolf',      'Spawn the rare brute wolf (10x health, angry brow)'],
       ['spawn-p2cameo',   'Spawn buddy cameo',        'Trigger the rare Player-2 cameo walk-through'],
@@ -278,6 +280,17 @@
         spawnGhostWolf();
       } else if (action === 'spawn-parachute') {
         spawnParachuteWolf();
+      } else if (action === 'spawn-soldier') {
+        // Bypasses the crate entirely so the rush-and-detonate behaviour can be
+        // watched without waiting on a drop and a payload roll.
+        const sc = spawnSoldierChicken();
+        toast(sc ? 'Soldier chicken reporting for duty' : 'Flock is at the cap', 1.2);
+      } else if (action === 'spawn-crate') {
+        // Drops anywhere in the field, same as a real one — the payload is
+        // still rolled when it's broken open, so press it a few times to see
+        // all three outcomes.
+        dropSupplyCrate();
+        toast('Supply crate inbound', 1.2);
       } else if (action === 'spawn-moonwalk') {
         spawnMoonwalkWolf();
       } else if (action === 'spawn-brute') {

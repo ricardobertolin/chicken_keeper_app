@@ -389,7 +389,7 @@
   }
   const SNAP_FIELDS = {
     wolves:   ['x','y','size','fasterLevel','hurtT','facingLeft','alive','fox','bomb','sword','assassin','hatted','aggroT','carrying','fleeing','meleeT','meleeDir','bob','smokeT','defective','turncoat','coldT','burnT','boss','aimDir','walkT','missileWolf','missilePhase','missileChargeT','jumper','jumpT','jumpDur','hunterWolf','muzzleT','maxHp','hp','hatColor','gunColor','pup','ranged','homer','parachuting','parachuteH','parachuteSway','crawler','legPhase','sparkleT','moonwalk','brute'],
-    chickens: ['x','y','alive','facingLeft','fat','worker','rich','bob','fleeT'],
+    chickens: ['x','y','alive','facingLeft','fat','worker','rich','bob','fleeT','soldier','fuseT'],
     coops:    ['x','y','level','dirtR','builtWave','shakeT','igniteT','launching','laying'],
     fences:   ['x','y','kind','hp','maxHp','hurtT'], // maxHp drives the half-health cracks
     farms:    ['x','y','growth','need','trampleFlash'],
@@ -406,6 +406,9 @@
     holes:    ['x','y'],
     scorches: ['x','y','t','life','r'],
     rooftoppers: ['x','y','fireT','dir','aimDir','facingLeft','alive','coopLevel','aiming','targetX','targetY'],
+    // Wartime supply crates. para/paraH/paraSway carry the descent so the drop
+    // animates on the guest; hp/hurtT drive the splits and the hit flash.
+    supplyCrates: ['x','y','hp','maxHp','hurtT','para','paraH','paraSway','landT'],
     // Laser / hit-scan beams (player, wolf, boss — incl. bending & ricochet
     // segments) so the guest sees every beam flash.
     beams:    ['x1','y1','x2','y2','t','life','color','yOff','thick'],
@@ -524,6 +527,7 @@
         holes:    snapList(holes,    SNAP_FIELDS.holes),
         scorches: snapList(scorches, SNAP_FIELDS.scorches),
         rooftoppers: snapList(rooftoppers, SNAP_FIELDS.rooftoppers),
+        supplyCrates: snapList(supplyCrates, SNAP_FIELDS.supplyCrates),
         beams:    snapList(beams,    SNAP_FIELDS.beams),
         hunters:  snapList(hunters,  SNAP_FIELDS.hunters),
         huntersCamps: snapList(huntersCamps, SNAP_FIELDS.huntersCamps),
@@ -721,6 +725,7 @@
     if (msg.holes)  replaceArray(holes,  msg.holes);
     if (msg.scorches) replaceArray(scorches, msg.scorches);
     if (msg.rooftoppers) replaceArray(rooftoppers, msg.rooftoppers);
+    if (msg.supplyCrates) replaceArray(supplyCrates, msg.supplyCrates);
     if (msg.beams)  replaceArray(beams,  msg.beams);
     if (msg.hunters) replaceArray(hunters, msg.hunters);
     if (msg.huntersCamps) replaceArray(huntersCamps, msg.huntersCamps);

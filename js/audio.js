@@ -216,6 +216,9 @@
       case 'wolfScrap':        playWolfScrap(); break;
       case 'ghostVanish':      playGhostVanish(); break;
       case 'hunterDeath':      playHunterDeath(); break;
+      case 'parachuteDrop':    playParachuteDrop(); break;
+      case 'crateLand':        playCrateLand(); break;
+      case 'fuseHiss':         playFuseHiss(); break;
       case 'rooftopShot':      playRooftopShot(); break;
       case 'fireCrackle':      playFireCrackle(); break;
       case 'freeze':           playFreeze(); break;
@@ -460,6 +463,120 @@
     ng.gain.exponentialRampToValueAtTime(0.0001, at + dur);
     src.connect(lp2); lp2.connect(ng); ng.connect(ctx.destination);
     src.start(at); src.stop(at + dur);
+  }
+
+  // ---- Wartime supply drops ----------------------------------------------
+  // A crate leaving the plane: a short rush of air as the canopy snaps open,
+  // over a low drone that gives the drop some weight overhead.
+  function playParachuteDrop() {
+    queueNetSound('parachuteDrop');
+    const ctx = getAudio();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    // Canopy snap — filtered noise swelling and dying back.
+    const dur = 0.9;
+    const sz = Math.floor(ctx.sampleRate * dur);
+    const b = ctx.createBuffer(1, sz, ctx.sampleRate);
+    const d = b.getChannelData(0);
+    for (let i = 0; i < sz; i++) {
+      // Swell in over the first fifth, then taper — the canopy filling out.
+      const f = i / sz;
+      const env = f < 0.2 ? f / 0.2 : Math.pow(1 - (f - 0.2) / 0.8, 1.6);
+      d[i] = (Math.random() * 2 - 1) * env * 0.7;
+    }
+    const src = ctx.createBufferSource(); src.buffer = b;
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(1100, now);
+    bp.frequency.exponentialRampToValueAtTime(420, now + dur);
+    bp.Q.setValueAtTime(0.8, now);
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.26, now);
+    src.connect(bp); bp.connect(ng); ng.connect(ctx.destination);
+    src.start(now); src.stop(now + dur);
+    // Distant transport drone underneath.
+    const osc = ctx.createOscillator();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(74, now);
+    osc.frequency.linearRampToValueAtTime(58, now + 1.1);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(0.10, now + 0.25);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 1.2);
+    osc.connect(g); g.connect(ctx.destination);
+    osc.start(now); osc.stop(now + 1.25);
+  }
+  // The crate touching down: a flat wooden slap with a short tail of grit.
+  function playCrateLand() {
+    queueNetSound('crateLand');
+    const ctx = getAudio();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = 'square';
+    osc.frequency.setValueAtTime(190, now);
+    osc.frequency.exponentialRampToValueAtTime(70, now + 0.14);
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(900, now);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(0.20, now + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
+    osc.connect(lp); lp.connect(g); g.connect(ctx.destination);
+    osc.start(now); osc.stop(now + 0.22);
+    // Grit and dust thrown out from under it.
+    const dur = 0.22;
+    const sz = Math.floor(ctx.sampleRate * dur);
+    const b = ctx.createBuffer(1, sz, ctx.sampleRate);
+    const d = b.getChannelData(0);
+    for (let i = 0; i < sz; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / sz, 2.2);
+    const src = ctx.createBufferSource(); src.buffer = b;
+    const hp = ctx.createBiquadFilter(); hp.type = 'highpass';
+    hp.frequency.setValueAtTime(900, now);
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.13, now);
+    ng.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    src.connect(hp); hp.connect(ng); ng.connect(ctx.destination);
+    src.start(now); src.stop(now + dur);
+  }
+  // A soldier chicken lighting its fuse — rising hiss plus a nervous cluck, so
+  // there's a warning beat before the blast.
+  function playFuseHiss() {
+    queueNetSound('fuseHiss');
+    const ctx = getAudio();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const dur = 0.42;
+    const sz = Math.floor(ctx.sampleRate * dur);
+    const b = ctx.createBuffer(1, sz, ctx.sampleRate);
+    const d = b.getChannelData(0);
+    // Sputtering rather than smooth: the amplitude jitters like a burning cord.
+    for (let i = 0; i < sz; i++) {
+      const f = i / sz;
+      const sput = 0.6 + 0.4 * Math.sin(f * 90) * Math.random();
+      d[i] = (Math.random() * 2 - 1) * sput * (0.4 + f * 0.6);
+    }
+    const src = ctx.createBufferSource(); src.buffer = b;
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(2600, now);
+    bp.frequency.linearRampToValueAtTime(4200, now + dur);
+    bp.Q.setValueAtTime(1.2, now);
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.09, now);
+    ng.gain.linearRampToValueAtTime(0.15, now + dur);
+    src.connect(bp); bp.connect(ng); ng.connect(ctx.destination);
+    src.start(now); src.stop(now + dur);
+    // One clipped cluck on top — it knows exactly what it signed up for.
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(720, now);
+    osc.frequency.exponentialRampToValueAtTime(1180, now + 0.06);
+    osc.frequency.exponentialRampToValueAtTime(540, now + 0.14);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(0.09, now + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+    osc.connect(g); g.connect(ctx.destination);
+    osc.start(now); osc.stop(now + 0.18);
   }
 
   // ---- Weather ambience ---------------------------------------------------

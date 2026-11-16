@@ -417,6 +417,7 @@
     }
     // A maxed mine is keyed to the pack and won't go off under a keeper.
     if (lvl < 5) explosionHitKeepers(m.x, m.y, r);
+    openCratesInBlast(m.x, m.y, r); // a crate sat on a mine gets opened the hard way
     holes.push({ x: m.x, y: m.y });
   }
 
@@ -430,6 +431,232 @@
         dist2(player.x, player.y, x, y) < r2) applyFriendlyFireHit(player);
     if (player2.active && !player2.ghost && (player2.flightT || 0) <= 0 &&
         dist2(player2.x, player2.y, x, y) < r2) applyFriendlyFireHit(player2);
+  }
+
+  // ---------- Wartime supply drops ----------
+  // Host-authoritative: the guest sees crates through the snapshot and must
+  // never roll its own, or the two clients would be looting different farms.
+  let crateDropT = 0;
+  // The airlift runs for the boss fight, then winds down to the odd stray
+  // crate once the farm is into the endless waves.
+  function crateDropsActive() {
+    if (inMenu || gameOver || !gameStarted) return false;
+    if (multiplayer && !isHost) return false;
+    if (bossWaveActive) return true;
+    return waveActive && wave > BOSS_WAVE;
+  }
+  function updateSupplyDrops(dt) {
+    // Deferred "war footing" announcement — see startBossWave.
+    if (wartimeNoticeT > 0) {
+      wartimeNoticeT -= dt;
+      if (wartimeNoticeT <= 0) {
+        wartimeNoticeT = 0;
+        toast('WARTIME EFFORT — the coops work double, and supplies are inbound', 3.4);
+        toastGuest('WARTIME EFFORT — the coops work double, and supplies are inbound', 3.4);
+      }
+    }
+    if (!crateDropsActive()) { crateDropT = 0; return; }
+    // First active frame just arms the timer — otherwise a crate would land on
+    // the boss's entrance, on top of the intro cutscene.
+    if (crateDropT <= 0) {
+      crateDropT = bossWaveActive ? rand(CRATE_DROP_MIN, CRATE_DROP_MAX)
+                                  : rand(CRATE_ENDLESS_MIN, CRATE_ENDLESS_MAX);
+      return;
+    }
+    crateDropT -= dt;
+    if (crateDropT > 0) return;
+    if (bossWaveActive) {
+      crateDropT = rand(CRATE_DROP_MIN, CRATE_DROP_MAX);
+      dropSupplyCrate();
+    } else {
+      // Past the boss the timer still ticks, but most of its firings come up
+      // empty — that's what makes a crate rare out here instead of a rhythm.
+      crateDropT = rand(CRATE_ENDLESS_MIN, CRATE_ENDLESS_MAX);
+      if (Math.random() < CRATE_ENDLESS_CHANCE) dropSupplyCrate();
+    }
+  }
+  // Put one crate in the air over a random spot in the field. Same geometry as
+  // spawnParachuteWolf: (x,y) is where it will LAND, paraH is how far above
+  // that it still has to fall.
+  function dropSupplyCrate() {
+    const r = HALF_MAP - 4;
+    supplyCrates.push({
+      x: rand(-r, r),
+      y: rand(-r, r),
+      hp: CRATE_HP,
+      maxHp: CRATE_HP,
+      hurtT: 0,
+      para: true,
+      paraT: PARACHUTE_FALL_TIME,
+      paraH: PARACHUTE_START_H,
+      paraSway: Math.random() * Math.PI * 2,
+      landT: 0,
+    });
+    playParachuteDrop();
+  }
+  function updateSupplyCrates(dt) {
+    for (let i = supplyCrates.length - 1; i >= 0; i--) {
+      const cr = supplyCrates[i];
+      if (cr.hurtT > 0) cr.hurtT = Math.max(0, cr.hurtT - dt);
+      if (cr.para) {
+        cr.paraT -= dt;
+        if (cr.paraT <= 0) {
+          cr.para = false;
+          cr.paraH = 0;
+          cr.landT = CRATE_LAND_DUST;
+          spawnSmoke(cr.x, cr.y, 4);   // dust kicked up as it touches down
+          playCrateLand();
+        } else {
+          cr.paraH = PARACHUTE_START_H * (cr.paraT / PARACHUTE_FALL_TIME);
+          cr.paraSway = (cr.paraSway || 0) + dt * 2.0;
+        }
+        continue;
+      }
+      if (cr.landT > 0) cr.landT = Math.max(0, cr.landT - dt);
+    }
+  }
+  // Any damage source can crack a crate: the keeper's pellets, a stray hunter
+  // round, a mine it happened to land on. Returns true if the hit landed, so a
+  // pellet knows to spend itself on the wood. `shooter` is the pellet's owner
+  // (1, 2, 'wolf', 'hunter', or undefined for a blast) and only matters for
+  // deciding whose head a hat payload lands on.
+  function hurtSupplyCrate(cr, dmg, shooter) {
+    if (!cr || cr.para || cr.landT > 0 || cr.opened) return false;
+    cr.hp -= dmg;
+    cr.hurtT = 0.14;
+    if (cr.hp > 0) { playWoodChop(); return true; }
+    openSupplyCrate(cr, shooter);
+    return true;
+  }
+  // Blasts crack crates open too, so a mine or a stray boss shell landing on
+  // one does what you'd expect. Victims are collected BEFORE any of them is
+  // opened: a payload can splice the array, and iterating it live while that
+  // happens would skip crates.
+  //
+  // Deliberately not called from the crate's own blast payload — a chain
+  // reaction would be fun but it's recursion through openSupplyCrate, and
+  // nothing asked for it.
+  function openCratesInBlast(x, y, radius) {
+    if (!supplyCrates.length) return;
+    const r2 = radius * radius;
+    const caught = [];
+    for (const cr of supplyCrates) {
+      if (cr.para || cr.opened) continue; // can't shell what's still in the air
+      if (dist2(cr.x, cr.y, x, y) < r2) caught.push(cr);
+    }
+    for (const cr of caught) if (!cr.opened) openSupplyCrate(cr);
+  }
+  // The crate at (x,y) that a point lands on, or null. Airborne and
+  // just-landed crates are skipped — nothing can be shot out of the sky.
+  function supplyCrateAt(x, y, r) {
+    for (const cr of supplyCrates) {
+      if (cr.para || cr.landT > 0 || cr.opened) continue;
+      if (dist2(cr.x, cr.y, x, y) < r * r) return cr;
+    }
+    return null;
+  }
+  // Break it open and roll what was inside. The roll happens HERE rather than
+  // at drop time so nothing about the crate on the ground can tell the player
+  // whether it's worth opening — that gamble is the whole point of making them
+  // shoot it.
+  function openSupplyCrate(cr, shooter) {
+    cr.opened = true;
+    const i = supplyCrates.indexOf(cr);
+    if (i >= 0) supplyCrates.splice(i, 1);
+    const roll = Math.random();
+    if (roll < CRATE_PAYLOAD_BOOM) {
+      // It was ordnance, and the drop damaged the fuse. Hurts the pack AND
+      // anyone standing too close — the keeper included.
+      spawnBlast(cr.x, cr.y);
+      spawnSmoke(cr.x, cr.y, 12);
+      spawnScorch(cr.x, cr.y);
+      playExplosion();
+      shake = Math.max(shake, 0.42);
+      const r2 = CRATE_BLAST_R * CRATE_BLAST_R;
+      for (const w of wolves) {
+        if (!w.alive) continue;
+        if (dist2(w.x, w.y, cr.x, cr.y) >= r2) continue;
+        const dx = w.x - cr.x, dy = w.y - cr.y;
+        const m = Math.hypot(dx, dy) || 1;
+        hurtWolf(w, CRATE_BLAST_DMG, (dx / m) * 0.4, (dy / m) * 0.4);
+      }
+      explosionHitKeepers(cr.x, cr.y, CRATE_BLAST_R);
+      toast('The crate was live ordnance!', 1.8);
+      toastGuest('The crate was live ordnance!', 1.8);
+      return;
+    }
+    if (roll < CRATE_PAYLOAD_BOOM + CRATE_PAYLOAD_HATS) {
+      // A hat pack — same three hats, same rare-colour rolls as the shop
+      // version, but free. Capped by MAX_HATS like every other hat source.
+      //
+      // They go to whoever cracked it open. The shop's Buy Hat Pack always
+      // feeds player 1, which is fine for a thing you paid for out of a shared
+      // wallet, but a guest shooting a crate open and watching the HOST get the
+      // hats would just read as broken.
+      let got = 0;
+      if (shooter === 2 && player2.active) {
+        // player2's hats are a plain count, not a colour stack (see drawPlayer2).
+        for (let n = 0; n < 3 && (player2.hats || 0) < MAX_HATS; n++) { player2.hats = (player2.hats || 0) + 1; got++; }
+        spawnSmoke(cr.x, cr.y, 6);
+        playSparkle();
+        toast(got > 0 ? 'Buddy cracked a crate — ' + got + ' spare hat' + (got > 1 ? 's' : '') + '!' : 'Supply crate — hats, and nowhere to put them', 2.0);
+        toastGuest(got > 0 ? 'Supply crate — ' + got + ' spare hat' + (got > 1 ? 's' : '') + '!' : 'Supply crate — hats, and nowhere to put them', 2.0);
+        return;
+      }
+      for (let n = 0; n < 3 && playerHats < MAX_HATS; n++) {
+        hatsBought++;
+        playerHats++;
+        let col = '#5a3825';
+        if (Math.random() < HAT_PACK_BUDDY_CHANCE) col = GUEST_HAT_COLOR;
+        else if (hatsBought >= 5 && Math.random() < LEPRECHAUN_BUY_CHANCE) col = LEPRECHAUN_HAT_COLOR;
+        hatColors.push(col);
+        got++;
+      }
+      spawnSmoke(cr.x, cr.y, 6);
+      playSparkle();
+      toast(got > 0 ? 'Supply crate — ' + got + ' spare hat' + (got > 1 ? 's' : '') + '!'
+                    : 'Supply crate — hats, and nowhere to put them', 2.0);
+      return;
+    }
+    // Live cargo: a few birds of whatever kind the farm happens to breed,
+    // plus a decent chance of a soldier in the mix.
+    const n = Math.round(rand(CRATE_CHICKENS_MIN, CRATE_CHICKENS_MAX));
+    let soldiers = 0;
+    for (let k = 0; k < n; k++) {
+      if (chickens.length >= MAX_CHICKENS) break;
+      const soldier = Math.random() < CRATE_SOLDIER_CHANCE;
+      const c = spawnCrateChicken(cr.x, cr.y, soldier);
+      if (c && c.soldier) soldiers++;
+    }
+    spawnSmoke(cr.x, cr.y, 6);
+    playChickenPop();
+    toast(soldiers > 0
+      ? 'Supply crate — reinforcements, ' + soldiers + ' of them armed!'
+      : 'Supply crate — live cargo!', 2.0);
+  }
+  // A bird out of a crate. Rolls the usual fat/worker/rich variants (so crate
+  // cargo looks like the rest of the farm), or comes out a soldier instead —
+  // the helmet and the TNT replace every other body type.
+  function spawnCrateChicken(x, y, soldier) {
+    const home = coops.length
+      ? coops[Math.floor(Math.random() * coops.length)]
+      : { x, y };
+    spawnChicken(home, true);
+    const c = chickens[chickens.length - 1];
+    if (!c) return null;
+    c.x = x + rand(-0.6, 0.6);
+    c.y = y + rand(-0.6, 0.6);
+    if (soldier) {
+      c.soldier = true;
+      c.fat = false; c.worker = false; c.rich = false;
+      c.fuseT = 0;
+    }
+    return c;
+  }
+  // Debug / crate helper: drop a soldier chicken at the player's feet.
+  function spawnSoldierChicken() {
+    if (chickens.length >= MAX_CHICKENS) return null;
+    return spawnCrateChicken(player.x + rand(-1, 1), player.y + rand(-1, 1), true);
   }
 
   // Spawn a "debris" pile on a destroyed fence's tile. Holds the original

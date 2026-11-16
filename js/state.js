@@ -387,6 +387,12 @@
   const holes   = [];   // {x,y} — scorched craters left by detonated mines; cleared next wave
   const scorches = [];  // {x,y,t,life,r} — temporary scorch marks any explosion burns into the grass
   const rooftoppers = []; // {x,y,coop,fireT,dir,facingLeft,alive} — sniper allies stationed on coop roofs
+  // Air-dropped supply crates. {x,y,hp,maxHp,hurtT,para,paraT,paraH,paraSway,landT}
+  // While `para` is set the crate is still under its canopy and can't be shot;
+  // once down it just sits there until something breaks it open. Deliberately
+  // NOT flagged `_decoy` — that field is what makes wolves siege a prop, and a
+  // crate hijacking the pack's attention mid-boss would wreck the fight.
+  const supplyCrates = [];
   const smoke = [];     // {x,y,vx,vy,t,life,r} — drifting gunsmoke puffs
   const blasts = [];    // {x,y,t,life} — expanding fat-chicken explosion rings
   const flyHats = [];        // {fromWx,fromWy,color,t,life,rot,spin} — hats arcing from wolf to player head
@@ -1013,6 +1019,48 @@
   const BRUTE_HP_MUL  = 10;
   const PARACHUTE_FALL_TIME = 3.8;  // seconds of descent (longer drift in)
   const PARACHUTE_START_H = 130;    // screen px above the landing spot at release
+
+  // ---------- Wartime effort: the war economy of the boss wave ----------
+  // FANGUS showing up puts the whole farm on a war footing. The coops work
+  // harder, and someone starts air-dropping supplies.
+  const WARTIME_HATCH_MUL = 1.5;    // +50% hatch rate while the boss is on the field
+  // Counts down from startBossWave so the "war footing" toast lands after the
+  // wave banner instead of on top of it.
+  let wartimeNoticeT = 0;
+  // The coop respawn timer is an INTERVAL, so a faster rate divides it.
+  function wartimeEffort() { return bossWaveActive; }
+  function wartimeHatchMul() { return wartimeEffort() ? 1 / WARTIME_HATCH_MUL : 1; }
+
+  // Supply crates. The regular cadence belongs to the boss fight; once FANGUS
+  // is down the airlift winds up, and from wave 51 on a crate is a rare treat
+  // rather than something to plan around.
+  const CRATE_DROP_MIN = 15;        // seconds between boss-fight drops
+  const CRATE_DROP_MAX = 30;
+  const CRATE_ENDLESS_MIN = 25;     // wave 51+: how often the roll below is taken
+  const CRATE_ENDLESS_MAX = 40;
+  const CRATE_ENDLESS_CHANCE = 0.18; // ...and how often that roll actually drops one
+  const CRATE_HP = 6;               // pellet damage needed to break it open
+  const CRATE_LAND_DUST = 0.35;     // seconds of landing dust/settle before it can be shot
+  const CRATE_BLAST_R = 2.4;        // tiles — the booby-trapped payload
+  const CRATE_BLAST_DMG = 14;       // per wolf inside the blast
+  const CRATE_CHICKENS_MIN = 1;     // live-cargo payload size
+  const CRATE_CHICKENS_MAX = 3;
+  // Payload weights, rolled when the crate breaks open (never at drop time, so
+  // there's no tell). They must sum to 1.
+  const CRATE_PAYLOAD_BOOM = 0.25;  // a dud — it was ordnance, and it goes off
+  const CRATE_PAYLOAD_HATS = 0.20;  // a hat pack
+  // ...the remaining 0.55 is live cargo (chickens).
+  const CRATE_SOLDIER_CHANCE = 0.45; // per bird in a live-cargo crate
+
+  // Soldier chicken: helmet, a bundle of TNT, and no survival instinct. Rushes
+  // the nearest wolf and detonates. Only ever arrives in a crate (or the debug
+  // panel) — the coops don't hatch these.
+  const SOLDIER_SPEED = 3.4;        // faster than a wandering bird, slower than a flutter
+  const SOLDIER_FUSE_R = 0.62;      // tiles — how close it gets before lighting the fuse
+  const SOLDIER_FUSE_T = 0.45;      // seconds of fizzing before it goes off
+  const SOLDIER_BLAST_R = 2.0;      // tiles
+  const SOLDIER_BLAST_DMG = 16;     // per wolf inside the blast
+  const SOLDIER_SEEK_R = 26;        // tiles — beyond this it just mills about like any bird
   // Player-2 cameo — a very rare single-player easter egg, at most once a run.
   const P2_CAMEO_CHANCE = 0.04;     // per-wave roll while it hasn't appeared yet
   const P2_CAMEO_LIFE   = 14;       // seconds it wanders before strolling off

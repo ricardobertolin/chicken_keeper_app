@@ -14,6 +14,11 @@
     // this was hard-coded at 100 and survived the squash down to 50.
     toast('WAVE ' + BOSS_WAVE + ' — the ground trembles…', 3.5);
     playNightOfWolfStart();
+    // Wartime effort: the farm goes onto a war footing for the fight. The
+    // coops lay +50% faster (wartimeHatchMul) and someone starts airdropping
+    // supply crates (updateSupplyDrops). Announced on a delay so it doesn't
+    // step on the wave banner above.
+    wartimeNoticeT = 3.6;
   }
 
   // Drop the boss in at the next corner with a fresh health bar.
@@ -609,6 +614,7 @@
     for (let i = dummies.length - 1; i >= 0; i--) if (dist2(dummies[i].x, dummies[i].y, x, y) < r2) { spawnSmoke(dummies[i].x, dummies[i].y, 4); dummies.splice(i, 1); }
     for (let i = statues.length - 1; i >= 0; i--) if (dist2(statues[i].x, statues[i].y, x, y) < r2) { spawnSmoke(statues[i].x, statues[i].y, 4); statues.splice(i, 1); }
     for (let i = farms.length - 1; i >= 0; i--) if (dist2(farms[i].x, farms[i].y, x, y) < r2) { spawnSmoke(farms[i].x, farms[i].y, 3); farms.splice(i, 1); }
+    openCratesInBlast(x, y, BOSS_BULLET_BLAST_R); // FANGUS shelling its own airdrop
     // NOTE: coops are deliberately spared here — only the MK-04 missiles damage
     // coops (lose floors + ignite). Bullets just flatten the smaller placeables.
   }
@@ -2315,6 +2321,14 @@
           return false;
         }
       }
+    }
+    // Supply crates are solid: any round that reaches one is spent on the
+    // planks, whoever fired it. This is the only way to get a crate open, so
+    // it deliberately accepts hunter and wolf fire too — the pack shooting
+    // your loot box open for you is a fair outcome.
+    if (supplyCrates.length) {
+      const cr = supplyCrateAt(p.x, p.y, 0.55);
+      if (cr) { hurtSupplyCrate(cr, p.dmg, p.shooter); return false; }
     }
     // Hit wolves — a pellet expires once its pierce budget runs out (1 for
     // normal pellets, 10 for the Tighter Pattern MAX slug). The hit set stops

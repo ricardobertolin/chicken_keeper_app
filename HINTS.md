@@ -45,7 +45,7 @@ the source, not anything the game shows: hints are drawn in random order.
 23. Who knew the pack had a currency of its own?
 24. Life was easier back when the wolves didn't go for the coops.
 25. Maybe ghosts really can possess things...
-26. I could swear I saw Buddy out there — and there was nobody else on this farm. Hmm.
+26. I could swear I saw Buddy out there — and there was nobody else on this site. Hmm.
 
 ## Weather
 

@@ -556,6 +556,10 @@
       if (!c.carrier.alive) { c.carrier = null; }
       else { c.x = c.carrier.x; c.y = c.carrier.y; return; }
     }
+    // Soldier chicken: charges the pack instead of fleeing it. Falls through to
+    // the normal bird behaviour when there's nothing on the field to charge,
+    // so a soldier between waves mills around with the rest of the flock.
+    if (c.soldier && updateSoldierChicken(c, dt)) return;
     // Find nearest wolf
     let nearestWolf = null, nd = Infinity;
     for (const w of wolves) {
@@ -683,6 +687,75 @@
     c.x = clamp(c.x, -HALF_MAP + 1, HALF_MAP - 1);
     c.y = clamp(c.y, -HALF_MAP + 1, HALF_MAP - 1);
     c.bob += dt * ((c.flutterT || 0) > 0 ? 22 : Math.hypot(c.vx, c.vy) > 0.1 ? 12 : 2);
+  }
+
+  // ---- Soldier chicken ----------------------------------------------------
+  // Helmet, a bundle of TNT, and no survival instinct whatsoever. Picks the
+  // nearest wolf, runs it down, and lights the fuse once it's close enough.
+  // Returns true when it has taken the chicken's turn; false means "nothing to
+  // charge" and the caller runs the ordinary flock behaviour instead.
+  function updateSoldierChicken(c, dt) {
+    // Fuse already lit — nothing stops it now, not even the target dying.
+    if ((c.fuseT || 0) > 0) {
+      c.fuseT -= dt;
+      c.vx = 0; c.vy = 0;
+      c.bob += dt * 26; // frantic last-second flapping
+      if (c.fuseT <= 0) detonateSoldierChicken(c);
+      return true;
+    }
+    let target = null, best = SOLDIER_SEEK_R * SOLDIER_SEEK_R;
+    for (const w of wolves) {
+      // Airborne parachuters can't be reached, and a corpse isn't a target.
+      if (!w.alive || w.parachuting) continue;
+      const d = dist2(c.x, c.y, w.x, w.y);
+      if (d < best) { best = d; target = w; }
+    }
+    if (!target) return false; // no war on right now — behave like a chicken
+    const dx = target.x - c.x, dy = target.y - c.y;
+    const m = Math.hypot(dx, dy) || 1;
+    if (m <= SOLDIER_FUSE_R) {
+      c.fuseT = SOLDIER_FUSE_T;
+      c.vx = 0; c.vy = 0;
+      playFuseHiss();
+      return true;
+    }
+    c.vx = (dx / m) * SOLDIER_SPEED;
+    c.vy = (dy / m) * SOLDIER_SPEED;
+    c.fleeT = 0;        // a soldier never panics
+    c.flutterT = 0;     // and never flutters home
+    const sSvx = c.vx - c.vy;
+    if (Math.abs(sSvx) > 0.05) c.facingLeft = sSvx < 0;
+    // Chickens phase through fences, so this is a plain step + clamp like the
+    // ordinary movement path. No fatMul: a soldier is never fat.
+    c.x = clamp(c.x + c.vx * dt, -HALF_MAP + 1, HALF_MAP - 1);
+    c.y = clamp(c.y + c.vy * dt, -HALF_MAP + 1, HALF_MAP - 1);
+    c.bob += dt * 16;
+    return true;
+  }
+  // The TNT goes off. Hurts the pack only — the keeper gave this bird its
+  // orders, so it won't take their hats off with it. (The crate's own
+  // booby-trapped payload is the thing that bites the player; see
+  // openSupplyCrate.)
+  function detonateSoldierChicken(c) {
+    spawnBlast(c.x, c.y);
+    spawnSmoke(c.x, c.y, 8);
+    spawnScorch(c.x, c.y);
+    playExplosion();
+    shake = Math.max(shake, 0.34);
+    const r2 = SOLDIER_BLAST_R * SOLDIER_BLAST_R;
+    for (const w of wolves) {
+      if (!w.alive) continue;
+      if (dist2(w.x, w.y, c.x, c.y) >= r2) continue;
+      const dx = w.x - c.x, dy = w.y - c.y;
+      const m = Math.hypot(dx, dy) || 1;
+      hurtWolf(w, SOLDIER_BLAST_DMG, (dx / m) * 0.38, (dy / m) * 0.38);
+    }
+    // Routed through killChicken like the worker chicken's fence-rebuild
+    // sacrifice, so the wave's death tally treats both self-sacrifices the
+    // same way. NOTE that means a detonating soldier counts as a chicken lost
+    // for the bonus-pick roll.
+    killChicken(c);
+    checkWaveDefended(); // the blast may have cleared the last wolf
   }
 
   // Fat Chickens at max tier: a slain chicken may burst, blasting nearby
