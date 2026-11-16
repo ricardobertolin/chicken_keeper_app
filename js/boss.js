@@ -10,7 +10,9 @@
     endScreen = false;
     waveActive = true;
     waveElapsed = 0;
-    toast('WAVE 100 — the ground trembles…', 3.5);
+    // Reads the constant so it can't drift from the actual boss wave again —
+    // this was hard-coded at 100 and survived the squash down to 50.
+    toast('WAVE ' + BOSS_WAVE + ' — the ground trembles…', 3.5);
     playNightOfWolfStart();
   }
 
@@ -856,7 +858,7 @@
       if (w.smokeT <= 0) { w.smokeT = 0.18; spawnSmoke(w.x, w.y - 0.5, 1); }
     }
     if (w.sabotageFuseT >= SABOTAGE_FUSE) { explodeSabotagedWolf(w); return; }
-    const baseSpeed = 2.2 * (w.speedMul || 1) * weatherSpeedMul(); // snow bogs the pack down
+    const baseSpeed = 2.2 * (w.speedMul || 1) * weatherWolfSpeedMul(); // snow bogs the pack down hard
     // Turncoat: pick the nearest live non-defective wolf as prey and chew it down.
     if (w.turncoat) {
       let prey = null, nd = Infinity;
@@ -2269,7 +2271,9 @@
       if (p.y < -B) { p.y = -B; p.vy = Math.abs(p.vy); }
       else if (p.y > B) { p.y = B; p.vy = -Math.abs(p.vy); }
     } else if (!inBounds(p.x, p.y)) return false;
-    if (stoneFenceBlocks(p.x, p.y)) {
+    // ignoreWalls rounds (the rooftopper's, fired from a roof) sail straight
+    // over stone — they'd otherwise bury themselves in the player's own wall.
+    if (!p.ignoreWalls && stoneFenceBlocks(p.x, p.y)) {
       // Size Matters MAX: ricochet off stone walls too (not just the border).
       if (p.bounce) {
         const px = p.x - p.vx * dt, py = p.y - p.vy * dt;

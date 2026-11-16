@@ -87,6 +87,30 @@
     }
   }
 
+  // Boot-prints pressed into the snow, fading as they fill back in. Drawn
+  // flat on the ground right after the tiles so everything walks over them.
+  function drawSnowTrails() {
+    ctx.save();
+    for (const s of snowTrails) {
+      const p = worldToScreen(s.x, s.y);
+      const a = Math.max(0, s.t / s.life) * 0.5;
+      if (a <= 0.01) continue;
+      ctx.globalAlpha = a;
+      ctx.fillStyle = '#9fb1c4'; // packed-down snow reads darker than fresh
+      ctx.save();
+      ctx.translate(p.x, p.y + TILE_H / 2);
+      ctx.rotate(s.ang);
+      const w = s.big ? 2.6 : 2.0, h = s.big ? 1.5 : 1.1;
+      // Two small prints side by side — a pair of feet, not a smear.
+      ctx.beginPath();
+      ctx.ellipse(0, -h * 0.9, w, h, 0, 0, Math.PI * 2);
+      ctx.ellipse(0,  h * 0.9, w, h, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
   // A cap of settled snow sitting on top of something, drawn as a squashed
   // white ellipse. Used for tree crowns and coop roofs during a blizzard.
   function drawSnowCap(cx, cy, rx, ry) {
@@ -124,9 +148,9 @@
     ctx.translate(sx, sy);
 
     drawGround();
+    if (snowTrails.length) drawSnowTrails(); // on the ground, under everything
     drawEntities();
     drawLaserPreviews(); // red telegraph lines for locking lasers (wolf + boss)
-    if (graves.length) drawGraves();
     if (wolfScrap.length) drawWolfScrap();
     if (bossWaveActive) drawChickenSuckers();
     if (bossBurstChickens.length) drawBossBurstChickens();
@@ -601,11 +625,13 @@
     // so the tile-to-tile variation still shows through as drift texture.
     // rollWeather() clears this cache whenever the weather changes, so the
     // snow goes on and comes off cleanly.
-    if (snowing()) {
+    const cover = snowCover();
+    if (cover > 0) {
       const SNOW = [226, 236, 246];
-      r = Math.round(r + (SNOW[0] - r) * 0.86);
-      g = Math.round(g + (SNOW[1] - g) * 0.86);
-      b = Math.round(b + (SNOW[2] - b) * 0.86);
+      const k = 0.86 * cover; // full during the storm, a dusting the wave after
+      r = Math.round(r + (SNOW[0] - r) * k);
+      g = Math.round(g + (SNOW[1] - g) * k);
+      b = Math.round(b + (SNOW[2] - b) * k);
     }
     const color = `rgb(${r},${g},${b})`;
     _tileColorCache.set(key, color);
@@ -662,6 +688,10 @@
     for (const s of scorches) items.push({ depth: s.x + s.y - 0.13, draw: () => drawScorch(s) });
     for (const h of holes) items.push({ depth: h.x + h.y - 0.12, draw: () => drawHole(h) });
     for (const m of mines) items.push({ depth: m.x + m.y - 0.10, draw: () => drawMine(m) });
+    // Graves join the depth sort like any other standing prop, so the keeper
+    // walks in front of one that's nearer the camera instead of the headstone
+    // always being painted over the top of everyone.
+    for (const g of graves) items.push({ depth: g.x + g.y, draw: () => drawGrave(g) });
     for (const dm of dummies) items.push({ depth: dm.x + dm.y, draw: () => drawDummy(dm) });
     for (const st of statues) items.push({ depth: st.x + st.y, draw: () => drawStatue(st) });
     for (const c of chickens) {
@@ -719,13 +749,21 @@
     ctx.beginPath();
     ctx.ellipse(cx, cy, 6, 3, 0, 0, Math.PI * 2);
     ctx.fill();
-    // Tiny dark dot at the centre — the pressure plate. Bumps up slightly at
-    // higher tiers so a maxed mine reads a touch better.
-    const dotR = 1.1 + (lvl - 1) * 0.15;
-    ctx.fillStyle = 'rgba(20,16,10,0.55)';
+    // An X scratched in the dirt marks the spot — far easier to pick out at a
+    // glance than the single dot this replaces. Grows slightly with tier.
+    const xr = 2.2 + (lvl - 1) * 0.35;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(20,16,10,0.62)';
+    ctx.lineWidth = 1.4;
+    ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.arc(cx, cy - 1, dotR, 0, Math.PI * 2);
-    ctx.fill();
+    // Drawn on the tile's isometric axes so it lies flat on the ground.
+    ctx.moveTo(cx - xr * 1.7, cy - 1 - xr * 0.85);
+    ctx.lineTo(cx + xr * 1.7, cy - 1 + xr * 0.85);
+    ctx.moveTo(cx + xr * 1.7, cy - 1 - xr * 0.85);
+    ctx.lineTo(cx - xr * 1.7, cy - 1 + xr * 0.85);
+    ctx.stroke();
+    ctx.restore();
     // Max-level: faint warning ring, a barely visible blinker, and a tiny
     // red flag jutting out of the dirt so you can actually spot your own
     // mines on the battlefield.
@@ -830,6 +868,10 @@
   // Jagged crack overlay drawn on a wall that's below half health. Seeded off
   // the tile position so a given wall's cracks don't crawl between frames.
   function drawFenceCracks(f, cx, cy, h) {
+    // The build-mode ghost has no hp/maxHp at all, so the comparison below used
+    // to read `undefined > n` → false and crack every preview. A preview is
+    // always pristine; only a real, placed, damaged wall splits.
+    if (typeof f.hp !== 'number') return;
     if (f.hp > fenceMaxHp(f) / 2) return;
     const seed = Math.abs(Math.round(f.x * 73856093 + f.y * 19349663));
     const rnd = i => (((seed >> (i % 12)) ^ (seed * (i + 3))) % 1000) / 1000;
@@ -3063,9 +3105,10 @@
     }
     // Snow piled along the eaves during a blizzard. Drawn across the roof's
     // lower edge rather than per roof-shape, so it reads the same on all three.
-    if (snowing() && !preview) {
-      drawSnowCap(cx, cy - topLift + 1, hw * 0.92, 3.4);
-      drawSnowCap(cx, cy - topLift - roofH * 0.45, hw * 0.5, 2.6);
+    if (snowCover() > 0 && !preview) {
+      const cv = snowCover();
+      drawSnowCap(cx, cy - topLift + 1, hw * 0.92, 3.4 * cv);
+      drawSnowCap(cx, cy - topLift - roofH * 0.45, hw * 0.5, 2.6 * cv);
     }
     // Cryptid Radar: small satellite dishes bolted to the coop's FLOOR WALLS
     // (not the roof) on a short outward arm. Only about HALF the coops sport
@@ -3509,11 +3552,12 @@
     ctx.arc(fx - 2 * s, cy - 50 * s, 2.5 * s, 0, Math.PI * 2);
     ctx.fill();
     // Snow settles along the top of the crown during a blizzard.
-    if (snowing()) {
-      drawSnowCap(fx,         cy - 50 * s, 5.4 * s, 3.2 * s);
-      drawSnowCap(fx,         cy - 44 * s, 7.2 * s, 3.0 * s);
-      drawSnowCap(fx - 5 * s, cy - 36 * s, 5.0 * s, 2.4 * s);
-      drawSnowCap(fx + 5 * s, cy - 36 * s, 5.0 * s, 2.4 * s);
+    if (snowCover() > 0) {
+      const cv = snowCover();
+      drawSnowCap(fx,         cy - 50 * s, 5.4 * s, 3.2 * s * cv);
+      drawSnowCap(fx,         cy - 44 * s, 7.2 * s, 3.0 * s * cv);
+      drawSnowCap(fx - 5 * s, cy - 36 * s, 5.0 * s, 2.4 * s * cv);
+      drawSnowCap(fx + 5 * s, cy - 36 * s, 5.0 * s, 2.4 * s * cv);
     }
   }
 
@@ -3522,50 +3566,64 @@
   // A plain headstone where a keeper fell. Hidden behind the game-over and
   // boss end screens — those already say what happened, and a marker under the
   // scoreboard just reads as clutter.
-  function drawGraves() {
+  function drawGrave(g) {
     if (gameOver || endScreen) return;
-    for (const g of graves) {
-      drawShadow(g.x, g.y, 0.4);
-      const p = worldToScreen(g.x, g.y);
-      const cx = p.x, cy = p.y + TILE_H / 2;
-      ctx.save();
-      ctx.translate(cx, cy);
-      ctx.rotate(g.lean || 0); // settled a little crooked in the dirt
-      // Slab: a rounded-top stone.
-      ctx.fillStyle = '#8d8d96';
-      ctx.strokeStyle = '#4a4a52';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(-5, 0);
-      ctx.lineTo(-5, -8);
-      ctx.arc(0, -8, 5, Math.PI, 0);
-      ctx.lineTo(5, 0);
-      ctx.closePath();
-      ctx.fill();
-      ctx.stroke();
-      // Shaded right face so it reads as stone, not paper.
-      ctx.fillStyle = 'rgba(0,0,0,0.16)';
-      ctx.beginPath();
-      ctx.moveTo(1.5, -12.5);
-      ctx.lineTo(5, -8);
-      ctx.lineTo(5, 0);
-      ctx.lineTo(1.5, 0);
-      ctx.closePath();
-      ctx.fill();
-      // "RIP"
-      ctx.fillStyle = '#3f3f47';
-      ctx.font = 'bold 5px "Lucida Console", Consolas, monospace';
-      ctx.textAlign = 'center';
-      ctx.fillText('RIP', 0, -7);
-      ctx.restore();
-      // A tuft of grass at the base.
-      ctx.strokeStyle = '#3f7a3a';
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(cx - 6, cy); ctx.lineTo(cx - 7.5, cy - 3);
-      ctx.moveTo(cx + 6, cy); ctx.lineTo(cx + 7.5, cy - 2.5);
-      ctx.stroke();
-    }
+    const p = worldToScreen(g.x, g.y);
+    const cx = p.x, cy = p.y + TILE_H / 2;
+    drawShadow(g.x, g.y, 0.42);
+    // A low mound of turned earth the stone is planted in.
+    ctx.fillStyle = 'rgba(74, 52, 30, 0.55)';
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, 8, 3.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.save();
+    ctx.translate(cx, cy - 1);
+    ctx.rotate(g.lean || 0); // settled a little crooked in the dirt
+    const W2 = 6, HGT = 13, R = 6;
+    // Face of the slab: straight sides with a domed top.
+    ctx.beginPath();
+    ctx.moveTo(-W2, 0);
+    ctx.lineTo(-W2, -HGT + R);
+    ctx.arc(0, -HGT + R, R, Math.PI, 0);
+    ctx.lineTo(W2, 0);
+    ctx.closePath();
+    ctx.fillStyle = '#9a9aa4';
+    ctx.fill();
+    ctx.strokeStyle = '#43434b';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    // Right-hand side in shadow, clipped to the slab so it can't spill out
+    // past the dome the way the old loose polygon did.
+    ctx.save();
+    ctx.clip();
+    ctx.fillStyle = 'rgba(0,0,0,0.20)';
+    ctx.fillRect(1.6, -HGT - 2, W2 + 2, HGT + 4);
+    // Weathered highlight down the left edge.
+    ctx.fillStyle = 'rgba(255,255,255,0.14)';
+    ctx.fillRect(-W2, -HGT - 2, 1.8, HGT + 4);
+    ctx.restore();
+    // Engraved cross above the lettering.
+    ctx.strokeStyle = 'rgba(58,58,66,0.85)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(0, -11.4); ctx.lineTo(0, -7.6);
+    ctx.moveTo(-1.7, -9.9); ctx.lineTo(1.7, -9.9);
+    ctx.stroke();
+    ctx.fillStyle = '#3a3a42';
+    ctx.font = 'bold 5px "Lucida Console", Consolas, monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText('RIP', 0, -3.4);
+    ctx.restore();
+
+    // Tufts of grass either side of the mound.
+    ctx.strokeStyle = '#3f7a3a';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx - 7, cy + 0.5); ctx.lineTo(cx - 8.4, cy - 2.4);
+    ctx.moveTo(cx + 7, cy + 0.5); ctx.lineTo(cx + 8.2, cy - 2.0);
+    ctx.stroke();
   }
 
   // Parts flung off a wolf that came apart on death — plates, struts and cogs
@@ -4489,12 +4547,15 @@
     // Brute: a heavy slanted brow over the eye — the one tell that this wolf
     // is carrying ten times the usual health.
     if (w.brute) {
+      // Sits just above the eye (which starts at cy-15) and slants down toward
+      // the snout for the scowl. It used to ride up at cy-18 where it collided
+      // with the ear and read as a floating bar rather than a brow.
       ctx.strokeStyle = '#1d1d22';
-      ctx.lineWidth = 2.2 * s;
+      ctx.lineWidth = 1.9 * s;
       ctx.lineCap = 'round';
       ctx.beginPath();
-      ctx.moveTo(cx + 8.5 * s, cy - 18.2 * s);  // inner, low and angry
-      ctx.lineTo(cx + 13.8 * s, cy - 16.2 * s); // outer, lower still
+      ctx.moveTo(cx + 9.0 * s,  cy - 16.8 * s); // back of the brow, raised
+      ctx.lineTo(cx + 13.6 * s, cy - 15.5 * s); // front, dipping over the eye
       ctx.stroke();
     }
     // Night of the Wolf: paint a small bright glow over the eye so it stays

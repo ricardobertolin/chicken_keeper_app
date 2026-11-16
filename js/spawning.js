@@ -32,7 +32,7 @@
     for (let i = 0; i < mines.length; i++) {
       if (mines[i].x === x && mines[i].y === y) {
         // Mines refund 60% so disarming is a useful option, not a trap.
-        return { array: mines, index: i, label: 'Explosive Mine', refund: Math.floor(MINE_COST * 0.6) };
+        return { array: mines, index: i, label: 'Explosive Mine', refund: Math.floor(mineCost() * 0.6) };
       }
     }
     // Debug DPS dummies live in wolves[] (stationary, integer-tile coords).
@@ -206,7 +206,7 @@
     else if (type === 'stonefence') label = 'Stone Wall ($' + STONE_FENCE_COST + ')' + (upgradeLevels.stoneWall > 0 ? '' : ' — LOCKED');
     else if (type === 'dummy') label = 'Scarecrow ($' + DUMMY_COST + ')' + (upgradeLevels.dummy > 0 ? '' : ' — LOCKED');
     else if (type === 'statue') label = 'Chicken Statue ($' + STATUE_COST + ')' + (upgradeLevels.statue > 0 ? '' : ' — LOCKED');
-    else if (type === 'mine') label = 'Explosive Mine ($' + MINE_COST + ')' + (upgradeLevels.mine > 0 ? '' : ' — LOCKED');
+    else if (type === 'mine') label = 'Explosive Mine ($' + mineCost() + ')' + (upgradeLevels.mine > 0 ? '' : ' — LOCKED');
     else if (type === 'dpsdummy') label = 'DPS Dummy (debug, free)';
     else label = 'Wooden Fence ($' + FENCE_COST + ')' + (upgradeLevels.woodFence > 0 ? '' : ' — LOCKED');
     return prefix + 'Build: ' + label + ' — ' + switchHint + ', ' + placeHint;
@@ -356,15 +356,15 @@
   function placeMine(builder) {
     builder = builder || player;
     if (upgradeLevels.mine < 1) { buildToast(builder, 'Explosive Mine upgrade needed'); return; }
-    if (moneyOf(builder) < MINE_COST) { exitBuildModeFor(builder); buildToast(builder, 'Need $' + MINE_COST + ' to bury a mine'); return; }
+    if (moneyOf(builder) < mineCost()) { exitBuildModeFor(builder); buildToast(builder, 'Need $' + mineCost() + ' to bury a mine'); return; }
     const target = getBuildTarget(builder);
     if (!target.valid) { buildToast(builder, target.reason); return; }
     // Snapshot the current mine tier — later upgrades won't retroactively
     // beef this mine up, so the player has to weigh placing now vs banking.
     mines.push({ x: target.x, y: target.y, level: upgradeLevels.mine, _decoy: 'mine' });
-    spendMoney(builder, MINE_COST);
+    spendMoney(builder, mineCost());
     playBuild();
-    buildToast(builder, 'Mine buried.  -$' + MINE_COST, 0.9);
+    buildToast(builder, 'Mine buried.  -$' + mineCost(), 0.9);
   }
 
   // Check every buried mine for an entity standing on it. The trigger
@@ -410,9 +410,13 @@
       if (dist2(w.x, w.y, m.x, m.y) >= r2) continue;
       const dx = w.x - m.x, dy = w.y - m.y;
       const dd = Math.hypot(dx, dy) || 1;
-      hurtWolf(w, dmg, (dx / dd) * 0.4, (dy / dd) * 0.4);
+      // Mines are the one anti-armour tool that really bites FANGUS — laying a
+      // minefield in its path is meant to be a genuine strategy, so the boss
+      // eats double. (bossTakeDamage still applies its per-second cap.)
+      hurtWolf(w, w.boss ? dmg * MINE_BOSS_DMG_MUL : dmg, (dx / dd) * 0.4, (dy / dd) * 0.4);
     }
-    explosionHitKeepers(m.x, m.y, r);
+    // A maxed mine is keyed to the pack and won't go off under a keeper.
+    if (lvl < 5) explosionHitKeepers(m.x, m.y, r);
     holes.push({ x: m.x, y: m.y });
   }
 
@@ -876,6 +880,7 @@
   // Ghost wolf — looks like a hunter wolf but vanishes silently when hit.
   // Spawn chance starts at 0% and grows +2% per player death.
   function spawnGhostWolf() {
+    playMagic(); // the same shimmering sting the buddy cameo arrives on
     const sp = pickEdgeSpawn();
     wolves.push({
       x: sp.x, y: sp.y, vx: 0, vy: 0,
@@ -1219,6 +1224,9 @@
       color: '#ffaa3a',
       trail: true,
       rooftop: true,            // drawn with a sniper glow
+      // Fired from a rooftop, so it arcs clean over fences, walls and any
+      // other ground obstacle instead of burying itself in your own wall.
+      ignoreWalls: true,
       shooter: 'hunter',        // reuses the hunter friendly-fire rules
     });
   }
@@ -1270,6 +1278,42 @@
       });
     }
     huntersGroups = huntersCamps.length;
+  }
+
+  // Top every standing camp back up to HUNTER_COUNT live hunters. Fresh
+  // arrivals come in at the current gear tier. Called when gear is bought, so
+  // the purchase rebuilds a thinned-out crew rather than only upgrading the
+  // survivors. Dead bodies are left in place — only the live count matters.
+  function refillHunterCamps() {
+    const tier = hunterPowerLvl();
+    const startHp = HUNTER_POWER_HP[tier];
+    for (const camp of huntersCamps) {
+      let live = 0;
+      for (const h of hunters) if (h.alive && h.camp === camp) live++;
+      for (let i = live; i < HUNTER_COUNT; i++) {
+        const a = (i / HUNTER_COUNT) * Math.PI * 2;
+        hunters.push({
+          x: camp.x + Math.cos(a) * 1.1,
+          y: camp.y + Math.sin(a) * 1.1,
+          vx: 0, vy: 0,
+          alive: true,
+          hp: startHp,
+          maxHp: startHp,
+          hurtT: 0,
+          facingLeft: false,
+          attackT: rand(0.4, 1.4),
+          dir: a,
+          walkT: 0,
+          weapon: hunterWeaponForTier(tier),
+          burstLeft: 0,
+          camp,
+          sombrero: Math.random() < 0.25,
+          _hunter: true,
+        });
+      }
+    }
+    // Fresh blood means the crew is no longer walking out at wave end.
+    huntersLeavePending = false;
   }
 
   function spawnHuntersCamp() {
@@ -1614,11 +1658,19 @@
     const prev = weather;
     weather = '';
     if (!nightOfWolf) {
-      if (weatherRollFor('rain')) {
+      // A debug-forced event is resolved FIRST. Rain is rolled before snow, so
+      // without this a random rain hit could quietly preempt a forced snow and
+      // the Force Snow button would look broken perhaps one time in six.
+      let pick = '';
+      if (weatherEvents.rain.force)      pick = weatherRollFor('rain') ? 'rain' : '';
+      else if (weatherEvents.snow.force) pick = weatherRollFor('snow') ? 'snow' : '';
+      else if (weatherRollFor('rain'))   pick = 'rain';
+      else if (weatherRollFor('snow'))   pick = 'snow';
+      if (pick === 'rain') {
         weather = 'rain';
         weatherEvents.rain.count++;
         toast('A downpour rolls in — the pack is shorting out!', 3.2);
-      } else if (weatherRollFor('snow')) {
+      } else if (pick === 'snow') {
         weather = 'snow';
         weatherEvents.snow.count++;
         giveSnowGift();
@@ -1629,17 +1681,51 @@
       _tileColorCache.clear();
       rainDrops.length = 0;
       snowFlakes.length = 0;
+      // The map changes look wholesale here, so hide the swap behind the same
+      // quick wipe the post-boss restart uses rather than popping mid-frame.
+      startBlackFade(null);
     }
   }
 
-  // Winter gift: a hand-up that's worth most when the player is broke, so a
-  // blizzard is a lifeline on a bad run rather than a bonus on a good one.
+  // Winter gift: a hand-up worth most when the player is broke, so a blizzard
+  // is a lifeline on a bad run rather than a bonus on a good one. The cap
+  // scales with the wave so it stays meaningful late without being free money.
+  //
+  //   cap  = wave * 2                 (the most anyone can get)
+  //   gift = cap - money / 2          (taper), clamped to [1, cap]
+  //
+  // which means a player holding 2x the cap is already past the taper and
+  // receives the single-coin floor. At wave 15 (cap $30): broke -> $30,
+  // $30 in hand -> $15, $60 or more in hand -> $1.
+  function snowGiftFor(waveNo, have) {
+    const cap = Math.max(1, Math.round(waveNo * SNOW_GIFT_WAVE_MUL));
+    return clamp(Math.round(cap - Math.max(0, have) / 2), 1, cap);
+  }
   function giveSnowGift() {
-    const have = Math.max(0, moneyOf(player));
-    const t = Math.max(0, 1 - have / SNOW_GIFT_FULL_AT);
-    const gift = Math.round(SNOW_GIFT_MIN + (SNOW_GIFT_MAX - SNOW_GIFT_MIN) * t);
+    const gift = snowGiftFor(wave, moneyOf(player));
     addSharedMoney(gift);
     toast('Snowfall — a winter gift of $' + gift + '!', 3.2);
+  }
+
+  // The weather breaks when the wave is defended — mirrors how Night of the
+  // Wolf clears itself and announces it, so an event always has a visible
+  // start AND end rather than just quietly stopping at the next wave roll.
+  function endWeather() {
+    if (!weather) return;
+    const was = weather;
+    weather = '';
+    rainDrops.length = 0;
+    snowFlakes.length = 0;
+    // A blizzard leaves the farm under a dusting for the next wave rather than
+    // snapping straight back to green; snowCover() reports the lighter value
+    // and startWave counts it down.
+    if (was === 'snow') snowLeftover = SNOW_LEFTOVER_WAVES + 1;
+    else snowTrails.length = 0;
+    _tileColorCache.clear(); // repaint the ground at the new cover level
+    toast(was === 'rain'
+      ? 'The rain passes — the pack steadies itself.'
+      : 'The snow stops — a dusting lingers on the farm.', 3.2);
+    playNightOfWolfEnd(); // the same soft "it's over" sting the night uses
   }
 
   // Rain: a wolf's circuits give out and it cooks off where it stands. Hurts
@@ -1662,11 +1748,45 @@
     checkWaveDefended(); // it removed itself — the wave may now be clear
   }
 
+  // Drop a boot-print if `e` has moved far enough since its last one. Shared
+  // by the keepers and the pack so everything walking the farm leaves a track.
+  function markSnowTrail(e, big) {
+    if (!snowing()) return;
+    const lx = e._trailX, ly = e._trailY;
+    if (lx !== undefined && dist2(e.x, e.y, lx, ly) < SNOW_TRAIL_STEP * SNOW_TRAIL_STEP) return;
+    e._trailX = e.x; e._trailY = e.y;
+    if (lx === undefined) return; // first sample just seeds the position
+    if (snowTrails.length > 400) snowTrails.shift(); // hard ceiling, oldest first
+    snowTrails.push({
+      x: e.x, y: e.y,
+      ang: Math.atan2(e.y - ly, e.x - lx),
+      t: SNOW_TRAIL_LIFE, life: SNOW_TRAIL_LIFE,
+      big: !!big,
+    });
+  }
+
+  function updateSnowTrails(dt) {
+    for (let i = snowTrails.length - 1; i >= 0; i--) {
+      const s = snowTrails[i];
+      s.t -= dt;
+      if (s.t <= 0) snowTrails.splice(i, 1);
+    }
+    if (!snowing()) return;
+    markSnowTrail(player, true);
+    if (player2.active && !player2.ghost) markSnowTrail(player2, true);
+    for (const w of wolves) if (w.alive && !w.parachuting) markSnowTrail(w, false);
+  }
+
   // Per-frame weather tick: short-outs during rain, plus the screen particles.
   function updateWeather(dt) {
+    updateSnowTrails(dt);
     if (raining()) {
       for (const w of wolves) {
         if (!w.alive || w.boss || w.parachuting) continue;
+        // Only the wolves the rain actually got into cook off. Previously this
+        // rolled on EVERY wolf, so even the dry two-thirds blew up and the
+        // whole pack looked like it had lost its mind.
+        if (!w.defective) continue;
         if (Math.random() < RAIN_SHORT_OUT_PER_SEC * dt) wolfShortOut(w);
       }
     }
@@ -1684,6 +1804,12 @@
     // Headstones only mark the round in which someone fell (same one-wave life
     // as the hunters' burnt-out fireplace).
     graves.length = 0;
+    // Age out the post-blizzard dusting.
+    if (snowLeftover > 0) {
+      snowLeftover--;
+      if (snowLeftover === 0) snowTrails.length = 0;
+      _tileColorCache.clear();
+    }
     morphChickens();
     // Prune stumps and twigs that have decayed (existed for their allotted wave count).
     for (let i = stumps.length - 1; i >= 0; i--) {
@@ -1810,7 +1936,8 @@
         spawnWolf();
       }, spawnDelay + i * spawnStagger);
     }
-    // Cryptid Radar boosts the per-wave roll for every rare wolf variant.
+    // Cryptid Radar boosts the per-wave roll for every rare wolf variant —
+    // including the moonwalker and the brute (see their rolls below).
     const cryptidMul = CRYPTID_RADAR_MUL[Math.min(5, upgradeLevels.cryptidRadar || 0)];
     // Rare: a fox slips in alongside the pack (6% per wave × cryptid mul).
     // Foxes are scarce in the opening waves (when a snatched chicken hurts
@@ -1915,8 +2042,9 @@
         spawnParachuteWolf();
       }, spawnDelay + rand(400, 2200));
     }
-    // Moonwalker — same rarity as the parachute drop.
-    if (wave >= MOONWALK_WAVE && Math.random() < MOONWALK_RATE) {
+    // Moonwalker — same rarity as the parachute drop, and like every other
+    // cryptid its odds climb with Cryptid Radar.
+    if (wave >= MOONWALK_WAVE && Math.random() < MOONWALK_RATE * cryptidMul) {
       pendingSpawns++;
       setTimeout(() => {
         if (gen !== runGen) return;
@@ -1925,8 +2053,8 @@
         spawnMoonwalkWolf();
       }, spawnDelay + rand(400, 2200));
     }
-    // Brute — same rarity again.
-    if (wave >= BRUTE_WAVE && Math.random() < BRUTE_RATE) {
+    // Brute — same rarity again, also radar-boosted.
+    if (wave >= BRUTE_WAVE && Math.random() < BRUTE_RATE * cryptidMul) {
       pendingSpawns++;
       setTimeout(() => {
         if (gen !== runGen) return;
@@ -2127,6 +2255,7 @@
     if (nightSurvived) {
       toast('Night of the Wolf survived — payout doubled!', 3.2);
     }
+    endWeather(); // the rain/snow lifts with the wave, and says so
     // Per-player karma drift — each keeper's tint reacts to their own kills,
     // not the buddy's. The legacy `karma` global mirrors player1's so older
     // call sites (Karma Resurrect, debug buttons) keep working.

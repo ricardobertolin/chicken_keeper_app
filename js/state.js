@@ -261,6 +261,13 @@
   const MINE_TRIGGER_R = 0.55;     // distance at which an entity sets off the mine
   const MINE_RADIUS = [0, 1.6, 1.9, 2.2, 2.5, 3.0]; // blast radius (tiles) by level
   const MINE_DMG    = [0, 4, 6, 9, 12, 16];          // damage per wolf inside the blast
+  const MINE_BOSS_DMG_MUL = 2;   // FANGUS takes double from a mine
+  const MINE_MAX_COST_MUL = 2;   // a maxed (keeper-safe) mine costs twice as much
+  // Cost of the next mine: the top tier is friend-or-foe keyed, and that
+  // safety is paid for.
+  function mineCost() {
+    return MINE_COST * ((upgradeLevels.mine || 0) >= 5 ? MINE_MAX_COST_MUL : 1);
+  }
   // Sabotage upgrade (wave 40+): per-level chance a fresh wolf hatches with
   // a glitching "defective" core — it wanders aimlessly with a flickering
   // eye instead of hunting. At max level a defective wolf has a small extra
@@ -613,6 +620,11 @@
   let pendingCarryMoney = 0; // post-boss restarts carry 0.1% of the run's money (NOT doubled)
   let runMoneyEarned = 0;    // every $ credited this run — death-screen restarts carry RESTART_CARRY_PCT of it
   const RESTART_CARRY_PCT = 0.02; // share of the run's earnings a death-restart keeps
+  // New-game-plus doubles the starting wallet per boss cleared (20 * 2^tier),
+  // which ran away fast: tier 3 already opened on $160 and tier 5 on $640,
+  // trivialising the early waves. A post-boss run now opens on at most this,
+  // carry-over included.
+  const NG_PLUS_MONEY_CAP = 100;
   // A death-restart also quietly hands back half the Longer Barrel levels the
   // run had reached. Deliberately NOT surfaced anywhere in the UI — the money
   // carry is the advertised reward and this is a silent leg-up on top.
@@ -792,6 +804,17 @@
   //   'rain' — wolves short out: most spawn confused, and live ones cook off.
   //   'snow' — everything slows, cold/hot shots bite harder, the farm whitens.
   let weather = '';               // '' | 'rain' | 'snow'
+  // Waves of lingering snow after a blizzard ends: the farm doesn't go from
+  // white to green in a single step, it keeps a dusting for one more wave.
+  let snowLeftover = 0;
+  const SNOW_LEFTOVER_WAVES = 1;
+  // How white the ground/props are right now: full during the storm, a light
+  // dusting the wave after, nothing once that has thawed.
+  function snowCover() { return snowing() ? 1 : (snowLeftover > 0 ? 0.3 : 0); }
+  // Boot-prints pressed into fresh snow. Purely cosmetic and short-lived.
+  const snowTrails = [];          // {x,y,t,life,ang,big}
+  const SNOW_TRAIL_LIFE = 6.0;    // seconds before a print has filled back in
+  const SNOW_TRAIL_STEP = 0.42;   // tiles travelled between prints
   const rainDrops = [];           // {x,y,len,spd} in screen space
   const snowFlakes = [];          // {x,y,r,spd,sway,phase} in screen space
   // Same window, odds and per-run cap the night event uses.
@@ -803,21 +826,35 @@
     rain: { count: 0, blockStart: -1, nextWave: -1, force: false },
     snow: { count: 0, blockStart: -1, nextWave: -1, force: false },
   };
-  const RAIN_CONFUSE_CHANCE   = 0.55; // share of wolves that spawn confused in the rain
+  const RAIN_CONFUSE_CHANCE   = 0.66; // roughly two thirds of the pack loses the plot
   const RAIN_SHORT_OUT_PER_SEC = 0.05; // per-wolf per-second chance to cook off
   const RAIN_BLAST_R   = 2.0;  // tiles a short-out blast reaches
   const RAIN_BLAST_DMG = 4;    // damage to each wolf caught in it
-  const SNOW_SLOW_MUL   = 0.75; // everything moves at three-quarter pace
+  // The downpour douses flames and washes off frost: Cold/Hot Shot land far
+  // less often and wear off almost immediately. The exact mirror of what a
+  // blizzard does for them.
+  const RAIN_STATUS_MUL = 0.4;
+  const SNOW_SLOW_MUL   = 0.75; // keepers and the flock move at three-quarter pace
+  const SNOW_WOLF_SLOW_MUL = 0.55; // wolves wade through it far worse than you do
   const SNOW_STATUS_MUL = 2;    // cold/hot proc chance AND duration both doubled
-  const SNOW_GIFT_MIN   = 40;   // smallest winter gift (player is already rich)
-  const SNOW_GIFT_MAX   = 300;  // largest (player is broke)
-  const SNOW_GIFT_FULL_AT = 600; // wallet at/above this gets only the minimum
+  // Winter gift: worth at most 2× the current wave, and only that much when the
+  // player is flat broke. It tapers to a single coin by the time they're
+  // holding twice that cap. See snowGiftFor() for the arithmetic.
+  const SNOW_GIFT_WAVE_MUL = 2;
   function snowing() { return weather === 'snow'; }
   function raining() { return weather === 'rain'; }
   // Movement multiplier from the weather — snow bogs everyone down equally.
   function weatherSpeedMul() { return weather === 'snow' ? SNOW_SLOW_MUL : 1; }
-  // Cold/Hot Shot are far more potent in a blizzard.
-  function statusPotencyMul() { return weather === 'snow' ? SNOW_STATUS_MUL : 1; }
+  // Wolves bog down harder in snow than the keepers do — a blizzard should be
+  // a window to breathe, not just a uniform slow on everything.
+  function weatherWolfSpeedMul() { return weather === 'snow' ? SNOW_WOLF_SLOW_MUL : 1; }
+  // Cold/Hot Shot are far more potent in a blizzard, and nearly useless in a
+  // downpour — the rain puts the fire out and melts the frost off.
+  function statusPotencyMul() {
+    if (weather === 'snow') return SNOW_STATUS_MUL;
+    if (weather === 'rain') return RAIN_STATUS_MUL;
+    return 1;
+  }
 
   let nightOfWolf = false;        // true while the current wave is a Night-of-the-Wolf wave
   let nightOfWolfCount = 0;       // how many have triggered this run
@@ -965,9 +1002,14 @@
   const HUNTER_COUNT = 3;
   // Hunter Caravan — per-group per-wave fee (group 1 = $100, 2 = $200, 3 = $300).
   const HUNTER_GROUP_FEE = [0, 100, 200, 300];
+  // The recurring wage is flat per group regardless of how well equipped the
+  // crew is — gear is a ONE-OFF purchase, not a permanent pay rise. The single
+  // exception is the top tier, which doubles the wage.
+  const HUNTER_MAX_TIER_FEE_MUL = 2;
   function hunterTotalFee() {
     let f = 0;
     for (let g = 1; g <= Math.min(3, huntersGroups); g++) f += HUNTER_GROUP_FEE[g];
+    if (hunterPowerLvl() >= 5) f *= HUNTER_MAX_TIER_FEE_MUL;
     return f;
   }
   // Metaverse (wave 51+) — once owned, every mutually-exclusive pick unlocks,

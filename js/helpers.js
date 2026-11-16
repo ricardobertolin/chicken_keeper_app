@@ -300,7 +300,7 @@
         available() { return wave >= 5 && (upgradeLevels.machineGun === 0 || metaverseOn()) && upgradeLevels.doubleBarrel < 5; },
         desc() {
           return upgradeLevels.doubleBarrel === 0
-            ? 'shotgun becames double-barrel, right-click fires twice'
+            ? 'Double-barrel: right-click fires twice'
             : 'Damage ×' + tableNext('doubleBarrel').toFixed(2);
         },
         apply() { upgradeLevels.doubleBarrel++; },
@@ -324,7 +324,7 @@
         // Debug-only now (granted via the Spawns & Tools panel); never offered in
         // normal play. Still locks out Jock Reload when applied.
         available() { return false; },
-        desc() { return 'Reload by answering a math question — type it, wrong = jam!'; },
+        desc() { return 'Solve a sum to reload — wrong = jam'; },
         apply() { upgradeLevels.nerdReload = 1; upgradeLevels.jockReload = 0; },
       },
       {
@@ -335,7 +335,7 @@
         // Debug-only now (granted via the Spawns & Tools panel); never offered in
         // normal play. Still locks out Nerd Reload when applied.
         available() { return false; },
-        desc() { return 'Reload by mashing SPACE before the timer drains — too slow = jam!'; },
+        desc() { return 'Mash SPACE to reload — too slow = jam'; },
         apply() { upgradeLevels.jockReload = 1; upgradeLevels.nerdReload = 0; },
       },
       {
@@ -394,7 +394,7 @@
         },
         desc() {
           if (upgradeLevels.minigun >= 4)
-            return 'MAX: +' + MINIGUN_MAG_PER_LVL + ' mag — and it spins up: the longer you hold fire, the faster it shoots';
+            return 'MAX: +' + MINIGUN_MAG_PER_LVL + ' mag, spins up as you hold fire';
           return '+' + MINIGUN_MAG_PER_LVL + ' magazine size';
         },
         apply() {
@@ -468,7 +468,7 @@
         available() { return wave >= 15 && upgradeLevels.rust < 5 && (upgradeLevels.rust < 4 || money >= RUST_MAX_COST); },
         desc() {
           return upgradeLevels.rust >= 4
-            ? 'MAX ($' + RUST_MAX_COST + '): no jams at all — each consecutive critical reload pays $1 (disables Weapon Oil)'
+            ? 'MAX ($' + RUST_MAX_COST + '): no jams, crit reloads pay $1'
             : 'Jam +' + Math.round(tableNext('rust') * 100) + '%, rusts gun (disables Weapon Oil)';
         },
         apply() {
@@ -484,7 +484,7 @@
         // upgrades by id directly (bypassing available()), so the sword can
         // still be granted there for testing.
         available() { return false; },
-        desc() { return 'Trade your gun for a sword — clicks swing for huge damage'; },
+        desc() { return 'Swap your gun for a sword — huge damage'; },
         apply() { upgradeLevels.sword = 1; },
       },
       {
@@ -517,8 +517,8 @@
         available() { return wave >= FAT_UNLOCK_WAVE && upgradeLevels.fatChicken < 5; },
         desc() {
           return upgradeLevels.fatChicken >= 4
-            ? 'MAX: ~1 in 5 chickens hatch fat — top gold, may burst'
-            : '~1 in 5 chickens hatch fat — more gold, but slower';
+            ? 'MAX: 1 in 5 hatch fat — top gold'
+            : '1 in 5 hatch fat — more gold, slower';
         },
         apply() { upgradeLevels.fatChicken++; },
       },
@@ -533,7 +533,7 @@
           const nxt = Math.min(5, upgradeLevels.workerChicken + 1);
           const pct = Math.round(WORKER_HATCH_CHANCE[nxt] * 100);
           if (upgradeLevels.workerChicken === 0)
-            return pct + '% hatch in a hardhat — faster, rebuild broken fences';
+            return pct + '% hatch in hardhats — they rebuild fences';
           if (upgradeLevels.workerChicken >= 4)
             return 'MAX: ' + pct + '% hardhat hatch';
           return 'Hardhat hatch chance → ' + pct + '%';
@@ -680,9 +680,9 @@
         title: 'Sabotage',
         available() { return wave >= MINE_UNLOCK_WAVE && upgradeLevels.sabotage < 5; },
         desc() {
-          const nxt = SABOTAGE_DEFECT_CHANCE[upgradeLevels.sabotage + 1];
+          const nxt = SABOTAGE_DEFECT_CHANCE[Math.min(5, upgradeLevels.sabotage + 1)];
           if (upgradeLevels.sabotage >= 4)
-            return 'MAX: ' + Math.round(nxt * 100) + '% defective — some turn turncoat (blue eye, attacks pack)';
+            return 'MAX: ' + Math.round(nxt * 100) + '% defective, some turncoat';
           return 'Wolves hatch defective → ' + Math.round(nxt * 100) + '% chance';
         },
         apply() { upgradeLevels.sabotage++; },
@@ -723,9 +723,9 @@
         desc() {
           const nxt = upgradeLevels.rocketBoots + 1;
           if (upgradeLevels.rocketBoots === 0)
-            return 'Rare lift-off while sprinting (' + ROCKET_BOOTS_DURATION[1].toFixed(1) + 's flight, trample wolves under the jets)';
+            return 'Rare lift-off when sprinting (' + ROCKET_BOOTS_DURATION[1].toFixed(1) + 's)';
           if (upgradeLevels.rocketBoots >= 4)
-            return 'MAX: ' + ROCKET_BOOTS_DURATION[5].toFixed(1) + 's flight, trample ' + ROCKET_BOOTS_TRAMPLE[5].toFixed(1) + ' dmg/s — phases through walls';
+            return 'MAX: ' + ROCKET_BOOTS_DURATION[5].toFixed(1) + 's flight, phases walls';
           return 'Lift-off chance up, flight ' + ROCKET_BOOTS_DURATION[nxt].toFixed(1) + 's, trample ' + ROCKET_BOOTS_TRAMPLE[nxt].toFixed(1) + ' dmg/s';
         },
         apply() { upgradeLevels.rocketBoots++; },
@@ -743,7 +743,7 @@
         },
         desc() {
           const nxt = upgradeLevels.lastStand + 1;
-          if (upgradeLevels.lastStand >= 4) return 'MAX: ×' + LAST_STAND_DMG_MUL[5].toFixed(1) + ' dmg, ×' + (1 / LAST_STAND_FIRE_MUL[5]).toFixed(1) + ' rate — holding fire cloaks you';
+          if (upgradeLevels.lastStand >= 4) return 'MAX: ×' + LAST_STAND_DMG_MUL[5].toFixed(1) + ' dmg, cloaks you';
           if (upgradeLevels.lastStand === 0) return 'Stand still → crouch up: ×' + LAST_STAND_DMG_MUL[1].toFixed(2) + ' dmg, faster fire';
           return 'Crouch buff → ×' + LAST_STAND_DMG_MUL[nxt].toFixed(2) + ' dmg, ×' + (1 / LAST_STAND_FIRE_MUL[nxt]).toFixed(2) + ' rate';
         },
@@ -761,8 +761,8 @@
               && upgradeLevels.homing < 5;
         },
         desc() {
-          if (upgradeLevels.homing >= 4) return 'MAX: slow pellets that hunt the nearest wolf — sharpest turn + longest seek';
-          if (upgradeLevels.homing === 0) return 'Slow pellets that auto-seek the nearest wolf and chase it';
+          if (upgradeLevels.homing >= 4) return 'MAX: sharpest turn, longest seek';
+          if (upgradeLevels.homing === 0) return 'Slow pellets seek the nearest wolf';
           return 'Sharper turn + longer seek range';
         },
         apply() { upgradeLevels.homing++; },
@@ -795,7 +795,7 @@
         available() { return wave >= MINE_UNLOCK_WAVE && upgradeLevels.cryptidRadar < 5; },
         desc() {
           const cur = upgradeLevels.cryptidRadar;
-          if (cur >= 4) return 'MAX: rare-wolf chance ×2, thing wolf, full-map range';
+          if (cur >= 4) return 'MAX: ×2 rare wolves, full-map range';
           if (cur === 0) return 'Antennas on coops — detect cryptids, ' + CRYPTID_RADAR_RANGE[1] + '-tile range';
           return 'Longer radar range → ' + CRYPTID_RADAR_RANGE[cur + 1] + ' tiles';
         },
@@ -818,8 +818,8 @@
         desc() {
           const nxt = upgradeLevels.rooftopper + 1;
           if (upgradeLevels.rooftopper >= 4) return 'MAX: ' + nxt + ' rooftop snipers — heavier on taller coops';
-          if (upgradeLevels.rooftopper === 0) return 'Station 1 sniper on the tallest coop — slow, devastating shots';
-          return nxt + ' snipers on coops — higher coop = slower fire, harder hit';
+          if (upgradeLevels.rooftopper === 0) return '1 sniper on your tallest coop';
+          return nxt + ' snipers — higher coop hits harder';
         },
         // Re-check the coop count at apply time too, so even the debug panel
         // (which calls apply() directly) can't push the level past the coops.
@@ -857,7 +857,7 @@
         title: 'Buy Hat Pack',
         available() { return wave >= 40 && playerHats < MAX_HATS; },
         affordable() { return money >= hatPackPrice; },
-        desc() { return 'Spend $' + hatPackPrice + ' → +3 hats (rare leprechaun / buddy colours)'; },
+        desc() { return '$' + hatPackPrice + ' → +3 hats (rare colours)'; },
         apply() {
           money -= hatPackPrice;
           hatPackPrice += 30;
@@ -890,7 +890,7 @@
           const price = weaponOilCostFromMoney(money);
           const after = Math.min(WEAPON_OIL_MAX_BAND, RELOAD_SC_HIT_HALF + WEAPON_OIL_PER_CHARGE);
           const pct = Math.round(after * 100 * 2); // bar-width pct of accept zone
-          return 'Spend $' + price + ' → wider reload band (' + pct + '%) +10% shot speed, ' + WEAPON_OIL_WAVES + ' waves';
+          return '$' + price + ' → ' + pct + '% reload band, ' + WEAPON_OIL_WAVES + ' waves';
         },
         apply() {
           if (weaponOilCharges > 0) return;
@@ -914,7 +914,7 @@
           return wave >= 40 && advancedOilWaves === 0; // shown even when broke (affordable() gates the buy)
         },
         affordable() { return money >= advancedOilCost(); },
-        desc() { return 'Spend $' + advancedOilCost() + ' → near-full reload band + bigger crit line, 1 round'; },
+        desc() { return '$' + advancedOilCost() + ' → near-full band, 1 round'; },
         apply() {
           const price = advancedOilCost();
           if (money < price) return;
@@ -960,7 +960,7 @@
         id: 'bribeWolves',
         title: 'Bribe Wolves',
         available() { return wave >= 51 && money >= bribePrice; },
-        desc() { return 'Spend $' + bribePrice + ' → next wave −20% wolves (the one after +10%)'; },
+        desc() { return '$' + bribePrice + ' → −20% wolves, +10% after'; },
         apply() {
           money -= bribePrice;
           bribePrice += 100;
@@ -993,27 +993,30 @@
         desc() {
           const next = upgradeLevels.hunterPower + 1;
           const cost = hunterGearCost();
-          if (next >= 5) return 'MAX gear: '
-               + HUNTER_POWER_HP[5] + ' HP, ×' + HUNTER_POWER_DMG[5].toFixed(2) + ' dmg, laser/homing + new hats — crew holds the line ($' + cost + ')';
-          return 'Equip hunters → tier ' + next + '/5 ('
-               + HUNTER_POWER_HP[next] + ' HP, ×' + HUNTER_POWER_DMG[next].toFixed(2) + ' dmg, new weapons) — $' + cost;
+          if (next >= 5) return 'MAX: ' + HUNTER_POWER_HP[5] + ' HP, ×' + HUNTER_POWER_DMG[5].toFixed(1)
+               + ' dmg, crew stays — $' + cost;
+          return 'Tier ' + next + '/5: ' + HUNTER_POWER_HP[next] + ' HP, ×'
+               + HUNTER_POWER_DMG[next].toFixed(1) + ' dmg — $' + cost;
         },
         apply() {
           money -= hunterGearCost();
-          const oldHP = HUNTER_POWER_HP[hunterPowerLvl()];
           upgradeLevels.hunterPower++;
           const newLvl = hunterPowerLvl();
           const newHP = HUNTER_POWER_HP[newLvl];
-          // Existing hunters keep their current damage but their cap and
-          // current HP both rise by the delta — and they re-arm to the new
-          // tier's weapon ladder so the gear visibly upgrades.
+          // New kit patches everyone up: survivors go to FULL health on the new
+          // cap (they were only topped up by the delta before, so a battered
+          // crew stayed battered) and re-arm to the tier's weapon ladder.
           for (const h of hunters) {
             if (!h.alive) continue;
             h.maxHp = newHP;
-            h.hp = Math.min(newHP, (h.hp || 0) + (newHP - oldHP));
+            h.hp = newHP;
             h.weapon = hunterWeaponForTier(newLvl);
             h.burstLeft = 0;
           }
+          // …and the camp is brought back up to strength, so buying gear after
+          // losing people actually rebuilds the crew instead of just upgrading
+          // the handful still standing.
+          refillHunterCamps();
         },
       },
       {

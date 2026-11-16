@@ -28,10 +28,19 @@
   const MUSIC_LOOKAHEAD = 0.25;            // seconds of notes queued ahead
   const MUSIC_LEVELS = {                   // mode -> [bus gain, lowpass Hz]
     off:     [0.0,   400],
-    distant: [0.055, 300],
-    near:    [0.150, 1500],
-    full:    [0.200, 9000],
+    distant: [0.090, 300],
+    near:    [0.260, 1500],
+    full:    [0.380, 9000],
   };
+  // Each boss side it comes back angrier: the tempo creeps up, the bus gets
+  // louder, and the horn line drops to a darker interval. bossSidesDone is
+  // 0..3 across the fight.
+  const MUSIC_PHASE_TEMPO = [1.0, 1.08, 1.17, 1.28]; // step multiplier per side
+  const MUSIC_PHASE_GAIN  = [1.0, 1.10, 1.20, 1.32];
+  function musicPhase() {
+    if (!bossWaveActive) return 0;
+    return Math.max(0, Math.min(3, bossSidesDone || 0));
+  }
   // Taiko-ish war pattern over 16 eighths (two bars). 0 = rest.
   const DRUM_PATTERN = [1, 0, 0.35, 0, 0.8, 0, 0.35, 0.5,
                         1, 0, 0.35, 0.35, 0.8, 0, 0.5, 0.6];
@@ -55,13 +64,18 @@
     musicBus.connect(ctx.destination);
   }
 
-  // Crossfade rather than cut, so a phase flip never clicks.
-  function setMusicMode(mode) {
-    if (mode === musicMode) return;
+  // Crossfade rather than cut, so a phase flip never clicks. Re-applied when
+  // the boss's phase advances too, hence the explicit `force`.
+  let musicPhaseApplied = -1;
+  function setMusicMode(mode, force) {
+    const phase = musicPhase();
+    if (mode === musicMode && phase === musicPhaseApplied && !force) return;
     musicMode = mode;
+    musicPhaseApplied = phase;
     if (!audioCtx || !musicBus) return;
     const [g, lp] = MUSIC_LEVELS[mode];
-    musicBus.gain.setTargetAtTime(g, audioCtx.currentTime, 0.5);
+    const gain = mode === 'off' ? 0 : g * MUSIC_PHASE_GAIN[phase];
+    musicBus.gain.setTargetAtTime(gain, audioCtx.currentTime, 0.5);
     musicLp.frequency.setTargetAtTime(lp, audioCtx.currentTime, 0.5);
   }
 
@@ -137,18 +151,30 @@
     if (musicMode === 'off') return; // fading out — stop queueing new hits
     const now = ctx.currentTime;
     if (musicNextT < now) musicNextT = now + 0.05; // resync after a stall/restart
+    const phase = musicPhase();
+    const step = MUSIC_STEP_S / MUSIC_PHASE_TEMPO[phase]; // later sides drive harder
     while (musicNextT < now + MUSIC_LOOKAHEAD) {
       const at = musicNextT;
       const vel = DRUM_PATTERN[musicStep];
       if (vel > 0) musicDrum(ctx, at, vel);
       if (musicMode === 'full') {
         const f = WAR_BASS[musicStep];
-        if (f) musicHorn(ctx, at, f, 1, MUSIC_STEP_S * 1.6);
-        // An answering cry at the top of each two-bar phrase.
-        if (musicStep === 0) musicHorn(ctx, at, 293.66, 0.5, MUSIC_STEP_S * 3);
+        if (f) musicHorn(ctx, at, f, 1, step * 1.6);
+        // An answering cry at the top of each two-bar phrase. It drops a
+        // semitone per side — by MK-04 the call is a flat, ugly tritone
+        // against the D-minor bass, which is where the menace comes from.
+        if (musicStep === 0) musicHorn(ctx, at, 293.66 * Math.pow(0.944, phase), 0.5, step * 3);
+        // From the second side on, a low drone shadows the downbeat.
+        if (phase >= 1 && (musicStep === 0 || musicStep === 8)) {
+          musicHorn(ctx, at, 36.71 * (1 + phase * 0.02), 0.85, step * 7);
+        }
+        // The last side adds an off-beat stab — the pattern stops breathing.
+        if (phase >= 3 && (musicStep === 6 || musicStep === 14)) {
+          musicHorn(ctx, at, 110.0, 0.7, step * 1.1);
+        }
       }
       musicStep = (musicStep + 1) % 16;
-      musicNextT += MUSIC_STEP_S;
+      musicNextT += step;
     }
   }
 

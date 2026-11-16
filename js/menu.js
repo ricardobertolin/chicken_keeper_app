@@ -76,6 +76,12 @@
       toast('Carried over $' + pendingCarryMoney + ' from your last run', 2.4);
       pendingCarryMoney = 0;
     }
+    // A post-boss run (tier > 0) opens on no more than NG_PLUS_MONEY_CAP, the
+    // doubling and the carry-over counted together.
+    if (restartBonusTier > 0) {
+      money  = Math.min(money,  NG_PLUS_MONEY_CAP);
+      money2 = Math.min(money2, NG_PLUS_MONEY_CAP);
+    }
     // Silent barrel carry — applied after the reset, never toasted.
     if (pendingCarryRange > 0) {
       upgradeLevels.range = Math.min(MAX_LEVEL, pendingCarryRange);
