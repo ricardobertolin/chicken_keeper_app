@@ -380,7 +380,16 @@
       } else if (action === 'spawn-grave') {
         // Same shape and lifetime as a real one, so it clears at the next
         // startWave exactly like a keeper's grave does.
-        graves.push({ x: player.x, y: player.y, lean: rand(-0.16, 0.16) });
+        //
+        // Planted a step DOWN-SCREEN of the keeper, not under their feet. A
+        // grave sorts at x+y like any prop, so one spawned at the player's own
+        // position ties with them on depth, loses the tie-break, and gets
+        // painted over by a sprite three times its height — the button looked
+        // dead when it was in fact working. The offset is clamped inside the
+        // playable field so it can't land in the treeline.
+        const gx = clamp(player.x + 1.1, -HALF_MAP + 2, HALF_MAP - 2);
+        const gy = clamp(player.y + 1.1, -HALF_MAP + 2, HALF_MAP - 2);
+        graves.push({ x: gx, y: gy, wave: wave, lean: rand(-0.16, 0.16) });
         toast('Tombstone planted', 1.0);
       } else if (action === 'force-snow') {
         nightOfWolfDebugForce = false;

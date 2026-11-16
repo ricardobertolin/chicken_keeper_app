@@ -92,6 +92,9 @@
   function drawSnowTrails() {
     ctx.save();
     for (const s of snowTrails) {
+      // A print only exists where there is still snow to press into. Once the
+      // thaw goes patchy, the ones left standing on bare grass have to go.
+      if (snowCoverAt(Math.round(s.x), Math.round(s.y)) <= 0) continue;
       const p = worldToScreen(s.x, s.y);
       const a = Math.max(0, s.t / s.life) * 0.5;
       if (a <= 0.01) continue;
@@ -126,15 +129,24 @@
     // Sky / background. Rebuilt on resize (skyGrad nulled) and whenever the
     // boss-red level moves — quantised so a smooth ramp doesn't allocate a new
     // gradient every single frame.
+    // The gradient's lower stops ARE the land past the treeline, so a blizzard
+    // has to whiten them too — otherwise the farm goes white inside a ring of
+    // untouched green. Keyed on the snow level as well as the red one so it
+    // rebuilds when the weather turns and comes off cleanly when it thaws.
     const redLvl = skyRedLevel();
     const redKey = Math.round(redLvl * 40); // 2.5% steps
-    if (!skyGrad || redKey !== skyGradRedKey) {
+    const snowKey = Math.round(snowCover() * 20);
+    if (!skyGrad || redKey !== skyGradRedKey || snowKey !== skyGradSnowKey) {
       skyGradRedKey = redKey;
+      skyGradSnowKey = snowKey;
       const f = redKey / 40;
+      // Blood red outranks the snow — the boss sky is the stronger event, and
+      // the two events can't co-occur anyway (no weather on the boss wave).
+      const s = (snowKey / 20) * (1 - f);
       skyGrad = ctx.createLinearGradient(0, 0, 0, H);
-      skyGrad.addColorStop(0,   mixHex('#7ec7ff', '#6e0f08', f)); // blue   → deep blood sky
-      skyGrad.addColorStop(0.6, mixHex('#bfe6a8', '#c23a1b', f)); // haze   → ember band
-      skyGrad.addColorStop(1,   mixHex('#5fa15a', '#5e2113', f)); // grass  → scorched earth
+      skyGrad.addColorStop(0,   mixHex(mixHex('#7ec7ff', '#6e0f08', f), '#cfe0ee', s * 0.55)); // blue  → blood sky → pale overcast
+      skyGrad.addColorStop(0.6, mixHex(mixHex('#bfe6a8', '#c23a1b', f), '#dfe9f2', s * 0.80)); // haze  → ember band → snow haze
+      skyGrad.addColorStop(1,   mixHex(mixHex('#5fa15a', '#5e2113', f), '#dce6f0', s * 0.86)); // grass → scorched → snowed-in land
     }
     ctx.fillStyle = skyGrad;
     ctx.fillRect(0, 0, W, H);
@@ -3115,8 +3127,8 @@
     }
     // Snow piled along the eaves during a blizzard. Drawn across the roof's
     // lower edge rather than per roof-shape, so it reads the same on all three.
-    if (snowCoverAt(Math.round(c.x), Math.round(c.y)) > 0 && !preview) {
-      const cv = snowCoverAt(Math.round(c.x), Math.round(c.y));
+    const cv = preview ? 0 : snowCoverAt(Math.round(c.x), Math.round(c.y));
+    if (cv > 0) {
       drawSnowCap(cx, cy - topLift + 1, hw * 0.92, 3.4 * cv);
       drawSnowCap(cx, cy - topLift - roofH * 0.45, hw * 0.5, 2.6 * cv);
     }
@@ -3561,11 +3573,11 @@
     ctx.arc(fx - 3 * s, cy - 42 * s, 3.5 * s, 0, Math.PI * 2);
     ctx.arc(fx - 2 * s, cy - 50 * s, 2.5 * s, 0, Math.PI * 2);
     ctx.fill();
-    // Snow settles along the top of the crown during a blizzard.
-    if (snowCoverAt(Math.round(t.x), Math.round(t.y)) > 0) {
-      // Per-tile, so the day after only the trees on still-snowy ground keep
-      // their caps instead of every tree wearing a uniform thin smear.
-      const cv = snowCoverAt(Math.round(t.x), Math.round(t.y));
+    // Snow settles along the top of the crown during a blizzard. Sampled
+    // per-tile, so the day after only the trees standing on still-snowy ground
+    // keep their caps instead of every tree wearing a uniform thin smear.
+    const cv = snowCoverAt(Math.round(t.x), Math.round(t.y));
+    if (cv > 0) {
       drawSnowCap(fx,         cy - 50 * s, 5.4 * s, 3.2 * s * cv);
       drawSnowCap(fx,         cy - 44 * s, 7.2 * s, 3.0 * s * cv);
       drawSnowCap(fx - 5 * s, cy - 36 * s, 5.0 * s, 2.4 * s * cv);

@@ -808,20 +808,29 @@
   // white to green in a single step, it keeps a dusting for one more wave.
   let snowLeftover = 0;
   const SNOW_LEFTOVER_WAVES = 1;
-  // How white the ground/props are right now: full during the storm, a light
-  // dusting the wave after, nothing once that has thawed.
-  function snowCover() { return snowing() ? 1 : (snowLeftover > 0 ? 0.3 : 0); }
   // Per-tile cover. During the storm everything is buried. The day after, the
   // thaw is PATCHY rather than a uniform pale wash: a stable hash picks which
-  // tiles keep full-depth snow and which have melted back to grass, which
+  // patches keep full-depth snow and which have melted back to grass, which
   // reads far more like real leftover snow.
-  const SNOW_PATCH_KEEP = 0.38; // share of tiles still holding snow the day after
+  //
+  // The hash is taken on a COARSE cell rather than per tile, so what survives
+  // the thaw is drifts a few tiles across. Per-tile it came out as single-tile
+  // salt-and-pepper, which reads as noise rather than as snow.
+  const SNOW_PATCH_KEEP = 0.38; // share of the farm still holding snow the day after
+  const SNOW_PATCH_CELL = 3;    // tiles per side of a drift
   function snowCoverAt(x, y) {
     if (snowing()) return 1;
     if (snowLeftover <= 0) return 0;
-    const h = ((x * 374761393 + y * 668265263) ^ 0x5bf03635) >>> 0;
+    const cx = Math.floor(x / SNOW_PATCH_CELL), cy = Math.floor(y / SNOW_PATCH_CELL);
+    const h = ((cx * 374761393 + cy * 668265263) ^ 0x5bf03635) >>> 0;
     return ((h >>> 8) % 1000) / 1000 < SNOW_PATCH_KEEP ? 1 : 0;
   }
+  // How white the farm reads as a WHOLE: full during the storm, and the day
+  // after, the share of it that snowCoverAt still keeps under snow. Used for
+  // the distant backdrop beyond the treeline, which has no tiles to sample —
+  // it's the sky gradient's lower stops, and while that stayed green the
+  // snowed-in farm sat inside a ring of summer grass.
+  function snowCover() { return snowing() ? 1 : (snowLeftover > 0 ? SNOW_PATCH_KEEP : 0); }
   // Boot-prints pressed into fresh snow. Purely cosmetic and short-lived.
   const snowTrails = [];          // {x,y,t,life,ang,big}
   const SNOW_TRAIL_LIFE = 6.0;    // seconds before a print has filled back in

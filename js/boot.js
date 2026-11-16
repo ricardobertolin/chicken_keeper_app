@@ -58,6 +58,7 @@
   let cssW = 0, cssH = 0; // CSS dimensions
   let skyGrad = null;     // cached sky background gradient, rebuilt on resize
   let skyGradRedKey = -1; // quantised boss-red level the cached gradient was built at
+  let skyGradSnowKey = -1; // quantised snow cover it was built at (whitens the land past the treeline)
   let redWashGrad = null; // cached red horizon wash (boss sky), rebuilt with the level
   let redWashKey = -1;
 

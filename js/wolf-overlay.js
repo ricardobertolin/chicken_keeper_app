@@ -227,6 +227,13 @@
   // and the rooftoppers strap on thermal goggles. Drawn over the darkness
   // mask like the wolf eyes, so a green twin-lens glow marks every ally you
   // own without lighting the ground around them.
+  //
+  // Every offset below is derived from where the sprite ACTUALLY puts the
+  // head, not guessed: both figures are drawn at HUNTER_SCALE about their own
+  // feet line, with the head circle at -30 (plus the crouch and any recoil)
+  // in pre-scale units and the eyes a touch above its centre.
+  const THERMAL_SCALE = 0.88;   // the hunter/rooftopper sprite scale
+  const THERMAL_EYE_Y = 31.5;   // pre-scale height of the eye line above the feet
   function drawAllyThermalOverlay() {
     const lens = (sx, sy, s, facingLeft) => {
       const sign = facingLeft ? -1 : 1;
@@ -240,7 +247,7 @@
       ctx.fillStyle = g;
       ctx.fillRect(sx - 7 * s, sy - 7 * s, 14 * s, 14 * s);
       ctx.restore();
-      // The two lenses themselves.
+      // The two lenses themselves, offset toward the face they're looking out of.
       ctx.fillStyle = '#9dffbe';
       ctx.fillRect(sx - 0.6 * s + sign * 0.6 * s, sy - 0.7 * s, 1.5 * s, 1.5 * s);
       ctx.fillRect(sx - 0.6 * s + sign * 3.0 * s, sy - 0.7 * s, 1.5 * s, 1.5 * s);
@@ -249,15 +256,25 @@
       if (!h.alive || h.dying) continue;
       if (isOccludedByBuilding(h.x, h.y)) continue;
       const p = worldToScreen(h.x, h.y);
-      lens(p.x, p.y + TILE_H / 2 - 23, 1, h.facingLeft);
+      // Follow the walk bob and the kneeling crouch — a fixed offset left the
+      // goggles hovering a few pixels clear of the head for the whole wave,
+      // and a hunter kneels for exactly as long as the fight lasts.
+      const feetY = p.y + TILE_H / 2 + Math.sin(h.walkT || 0) * 1.0;
+      const kneel = (waveActive || bossWaveActive) && !huntersLeavePending;
+      lens(p.x, feetY - (THERMAL_EYE_Y - (kneel ? 6 : 0)) * THERMAL_SCALE,
+           THERMAL_SCALE, h.facingLeft);
     }
     for (const r of rooftoppers) {
       if (!r.alive || r.falling) continue;
+      // Rooftoppers are lifted onto the coop roof, so their feet line comes
+      // from the same helper drawRooftopper builds the sprite off. They are
+      // permanently crouched, and the shot recoil dips the whole torso.
       const p = worldToScreen(r.x, r.y);
-      // Rooftoppers are drawn lifted onto the coop roof; match that offset so
-      // the goggles sit on the sniper's head, not in mid-air below them.
-      const lift = ((r.coop && r.coop.level) || 0) * 14 + 26;
-      lens(p.x, p.y + TILE_H / 2 - lift, 1, r.facingLeft);
+      const cy = p.y + TILE_H / 2;
+      const baseCD = ROOFTOP_BASE_COOLDOWN + rooftopperCoopLevel(r) * ROOFTOP_DELAY_PER_FLOOR;
+      const recoil = (r.fireT > 0 && r.fireT > baseCD - 0.16) ? -1 : 0;
+      lens(p.x, rooftopperFeetY(r, cy) - (THERMAL_EYE_Y - 6 - recoil) * THERMAL_SCALE,
+           THERMAL_SCALE, r.facingLeft);
     }
   }
 
@@ -532,29 +549,34 @@
     }
   }
 
-  // A hunter — keeper-shaped silhouette in a wide-brim hat. Coat tint and the
-  // shotgun barrel vary by weapon (shotgun / mg / double-barrel). Flashes red
-  // after a hit; lays flat on death.
+  // On the guest, `r.coop` isn't a live reference — we rely on the synced
+  // `coopLevel` field. Host has both.
+  function rooftopperCoopLevel(r) {
+    return (r.coop && r.coop.level) || r.coopLevel || 0;
+  }
+  // Screen Y of a rooftopper's feet once they've been lifted onto the roof
+  // peak — the anchor the whole sprite is built off. Shared so anything that
+  // has to line up with the sniper (the night-vision goggles) reads the same
+  // number instead of carrying its own guess at the roof height.
+  const ROOFTOP_WALL_H = 22, ROOFTOP_ROOF_H = 16; // same scale numbers drawCoop uses
+  function rooftopperFeetY(r, cy) {
+    const floors = rooftopperCoopLevel(r) + 1;
+    return cy - (floors * ROOFTOP_WALL_H + ROOFTOP_ROOF_H * 0.55) + 10;
+  }
+
   // A rooftopper — a full-size hunter silhouette perched on the coop roof
   // with a long sniper rifle. The rifle rotates to track whatever the
   // sniper is aiming at (r.aimDir is the SCREEN-space angle to the target,
   // same trick the ranged wolf uses for its laser cannon).
   function drawRooftopper(r) {
-    // On the guest, `r.coop` isn't a live reference — we rely on the
-    // synced `coopLevel` field. Host has both.
-    const coopLvl = (r.coop && r.coop.level) || r.coopLevel || 0;
+    const coopLvl = rooftopperCoopLevel(r);
     const p = worldToScreen(r.x, r.y);
     const cx = p.x;
     const cy = p.y + TILE_H / 2;
-    // Same scale numbers drawCoop uses — mirror them so the figure sits at
-    // the peak of the roof regardless of floor count.
-    const wallH = 22, roofH = 16;
-    const floors = coopLvl + 1;
-    const topLift = floors * wallH + roofH * 0.55;
     // Shift the keeper's local "feet line" up so the body sits on the roof
     // peak. The rest of the sprite mirrors drawHunter's proportions so the
     // rooftopper reads as the same size as a ground-level hunter.
-    const feetY = cy - topLift + 10;
+    const feetY = rooftopperFeetY(r, cy);
     const baseCD = ROOFTOP_BASE_COOLDOWN + coopLvl * ROOFTOP_DELAY_PER_FLOOR;
     const recoil = (r.fireT > 0 && r.fireT > baseCD - 0.16) ? -1 : 0;
     const facingLeft = r.facingLeft;
@@ -689,6 +711,9 @@
     }
   }
 
+  // A hunter — keeper-shaped silhouette in a wide-brim hat. Coat tint and the
+  // shotgun barrel vary by weapon (shotgun / mg / double-barrel). Flashes red
+  // after a hit; lays flat on death.
   function drawHunter(h) {
     drawShadow(h.x, h.y, 0.30);
     const p = worldToScreen(h.x, h.y);

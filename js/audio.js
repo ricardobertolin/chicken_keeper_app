@@ -463,11 +463,66 @@
   }
 
   // ---- Weather ambience ---------------------------------------------------
-  // A continuous bed that runs for as long as the event does. One looping
-  // noise buffer through a filter, so it costs nothing per frame — the volume
-  // and tone are the only things that move.
-  let weatherAmbSrc = null, weatherAmbGain = null, weatherAmbFilter = null;
+  // A continuous bed that runs for as long as the event does. Looping noise
+  // buffers through filters, so it costs nothing per frame — only the master
+  // volume and a slow gust LFO move.
+  //
+  // Levels matter more here than for a one-shot: a bed has to sit UNDER
+  // gunfire and still be heard. The game's noise one-shots run around
+  // -19 dBFS rms, so the bed is aimed at roughly -21, about 10 dB louder than
+  // a first pass that measured -32 and was simply inaudible. Rain is split
+  // into a bright spatter plus a low roar, and the blizzard's wind keeps real
+  // energy in the 300-900 Hz band — a bed filtered down to 420 Hz is gone
+  // entirely on laptop speakers, which roll off hard below ~300.
+  const WEATHER_AMB_GUST_HZ = 0.07;   // one gust swell roughly every 14s
+  let weatherAmbSrcs = [];            // every node needing a stop()
+  let weatherAmbGain = null;          // master — the only thing faded
+  let weatherAmbGust = null;          // gust LFO depth, faded along with the master
   let weatherAmbKind = '';
+  // Looping noise. `brown` integrates it into a low rumble instead of hiss.
+  function weatherNoiseBuffer(ctx, secs, brown) {
+    const sz = Math.floor(ctx.sampleRate * secs);
+    const b = ctx.createBuffer(1, sz, ctx.sampleRate);
+    const d = b.getChannelData(0);
+    if (brown) {
+      let last = 0;
+      for (let i = 0; i < sz; i++) {
+        last = (last + (Math.random() * 2 - 1) * 0.04) * 0.985;
+        d[i] = last * 3.2;
+      }
+      // A random walk ends wherever it wandered to, so looping it steps
+      // straight back to the start value — a low thump once per loop. Tilt the
+      // whole buffer so the last sample meets the first and the seam vanishes.
+      // White noise needs none of this: any sample follows any other.
+      const drift = (d[sz - 1] - d[0]) / (sz - 1);
+      for (let i = 0; i < sz; i++) d[i] -= drift * i;
+    } else {
+      for (let i = 0; i < sz; i++) {
+        let v = Math.random() * 2 - 1;
+        if (Math.random() < 0.0015) v *= 2.6; // a fat drop
+        d[i] = v * 0.5;
+      }
+    }
+    return b;
+  }
+  // One filtered noise layer feeding the master. Returns nothing — the source
+  // is registered for stop() on the way out.
+  function weatherAmbLayer(ctx, master, brown, type, freq, q, gain) {
+    const src = ctx.createBufferSource();
+    // Four seconds for the brown layers: the integrator's slow wander makes a
+    // short loop audible as a repeating pulse, where plain hiss hides it.
+    src.buffer = weatherNoiseBuffer(ctx, brown ? 4.0 : 2.0, brown);
+    src.loop = true;
+    const f = ctx.createBiquadFilter();
+    f.type = type;
+    f.frequency.setValueAtTime(freq, ctx.currentTime);
+    f.Q.setValueAtTime(q, ctx.currentTime);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(gain, ctx.currentTime);
+    src.connect(f); f.connect(g); g.connect(master);
+    src.start();
+    weatherAmbSrcs.push(src);
+  }
   function startWeatherAmbience(kind) {
     if (weatherAmbKind === kind) return;
     const ctx = getAudio();
@@ -475,52 +530,59 @@
     stopWeatherAmbience();
     if (!kind) return;
     weatherAmbKind = kind;
-    // Two seconds of noise, looped. Long enough that the loop point is
-    // inaudible inside a broadband hiss.
-    const dur = 2.0;
-    const sz = Math.floor(ctx.sampleRate * dur);
-    const b = ctx.createBuffer(1, sz, ctx.sampleRate);
-    const d = b.getChannelData(0);
+    const now = ctx.currentTime;
+    const master = ctx.createGain();
+    // Measures ~-21 dBFS rms, give or take, which is where the game's noise
+    // one-shots sit — loud enough to hear under gunfire, with headroom left
+    // so a fat drop landing on top of a shotgun blast doesn't clip.
+    const peak = 0.26;
+    master.gain.setValueAtTime(0.0001, now);
+    // Fade in under the black wipe rather than slamming on.
+    master.gain.linearRampToValueAtTime(peak, now + 1.2);
+    master.connect(ctx.destination);
+    weatherAmbGain = master;
     if (kind === 'rain') {
-      // White-ish noise with occasional heavier spatter for the downpour.
-      for (let i = 0; i < sz; i++) {
-        let v = Math.random() * 2 - 1;
-        if (Math.random() < 0.0015) v *= 2.6; // a fat drop
-        d[i] = v * 0.5;
-      }
+      weatherAmbLayer(ctx, master, false, 'highpass', 1500, 0.7, 0.85); // spatter on the roofs
+      weatherAmbLayer(ctx, master, false, 'bandpass',  600, 0.8, 0.70); // the body of it
+      weatherAmbLayer(ctx, master, true,  'lowpass',   260, 0.7, 0.55); // distant roar
     } else {
-      // Brown-ish noise — a low, hollow wind for the blizzard.
-      let last = 0;
-      for (let i = 0; i < sz; i++) {
-        last = (last + (Math.random() * 2 - 1) * 0.04) * 0.985;
-        d[i] = last * 3.2;
-      }
+      weatherAmbLayer(ctx, master, true,  'lowpass',   300, 0.7, 0.80); // low hollow wind
+      weatherAmbLayer(ctx, master, false, 'bandpass',  700, 0.6, 0.55); // the part small speakers can carry
+      weatherAmbLayer(ctx, master, false, 'highpass', 2600, 0.7, 0.16); // thin whistle over the top
     }
-    const src = ctx.createBufferSource();
-    src.buffer = b;
-    src.loop = true;
-    const f = ctx.createBiquadFilter();
-    if (kind === 'rain') { f.type = 'highpass'; f.frequency.setValueAtTime(700, ctx.currentTime); }
-    else                 { f.type = 'lowpass';  f.frequency.setValueAtTime(420, ctx.currentTime); }
-    const g = ctx.createGain();
-    g.gain.setValueAtTime(0.0001, ctx.currentTime);
-    // Fade in over the black wipe rather than slamming on.
-    g.gain.linearRampToValueAtTime(kind === 'rain' ? 0.085 : 0.07, ctx.currentTime + 1.2);
-    src.connect(f); f.connect(g); g.connect(ctx.destination);
-    src.start();
-    weatherAmbSrc = src; weatherAmbGain = g; weatherAmbFilter = f;
+    // Gusts: a slow sine summed into the master gain (an AudioParam adds any
+    // connected signal to its own value), so the bed swells and eases instead
+    // of sitting there as a flat wash.
+    const lfo = ctx.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.setValueAtTime(WEATHER_AMB_GUST_HZ, now);
+    const lfoAmt = ctx.createGain();
+    lfoAmt.gain.setValueAtTime(0.0001, now);
+    lfoAmt.gain.linearRampToValueAtTime(peak * 0.35, now + 1.2);
+    lfo.connect(lfoAmt); lfoAmt.connect(master.gain);
+    lfo.start();
+    weatherAmbSrcs.push(lfo);
+    weatherAmbGust = lfoAmt;
   }
   function stopWeatherAmbience() {
     weatherAmbKind = '';
-    if (!weatherAmbSrc || !audioCtx) return;
-    const src = weatherAmbSrc, g = weatherAmbGain;
-    weatherAmbSrc = null; weatherAmbGain = null; weatherAmbFilter = null;
+    if (!weatherAmbGain || !audioCtx) return;
+    const srcs = weatherAmbSrcs, g = weatherAmbGain, gust = weatherAmbGust;
+    weatherAmbSrcs = []; weatherAmbGain = null; weatherAmbGust = null;
     const t = audioCtx.currentTime;
     try {
       g.gain.cancelScheduledValues(t);
       g.gain.setValueAtTime(g.gain.value, t);
       g.gain.linearRampToValueAtTime(0.0001, t + 0.8); // fade out with the wipe
-      src.stop(t + 0.85);
+      // The gust depth has to come down too. It's summed into master.gain as a
+      // connected signal, and cancelScheduledValues only clears the param's
+      // own timeline — left running, it would hold the "faded" bed audible.
+      if (gust) {
+        gust.gain.cancelScheduledValues(t);
+        gust.gain.setValueAtTime(gust.gain.value, t);
+        gust.gain.linearRampToValueAtTime(0.0001, t + 0.8);
+      }
+      for (const s of srcs) s.stop(t + 0.85);
     } catch (e) { /* already stopped */ }
   }
   // Pumped from updateMusic so it tracks `weather` without its own timer.
