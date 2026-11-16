@@ -220,6 +220,45 @@
     // Paint wolf eyes over everything so they stay visible without lighting
     // up the surrounding fur.
     drawWolfEyesOverlay();
+    drawAllyThermalOverlay();
+  }
+
+  // Night of the Wolf: your allies aren't fumbling in the dark — the hunters
+  // and the rooftoppers strap on thermal goggles. Drawn over the darkness
+  // mask like the wolf eyes, so a green twin-lens glow marks every ally you
+  // own without lighting the ground around them.
+  function drawAllyThermalOverlay() {
+    const lens = (sx, sy, s, facingLeft) => {
+      const sign = facingLeft ? -1 : 1;
+      ctx.save();
+      // Soft bloom so it reads as emitted light rather than a painted dot.
+      ctx.globalCompositeOperation = 'lighter';
+      const g = ctx.createRadialGradient(sx, sy, 0, sx, sy, 7 * s);
+      g.addColorStop(0,   'rgba(120,255,150,0.75)');
+      g.addColorStop(0.45,'rgba(60,220,110,0.28)');
+      g.addColorStop(1,   'rgba(40,200,90,0)');
+      ctx.fillStyle = g;
+      ctx.fillRect(sx - 7 * s, sy - 7 * s, 14 * s, 14 * s);
+      ctx.restore();
+      // The two lenses themselves.
+      ctx.fillStyle = '#9dffbe';
+      ctx.fillRect(sx - 0.6 * s + sign * 0.6 * s, sy - 0.7 * s, 1.5 * s, 1.5 * s);
+      ctx.fillRect(sx - 0.6 * s + sign * 3.0 * s, sy - 0.7 * s, 1.5 * s, 1.5 * s);
+    };
+    for (const h of hunters) {
+      if (!h.alive || h.dying) continue;
+      if (isOccludedByBuilding(h.x, h.y)) continue;
+      const p = worldToScreen(h.x, h.y);
+      lens(p.x, p.y + TILE_H / 2 - 23, 1, h.facingLeft);
+    }
+    for (const r of rooftoppers) {
+      if (!r.alive || r.falling) continue;
+      const p = worldToScreen(r.x, r.y);
+      // Rooftoppers are drawn lifted onto the coop roof; match that offset so
+      // the goggles sit on the sniper's head, not in mid-air below them.
+      const lift = ((r.coop && r.coop.level) || 0) * 14 + 26;
+      lens(p.x, p.y + TILE_H / 2 - lift, 1, r.facingLeft);
+    }
   }
 
   // A gunsmoke puff — pale, rises and grows as it fades, like the chimney smoke.
@@ -1117,8 +1156,9 @@
 
   // Fast black screen wipe: fade to black, run onBlack() at full black (where
   // the world is swapped), then fade back in. Ticks even while the sim is frozen.
-  function startBlackFade(onBlack) {
-    fade = { t: 0, dur: 0.22, phase: 'out', onBlack: onBlack || null };
+  // `dur` overrides the default half-length for a slower, weightier wipe.
+  function startBlackFade(onBlack, dur) {
+    fade = { t: 0, dur: dur || 0.22, phase: 'out', onBlack: onBlack || null };
   }
   function updateFade(dt) {
     if (!fade) return;
@@ -1285,6 +1325,15 @@
   // Wipe every entity array + run-progress scalar so a fresh game starts
   // clean after the menu demo (or after a previous session in MP).
   function resetWorld() {
+    // Every 10 coops the land expands (expandMap). That growth used to survive
+    // a restart, so a new run opened on a sprawling map with the forest border
+    // pushed way out. Shrink back to the starting footprint and rebuild the
+    // treeline to match.
+    if (MAP_SIZE !== MAP_SIZE_DEFAULT) {
+      MAP_SIZE = MAP_SIZE_DEFAULT;
+      HALF_MAP = MAP_SIZE / 2;
+      generateTrees();
+    }
     comboKills = 0; comboT = 0; comboFloat = null;
     ghostWolfChance = 0;
     coops.length = 0;

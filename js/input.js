@@ -2,7 +2,8 @@
   // World units: 1 = one tile. Player position is in world coords.
   const TILE_W = 32;  // isometric tile width (art pixels)
   const TILE_H = 16;  // isometric tile height (art pixels)
-  let MAP_SIZE = 40; // tiles per side — grows as the player places coops
+  const MAP_SIZE_DEFAULT = 40; // the farm's starting footprint
+  let MAP_SIZE = MAP_SIZE_DEFAULT; // tiles per side — grows as the player places coops
   let HALF_MAP = MAP_SIZE / 2;
 
   // camera offset (centered on player)

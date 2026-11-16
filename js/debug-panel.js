@@ -377,6 +377,11 @@
         weatherEvents.rain.force = true;
         weatherEvents.snow.force = false;
         toast('Next wave will be a downpour', 1.6);
+      } else if (action === 'spawn-grave') {
+        // Same shape and lifetime as a real one, so it clears at the next
+        // startWave exactly like a keeper's grave does.
+        graves.push({ x: player.x, y: player.y, lean: rand(-0.16, 0.16) });
+        toast('Tombstone planted', 1.0);
       } else if (action === 'force-snow') {
         nightOfWolfDebugForce = false;
         weatherEvents.snow.force = true;

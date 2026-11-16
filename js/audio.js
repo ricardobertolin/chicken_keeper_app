@@ -141,6 +141,7 @@
 
   // Pumped once per frame from loop().
   function updateMusic() {
+    syncWeatherAmbience(); // the rain/wind bed rides along with the music pump
     const want = musicModeForState();
     // Idle: don't even spin up an AudioContext before the player needs one.
     if (want === 'off' && musicMode === 'off') return;
@@ -213,6 +214,8 @@
       case 'cashRegister':     playCashRegister(); break;
       case 'woodChop':         playWoodChop(); break;
       case 'wolfScrap':        playWolfScrap(); break;
+      case 'ghostVanish':      playGhostVanish(); break;
+      case 'hunterDeath':      playHunterDeath(); break;
       case 'rooftopShot':      playRooftopShot(); break;
       case 'fireCrackle':      playFireCrackle(); break;
       case 'freeze':           playFreeze(); break;
@@ -383,6 +386,150 @@
     og.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
     osc.connect(og); og.connect(ctx.destination);
     osc.start(now); osc.stop(now + 0.22);
+  }
+
+  // Ghost wolf dissolving after a hit: a descending, detuned wail with a long
+  // breathy tail. Deliberately unlike every other death sound in the game.
+  function playGhostVanish() {
+    queueNetSound('ghostVanish');
+    const ctx = getAudio();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    // Two sines a hair apart so they beat against each other — that slow
+    // warble is what makes it read as spectral rather than just a falling tone.
+    [0, 7].forEach((detune, i) => {
+      const osc = ctx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(660 + detune, now);
+      osc.frequency.exponentialRampToValueAtTime(130 + detune, now + 0.85);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, now);
+      g.gain.exponentialRampToValueAtTime(i === 0 ? 0.11 : 0.07, now + 0.07);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.9);
+      osc.connect(g); g.connect(ctx.destination);
+      osc.start(now); osc.stop(now + 0.95);
+    });
+    // Airy hiss underneath — the body coming apart into nothing.
+    const dur = 0.8;
+    const sz = Math.floor(ctx.sampleRate * dur);
+    const b = ctx.createBuffer(1, sz, ctx.sampleRate);
+    const d = b.getChannelData(0);
+    for (let i = 0; i < sz; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / sz);
+    const src = ctx.createBufferSource(); src.buffer = b;
+    const bp = ctx.createBiquadFilter(); bp.type = 'bandpass';
+    bp.frequency.setValueAtTime(2400, now);
+    bp.frequency.exponentialRampToValueAtTime(380, now + dur);
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.07, now);
+    ng.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    src.connect(bp); bp.connect(ng); ng.connect(ctx.destination);
+    src.start(now); src.stop(now + dur);
+  }
+
+  // A hunter going down: a short gruff cry over the thud of the body landing.
+  function playHunterDeath() {
+    queueNetSound('hunterDeath');
+    const ctx = getAudio();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(240, now);
+    osc.frequency.exponentialRampToValueAtTime(96, now + 0.3);
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(1100, now);
+    lp.frequency.exponentialRampToValueAtTime(380, now + 0.3);
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(0.17, now + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + 0.34);
+    osc.connect(lp); lp.connect(g); g.connect(ctx.destination);
+    osc.start(now); osc.stop(now + 0.36);
+    // Body hitting the dirt a beat later.
+    const at = now + 0.22;
+    const dur = 0.12;
+    const sz = Math.floor(ctx.sampleRate * dur);
+    const b = ctx.createBuffer(1, sz, ctx.sampleRate);
+    const d = b.getChannelData(0);
+    for (let i = 0; i < sz; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / sz, 2);
+    const src = ctx.createBufferSource(); src.buffer = b;
+    const lp2 = ctx.createBiquadFilter(); lp2.type = 'lowpass';
+    lp2.frequency.setValueAtTime(320, at);
+    const ng = ctx.createGain();
+    ng.gain.setValueAtTime(0.2, at);
+    ng.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    src.connect(lp2); lp2.connect(ng); ng.connect(ctx.destination);
+    src.start(at); src.stop(at + dur);
+  }
+
+  // ---- Weather ambience ---------------------------------------------------
+  // A continuous bed that runs for as long as the event does. One looping
+  // noise buffer through a filter, so it costs nothing per frame — the volume
+  // and tone are the only things that move.
+  let weatherAmbSrc = null, weatherAmbGain = null, weatherAmbFilter = null;
+  let weatherAmbKind = '';
+  function startWeatherAmbience(kind) {
+    if (weatherAmbKind === kind) return;
+    const ctx = getAudio();
+    if (!ctx) return;
+    stopWeatherAmbience();
+    if (!kind) return;
+    weatherAmbKind = kind;
+    // Two seconds of noise, looped. Long enough that the loop point is
+    // inaudible inside a broadband hiss.
+    const dur = 2.0;
+    const sz = Math.floor(ctx.sampleRate * dur);
+    const b = ctx.createBuffer(1, sz, ctx.sampleRate);
+    const d = b.getChannelData(0);
+    if (kind === 'rain') {
+      // White-ish noise with occasional heavier spatter for the downpour.
+      for (let i = 0; i < sz; i++) {
+        let v = Math.random() * 2 - 1;
+        if (Math.random() < 0.0015) v *= 2.6; // a fat drop
+        d[i] = v * 0.5;
+      }
+    } else {
+      // Brown-ish noise — a low, hollow wind for the blizzard.
+      let last = 0;
+      for (let i = 0; i < sz; i++) {
+        last = (last + (Math.random() * 2 - 1) * 0.04) * 0.985;
+        d[i] = last * 3.2;
+      }
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = b;
+    src.loop = true;
+    const f = ctx.createBiquadFilter();
+    if (kind === 'rain') { f.type = 'highpass'; f.frequency.setValueAtTime(700, ctx.currentTime); }
+    else                 { f.type = 'lowpass';  f.frequency.setValueAtTime(420, ctx.currentTime); }
+    const g = ctx.createGain();
+    g.gain.setValueAtTime(0.0001, ctx.currentTime);
+    // Fade in over the black wipe rather than slamming on.
+    g.gain.linearRampToValueAtTime(kind === 'rain' ? 0.085 : 0.07, ctx.currentTime + 1.2);
+    src.connect(f); f.connect(g); g.connect(ctx.destination);
+    src.start();
+    weatherAmbSrc = src; weatherAmbGain = g; weatherAmbFilter = f;
+  }
+  function stopWeatherAmbience() {
+    weatherAmbKind = '';
+    if (!weatherAmbSrc || !audioCtx) return;
+    const src = weatherAmbSrc, g = weatherAmbGain;
+    weatherAmbSrc = null; weatherAmbGain = null; weatherAmbFilter = null;
+    const t = audioCtx.currentTime;
+    try {
+      g.gain.cancelScheduledValues(t);
+      g.gain.setValueAtTime(g.gain.value, t);
+      g.gain.linearRampToValueAtTime(0.0001, t + 0.8); // fade out with the wipe
+      src.stop(t + 0.85);
+    } catch (e) { /* already stopped */ }
+  }
+  // Pumped from updateMusic so it tracks `weather` without its own timer.
+  function syncWeatherAmbience() {
+    const want = (gameStarted && !inMenu && !gameOver && weather) ? weather : '';
+    if (want !== weatherAmbKind) {
+      if (want) startWeatherAmbience(want);
+      else stopWeatherAmbience();
+    }
   }
 
   // A wolf coming apart: metal clatter — a short burst of ringing debris.

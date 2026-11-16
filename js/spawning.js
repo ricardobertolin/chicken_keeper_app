@@ -1636,6 +1636,10 @@
   function weatherRollFor(kind) {
     const st = weatherEvents[kind];
     if (wave === BOSS_WAVE) return false;
+    // The wave straight after FANGUS is a breather: the fight already ends on
+    // a cutscene and a sky fade, and opening the very next round in a downpour
+    // trampled all of that.
+    if (wave === BOSS_WAVE + 1) return false;
     if (st.force) { st.force = false; return true; }
     if (wave >= WEATHER_MIN_WAVE && wave <= WEATHER_MAX_WAVE) {
       if (st.count >= WEATHER_MAX_PER_RUN) return false;
@@ -1681,9 +1685,11 @@
       _tileColorCache.clear();
       rainDrops.length = 0;
       snowFlakes.length = 0;
-      // The map changes look wholesale here, so hide the swap behind the same
-      // quick wipe the post-boss restart uses rather than popping mid-frame.
-      startBlackFade(null);
+      // The map changes look wholesale here, so hide the swap behind a wipe
+      // rather than popping mid-frame. Slower than the restart wipe (0.22) so
+      // the change of weather lands as an event, and long enough to cover the
+      // ambience fading in underneath.
+      startBlackFade(null, 0.55);
     }
   }
 
@@ -3008,6 +3014,7 @@
   // max Hunter Gear the crew holds the line even on a player kill.
   function onHunterKilled(h, byPlayer) {
     h.alive = false;
+    playHunterDeath();
     // Topple like a felled keeper — the corpse is dropped once the fall lands
     // (see tickHunterDeaths). It stops acting immediately (alive = false).
     h.dying = true;

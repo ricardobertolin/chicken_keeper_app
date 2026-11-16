@@ -602,10 +602,13 @@
     // Stable hash-based green variation
     const h = ((x * 928371 + y * 18217) ^ 0x5f3759df) >>> 0;
     const v = (h % 100) / 100;
-    // Border darker
+    // Border darker — but it still takes the snow, otherwise the treeline sat
+    // on a green ring in the middle of a white farm.
     if (Math.abs(x) >= HALF_MAP - 1 || Math.abs(y) >= HALF_MAP - 1) {
-      _tileColorCache.set(key, '#3d6b34');
-      return '#3d6b34';
+      const bc = snowCoverAt(x, y);
+      const col = bc > 0 ? mixHex('#3d6b34', '#dce6f0', 0.86 * bc) : '#3d6b34';
+      _tileColorCache.set(key, col);
+      return col;
     }
     // Patchy grass
     let r = 60 + Math.floor(v * 30);
@@ -625,10 +628,10 @@
     // so the tile-to-tile variation still shows through as drift texture.
     // rollWeather() clears this cache whenever the weather changes, so the
     // snow goes on and comes off cleanly.
-    const cover = snowCover();
+    const cover = snowCoverAt(x, y);
     if (cover > 0) {
       const SNOW = [226, 236, 246];
-      const k = 0.86 * cover; // full during the storm, a dusting the wave after
+      const k = 0.86 * cover;
       r = Math.round(r + (SNOW[0] - r) * k);
       g = Math.round(g + (SNOW[1] - g) * k);
       b = Math.round(b + (SNOW[2] - b) * k);
@@ -879,14 +882,21 @@
     ctx.strokeStyle = 'rgba(20, 14, 10, 0.75)';
     ctx.lineWidth = 1.2;
     ctx.lineCap = 'round';
+    // Keep every crack inside the block's front faces. The old version let the
+    // start offset (±8px) and three unclamped ±3px steps wander up to 17px out
+    // and well below the tile, so cracks floated off the wall entirely.
+    const HX = TILE_W * 0.30;        // half-width of the drawable face
+    const TOP = cy - h + 2;          // just under the parapet
+    const BOT = cy - 2;              // just above the ground line
+    const cl = (v, lo, hi) => (v < lo ? lo : v > hi ? hi : v);
     for (let k = 0; k < 3; k++) {
-      const ox = (rnd(k * 3) - 0.5) * TILE_W * 0.5;
-      let x = cx + ox, y = cy - h * (0.25 + rnd(k * 3 + 1) * 0.5);
+      let x = cx + (rnd(k * 3) - 0.5) * HX * 1.4;
+      let y = cl(TOP + (BOT - TOP) * (0.10 + rnd(k * 3 + 1) * 0.35), TOP, BOT);
       ctx.beginPath();
-      ctx.moveTo(x, y);
+      ctx.moveTo(cl(x, cx - HX, cx + HX), y);
       for (let s = 0; s < 3; s++) {
-        x += (rnd(k * 7 + s) - 0.5) * 6;
-        y += 2.5 + rnd(k * 5 + s) * 3;
+        x = cl(x + (rnd(k * 7 + s) - 0.5) * 4.5, cx - HX, cx + HX);
+        y = cl(y + 1.6 + rnd(k * 5 + s) * 2.2, TOP, BOT);
         ctx.lineTo(x, y);
       }
       ctx.stroke();
@@ -3105,8 +3115,8 @@
     }
     // Snow piled along the eaves during a blizzard. Drawn across the roof's
     // lower edge rather than per roof-shape, so it reads the same on all three.
-    if (snowCover() > 0 && !preview) {
-      const cv = snowCover();
+    if (snowCoverAt(Math.round(c.x), Math.round(c.y)) > 0 && !preview) {
+      const cv = snowCoverAt(Math.round(c.x), Math.round(c.y));
       drawSnowCap(cx, cy - topLift + 1, hw * 0.92, 3.4 * cv);
       drawSnowCap(cx, cy - topLift - roofH * 0.45, hw * 0.5, 2.6 * cv);
     }
@@ -3552,8 +3562,10 @@
     ctx.arc(fx - 2 * s, cy - 50 * s, 2.5 * s, 0, Math.PI * 2);
     ctx.fill();
     // Snow settles along the top of the crown during a blizzard.
-    if (snowCover() > 0) {
-      const cv = snowCover();
+    if (snowCoverAt(Math.round(t.x), Math.round(t.y)) > 0) {
+      // Per-tile, so the day after only the trees on still-snowy ground keep
+      // their caps instead of every tree wearing a uniform thin smear.
+      const cv = snowCoverAt(Math.round(t.x), Math.round(t.y));
       drawSnowCap(fx,         cy - 50 * s, 5.4 * s, 3.2 * s * cv);
       drawSnowCap(fx,         cy - 44 * s, 7.2 * s, 3.0 * s * cv);
       drawSnowCap(fx - 5 * s, cy - 36 * s, 5.0 * s, 2.4 * s * cv);

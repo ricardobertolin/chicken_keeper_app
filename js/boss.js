@@ -96,9 +96,18 @@
       const c = huntersCamps[i];
       if (dist2(c.x, c.y, b.x, b.y) < 6) {
         huntersCamps.splice(i, 1);
+        let crushedCrew = 0;
         for (let j = hunters.length - 1; j >= 0; j--) {
-          if (hunters[j].camp === c) { spawnSmoke(hunters[j].x, hunters[j].y, 3); hunters.splice(j, 1); }
+          if (hunters[j].camp === c) {
+            spawnSmoke(hunters[j].x, hunters[j].y, 3);
+            if (hunters[j].alive) crushedCrew++;
+            hunters.splice(j, 1);
+          }
         }
+        // They're spliced out rather than routed through onHunterKilled, so
+        // the death sound has to be raised here. One cry for the whole camp —
+        // three overlapping copies would just be noise.
+        if (crushedCrew > 0) playHunterDeath();
         huntersGroups = huntersCamps.length;
         spawnBlast(c.x, c.y); spawnSmoke(c.x, c.y, 12);
         toast('FANGUS flattened a hunter camp!', 1.8);
@@ -810,14 +819,13 @@
             hurtWolf(wv, DUMMY_EXPLOSION_DMG, (dx / m) * 0.3, (dy / m) * 0.3);
           }
         }
-        toast('Scarecrow exploded!', 1.4);
-      } else {
-        toast('A scarecrow was destroyed!', 1.0);
+        toast('Scarecrow exploded!', 1.4); // the blast is a real effect — worth saying
       }
+      // (A plain scarecrow going down is self-evident — no toast.)
     } else if (target._decoy === 'statue') {
       const i = statues.indexOf(target);
       if (i >= 0) statues.splice(i, 1);
-      toast('A chicken statue shattered!', 1.0);
+      // (Likewise the statue — it just vanishes from the field.)
     }
   }
 
@@ -1818,7 +1826,8 @@
       if ((w.hitDebounceT || 0) > 0) return;
       w.ghostFleeing = true;
       w.ghostAlpha = 1.0;
-      spawnSmoke(w.x, w.y, 2); // just a tiny puff — no sound
+      spawnSmoke(w.x, w.y, 2);
+      playGhostVanish(); // a cold wail as it dissolves
       return;
     }
     // Hunter wolf: any hit knocks off exactly ONE hat (never one-shot), with
@@ -2348,6 +2357,7 @@
             w.ghostFleeing = true;
             w.ghostAlpha = 1.0;
             spawnSmoke(w.x, w.y, 2);
+            playGhostVanish(); // a cold wail as it dissolves
           }
           p.didHit = true;
           if (p.hit) p.hit.add(w);
