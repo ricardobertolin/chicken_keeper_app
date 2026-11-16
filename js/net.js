@@ -408,7 +408,7 @@
     rooftoppers: ['x','y','fireT','dir','aimDir','facingLeft','alive','coopLevel','aiming','targetX','targetY'],
     // Wartime supply crates. para/paraH/paraSway carry the descent so the drop
     // animates on the guest; hp/hurtT drive the splits and the hit flash.
-    supplyCrates: ['x','y','hp','maxHp','hurtT','para','paraH','paraSway','landT'],
+    supplyCrates: ['x','y','hp','maxHp','hurtT','para','paraH','paraSway','landT','shakeT'],
     // Robot allies. mk drives the chassis colour and the mark pips; bootT and
     // muzzleT drive the spin-up flicker and the muzzle flash.
     robots:   ['x','y','mk','hp','maxHp','hurtT','facingLeft','walkT','dir','alive','dying','downT','bootT','muzzleT'],

@@ -1038,8 +1038,8 @@
   // Supply crates. The regular cadence belongs to the boss fight; once FANGUS
   // is down the airlift winds up, and from wave 51 on a crate is a rare treat
   // rather than something to plan around.
-  const CRATE_DROP_MIN = 15;        // seconds between boss-fight drops
-  const CRATE_DROP_MAX = 30;
+  const CRATE_DROP_MIN = 30;        // seconds between boss-fight drops
+  const CRATE_DROP_MAX = 60;
   const CRATE_ENDLESS_MIN = 25;     // wave 51+: how often the roll below is taken
   const CRATE_ENDLESS_MAX = 40;
   const CRATE_ENDLESS_CHANCE = 0.18; // ...and how often that roll actually drops one
@@ -1055,6 +1055,14 @@
   const CRATE_PAYLOAD_HATS = 0.20;  // a hat pack
   // ...the remaining 0.55 is live cargo (chickens).
   const CRATE_SOLDIER_CHANCE = 0.45; // per bird in a live-cargo crate
+  // Birds out of a crate land in the middle of a fight, so they get a few
+  // seconds of total immunity — a crate whose cargo is eaten the instant it
+  // opens is worse than no crate at all. killChicken honours this, which is
+  // what makes it cover every death path (jaws, pellets, blasts, the siphon).
+  const CRATE_CHICK_SHIELD = 3.0;
+  // An unopened crate starts rattling once the next wave begins, and
+  // eventually pops itself. Whatever is in there was never going to wait.
+  const CRATE_SELF_OPEN_PER_SEC = 0.045; // ~22s of shaking before it goes
 
   // ---------- Robot allies (MK-1 / MK-2 / MK-3) ----------
   // A keeper-shaped drone that fights and nothing else — the same deal the

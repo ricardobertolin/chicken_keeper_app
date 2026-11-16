@@ -491,6 +491,10 @@
       paraH: PARACHUTE_START_H,
       paraSway: Math.random() * Math.PI * 2,
       landT: 0,
+      // The wave it arrived on. Once the farm moves past it, whatever is inside
+      // stops waiting: the crate rattles and eventually pops itself open.
+      bornWave: wave,
+      shakeT: 0,
     });
     playParachuteDrop();
   }
@@ -513,6 +517,18 @@
         continue;
       }
       if (cr.landT > 0) cr.landT = Math.max(0, cr.landT - dt);
+      // Left unopened into the next wave, the crate starts rattling — and
+      // every second of rattling is a roll to burst open on its own. That way
+      // ignoring a crate isn't free: it still resolves, just not on your
+      // terms, and a booby-trapped one going off unattended is the risk.
+      if (cr.landT <= 0 && wave > (cr.bornWave !== undefined ? cr.bornWave : wave)) {
+        cr.shakeT = (cr.shakeT || 0) + dt;
+        if (Math.random() < CRATE_SELF_OPEN_PER_SEC * dt) {
+          // No shooter: hatRecipientFor picks a keeper at random.
+          openSupplyCrate(cr);
+          continue;
+        }
+      }
     }
   }
   // Any damage source can crack a crate: the keeper's pellets, a stray hunter
@@ -581,58 +597,66 @@
         hurtWolf(w, CRATE_BLAST_DMG, (dx / m) * 0.4, (dy / m) * 0.4);
       }
       explosionHitKeepers(cr.x, cr.y, CRATE_BLAST_R);
-      toast('The crate was live ordnance!', 1.8);
-      toastGuest('The crate was live ordnance!', 1.8);
+      // (No toast — a blast at your feet announces itself.)
       return;
     }
     if (roll < CRATE_PAYLOAD_BOOM + CRATE_PAYLOAD_HATS) {
       // A hat pack — same three hats, same rare-colour rolls as the shop
-      // version, but free. Capped by MAX_HATS like every other hat source.
+      // version, but free, and they ARC ONTO THE KEEPER'S HEAD rather than
+      // appearing on the stack. Same flight the hatted-wolf drop uses: a
+      // flyHat for the visible arc, plus a pendingHatLanding that actually
+      // credits the hat when the arc lands.
       //
-      // They go to whoever cracked it open. The shop's Buy Hat Pack always
-      // feeds player 1, which is fine for a thing you paid for out of a shared
-      // wallet, but a guest shooting a crate open and watching the HOST get the
-      // hats would just read as broken.
+      // They go to whoever cracked it open; a crate that popped itself picks a
+      // keeper at random. The shop's Buy Hat Pack always feeds player 1, which
+      // is fine for something bought from a shared wallet, but a guest
+      // shooting a crate and watching the HOST get the hats reads as broken.
+      const to = hatRecipientFor(shooter);
+      const held = (to === player2 && player2.active)
+        ? (player2.hats || 0)
+        : playerHats + pendingHatLandings.length;
       let got = 0;
-      if (shooter === 2 && player2.active) {
-        // player2's hats are a plain count, not a colour stack (see drawPlayer2).
-        for (let n = 0; n < 3 && (player2.hats || 0) < MAX_HATS; n++) { player2.hats = (player2.hats || 0) + 1; got++; }
-        spawnSmoke(cr.x, cr.y, 6);
-        playSparkle();
-        toast(got > 0 ? 'Buddy cracked a crate — ' + got + ' spare hat' + (got > 1 ? 's' : '') + '!' : 'Supply crate — hats, and nowhere to put them', 2.0);
-        toastGuest(got > 0 ? 'Supply crate — ' + got + ' spare hat' + (got > 1 ? 's' : '') + '!' : 'Supply crate — hats, and nowhere to put them', 2.0);
-        return;
-      }
-      for (let n = 0; n < 3 && playerHats < MAX_HATS; n++) {
-        hatsBought++;
-        playerHats++;
+      for (let n = 0; n < 3 && held + got < MAX_HATS; n++) {
         let col = '#5a3825';
-        if (Math.random() < HAT_PACK_BUDDY_CHANCE) col = GUEST_HAT_COLOR;
-        else if (hatsBought >= 5 && Math.random() < LEPRECHAUN_BUY_CHANCE) col = LEPRECHAUN_HAT_COLOR;
-        hatColors.push(col);
+        if (to === player2 && player2.active) {
+          col = GUEST_HAT_COLOR;
+        } else {
+          hatsBought++;
+          if (Math.random() < HAT_PACK_BUDDY_CHANCE) col = GUEST_HAT_COLOR;
+          else if (hatsBought >= 5 && Math.random() < LEPRECHAUN_BUY_CHANCE) col = LEPRECHAUN_HAT_COLOR;
+        }
+        // Staggered so three hats sail over one after another instead of
+        // overlapping into a single blob.
+        const delay = n * 0.16;
+        spawnFlyHat(cr.x, cr.y, col, to, delay);
+        pendingHatLandings.push({ delayT: delay + 0.55, color: col, to });
         got++;
       }
       spawnSmoke(cr.x, cr.y, 6);
-      playSparkle();
-      toast(got > 0 ? 'Supply crate — ' + got + ' spare hat' + (got > 1 ? 's' : '') + '!'
-                    : 'Supply crate — hats, and nowhere to put them', 2.0);
+      if (got > 0) playSparkle();
       return;
     }
     // Live cargo: a few birds of whatever kind the farm happens to breed,
     // plus a decent chance of a soldier in the mix.
     const n = Math.round(rand(CRATE_CHICKENS_MIN, CRATE_CHICKENS_MAX));
-    let soldiers = 0;
     for (let k = 0; k < n; k++) {
       if (chickens.length >= MAX_CHICKENS) break;
-      const soldier = Math.random() < CRATE_SOLDIER_CHANCE;
-      const c = spawnCrateChicken(cr.x, cr.y, soldier);
-      if (c && c.soldier) soldiers++;
+      spawnCrateChicken(cr.x, cr.y, Math.random() < CRATE_SOLDIER_CHANCE);
     }
     spawnSmoke(cr.x, cr.y, 6);
     playChickenPop();
-    toast(soldiers > 0
-      ? 'Supply crate — reinforcements, ' + soldiers + ' of them armed!'
-      : 'Supply crate — live cargo!', 2.0);
+  }
+  // Whose head a crate's hats land on. A keeper's shot claims them; a crate
+  // that rattled itself open has no owner, so it picks from whoever is
+  // actually standing (a ghost can't wear a hat).
+  function hatRecipientFor(shooter) {
+    if (shooter === 1 && !player.ghost) return player;
+    if (shooter === 2 && player2.active && !player2.ghost) return player2;
+    const up = [];
+    if (!player.ghost) up.push(player);
+    if (player2.active && !player2.ghost) up.push(player2);
+    if (!up.length) return player;
+    return up[Math.floor(Math.random() * up.length)];
   }
   // A bird out of a crate. Rolls the usual fat/worker/rich variants (so crate
   // cargo looks like the rest of the farm), or comes out a soldier instead —
@@ -646,6 +670,10 @@
     if (!c) return null;
     c.x = x + rand(-0.6, 0.6);
     c.y = y + rand(-0.6, 0.6);
+    // A few seconds where nothing can touch it — see CRATE_CHICK_SHIELD. The
+    // guard lives in killChicken, so this covers jaws, pellets, blasts and the
+    // siphon alike, and the two snatch sites refuse to carry a shielded bird.
+    c.savedT = CRATE_CHICK_SHIELD;
     if (soldier) {
       c.soldier = true;
       c.fat = false; c.worker = false; c.rich = false;
@@ -724,8 +752,20 @@
   // Centralised chicken-death sink. Every code path that sets c.alive=false
   // for a chicken should route through here so the per-wave death counter
   // stays accurate. Idempotent: a chicken that's already dead is a no-op.
-  function killChicken(c) {
+  // `force` bypasses the shield below. It is for a chicken ENDING ITSELF on
+  // purpose — a soldier detonating its TNT, a worker spending itself to rebuild
+  // a fence. Those two call this to finish a job they have already done, so a
+  // refusal doesn't save the bird, it just replays the job: a shielded soldier
+  // detonated over and over, and a shielded worker became a free fence-repair
+  // machine. Everything the PACK does goes through the unforced path.
+  function killChicken(c, force) {
     if (!c || !c.alive) return;
+    // Shielded birds simply cannot be killed. `savedT` already meant "just
+    // rescued, briefly untouchable" and was honoured by the pellet paths only;
+    // the guard lives HERE now so one place covers every way a chicken dies —
+    // jaws, pellets, blasts, the FANGUS siphon. Crate cargo leans on it for
+    // its first few seconds (CRATE_CHICK_SHIELD).
+    if (!force && (c.savedT || 0) > 0) return;
     c.alive = false;
     chickenDeathsThisWave++;
   }
@@ -3056,8 +3096,12 @@
     }
   }
 
-  function spawnFlyHat(wx, wy, color) {
-    flyHats.push({ fromWx: wx, fromWy: wy, color, t: 0, life: 0.55,
+  // A hat arcing onto a keeper's head. `to` is the keeper it flies to and
+  // defaults to player 1 — crate loot needs to be able to land on the buddy
+  // instead, so the destination can no longer be hard-coded.
+  function spawnFlyHat(wx, wy, color, to, delay) {
+    flyHats.push({ fromWx: wx, fromWy: wy, color, t: -(delay || 0), life: 0.55,
+                   to: to || player,
                    spin: (Math.random() > 0.5 ? 1 : -1) * (5 + Math.random() * 8), rot: 0 });
   }
 
@@ -3071,7 +3115,12 @@
     for (let i = pendingHatLandings.length - 1; i >= 0; i--) {
       const ph = pendingHatLandings[i];
       ph.delayT -= dt;
-      if (ph.delayT <= 0 && playerHats < MAX_HATS) {
+      if (ph.delayT > 0) continue;
+      // player2's hats are a plain count with no colour stack (see drawPlayer2).
+      if (ph.to === player2 && player2.active) {
+        if ((player2.hats || 0) < MAX_HATS) player2.hats = (player2.hats || 0) + 1;
+        pendingHatLandings.splice(i, 1);
+      } else if (playerHats < MAX_HATS) {
         playerHats++;
         hatColors.push(ph.color);
         pendingHatLandings.splice(i, 1);
@@ -3081,9 +3130,11 @@
 
   function drawFlyHats() {
     if (!flyHats.length) return;
-    const pp = worldToScreen(player.x, player.y);
-    const px = pp.x, py = pp.y + TILE_H / 2 - 34; // top hat position on player head
     for (const fh of flyHats) {
+      if (fh.t < 0) continue; // staggered launch — not in the air yet
+      const dest = (fh.to === player2 && player2.active) ? player2 : player;
+      const pp = worldToScreen(dest.x, dest.y);
+      const px = pp.x, py = pp.y + TILE_H / 2 - 34; // top-hat height on the head
       const prog = clamp(fh.t / fh.life, 0, 1);
       const fp = worldToScreen(fh.fromWx, fh.fromWy);
       const sx = fp.x, sy = fp.y + TILE_H / 2;

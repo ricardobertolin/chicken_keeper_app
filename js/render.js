@@ -24,7 +24,11 @@
   // Both live in SCREEN space and wrap around the viewport, so they cost the
   // same no matter how far the map has grown and never need culling.
   const RAIN_COUNT = 190;
-  const SNOW_COUNT = 150;
+  // Flakes on screen during the blizzard, and the thinner flurry still falling
+  // the morning after. The storm count is deliberately heavy — at 150 a
+  // "blizzard" read as light snowfall.
+  const SNOW_COUNT_STORM = 620;
+  const SNOW_COUNT_AFTER = 55;
 
   function updateWeatherParticles(dt) {
     if (raining()) {
@@ -40,12 +44,21 @@
       }
     } else if (rainDrops.length) rainDrops.length = 0;
 
-    if (snowing()) {
-      while (snowFlakes.length < SNOW_COUNT) {
+    // Snowfall runs at two densities: a heavy blizzard during the event, then
+    // a thin flurry still drifting the morning after (which is also when the
+    // ground goes patchy — see snowCoverAt). Outside both, no flakes at all.
+    const snowWant = snowing() ? SNOW_COUNT_STORM
+                   : snowLeftover > 0 ? SNOW_COUNT_AFTER
+                   : 0;
+    if (snowWant > 0) {
+      while (snowFlakes.length < snowWant) {
         snowFlakes.push({ x: Math.random() * W, y: Math.random() * H,
                           r: 0.8 + Math.random() * 1.8, spd: 18 + Math.random() * 34,
                           sway: 6 + Math.random() * 16, phase: Math.random() * Math.PI * 2 });
       }
+      // Coming DOWN in density (storm -> next morning) has to trim the excess,
+      // or the blizzard's flake count would linger through the thaw.
+      if (snowFlakes.length > snowWant) snowFlakes.length = snowWant;
       for (const f of snowFlakes) {
         f.y += f.spd * dt;
         f.phase += dt * 1.6;
@@ -71,12 +84,18 @@
       ctx.restore();
       return;
     }
-    if (snowing()) {
+    // Flakes are drawn whenever any are in the air — during the storm, and
+    // again for the thin flurry still falling the morning after. The pale
+    // daylight wash belongs to the storm ONLY; the day after is a clear sky
+    // with a few flakes left in it.
+    if (snowFlakes.length) {
       ctx.save();
-      // Pale, flat daylight — the blizzard washes the colour out of everything.
-      ctx.fillStyle = 'rgba(206, 224, 240, 0.20)';
-      ctx.fillRect(0, 0, W, H);
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+      if (snowing()) {
+        // Pale, flat daylight — the blizzard washes the colour out of everything.
+        ctx.fillStyle = 'rgba(206, 224, 240, 0.20)';
+        ctx.fillRect(0, 0, W, H);
+      }
+      ctx.fillStyle = snowing() ? 'rgba(255, 255, 255, 0.9)' : 'rgba(255, 255, 255, 0.72)';
       for (const f of snowFlakes) {
         const fx = f.x + Math.sin(f.phase) * f.sway;
         ctx.beginPath();
@@ -181,7 +200,9 @@
 
     // Rain/snow sit outside the shake transform: the weather is "on the
     // camera", so it shouldn't jitter along with the world.
-    if (weather) drawWeather();
+    // Also runs with no active weather when flakes are still in the air — the
+    // morning-after flurry outlives the storm that dropped it.
+    if (weather || snowFlakes.length || rainDrops.length) drawWeather();
 
     // Boss wave: a dusk-orange wash over everything, deepening through the
     // intro, plus the boss health bar while it's actively fighting.
@@ -4081,10 +4102,20 @@
   function drawSupplyCrate(cr) {
     const lift = cr.para ? (cr.paraH || 0) : 0;
     const sway = cr.para ? Math.sin(cr.paraSway || 0) * 5 : 0;
+    // An overdue crate rattles: something inside is trying to get out, and it
+    // reads as a warning that this one is about to resolve itself. The jitter
+    // builds over the first few seconds of shaking so it starts as a twitch.
+    const shakeT = cr.shakeT || 0;
+    let jx = 0, jy = 0;
+    if (shakeT > 0 && !cr.para) {
+      const amp = Math.min(1.8, 0.5 + shakeT * 0.22);
+      jx = Math.sin(shakeT * 37) * amp;
+      jy = Math.sin(shakeT * 23 + 1.3) * amp * 0.45;
+    }
     const p = worldToScreen(cr.x, cr.y);
-    const cx = p.x + sway;
+    const cx = p.x + sway + jx;
     const groundY = p.y + TILE_H / 2;
-    const cy = groundY - lift;
+    const cy = groundY - lift + jy;
     // Shadow stays on the ground and tightens as the crate comes down, so the
     // drop reads as height rather than the crate just sliding up the screen.
     const shrink = cr.para ? 1 - (lift / PARACHUTE_START_H) * 0.55 : 1;

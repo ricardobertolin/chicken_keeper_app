@@ -584,7 +584,10 @@
         const m = Math.hypot(dx, dy) || 1;
         if (m <= WORKER_REBUILD_REACH) {
           // Sacrifice the chicken and rebuild the fence at full HP.
-          killChicken(c);
+          // Forced for the same reason the soldier's blast is: the worker is
+          // spending itself, and a shielded bird refusing to die would just
+          // rebuild the next pile too, for free.
+          killChicken(c, true);
           corpses.push({ x: c.x, y: c.y, kind: 'chicken', t: 4 });
           fences.push({ x: bestD.x, y: bestD.y, kind: bestD.kind, hp: bestD.hp, hurtT: 0 });
           const di = debris.indexOf(bestD);
@@ -1008,11 +1011,13 @@
       const m = Math.hypot(dx, dy) || 1;
       hurtWolf(w, SOLDIER_BLAST_DMG, (dx / m) * 0.38, (dy / m) * 0.38);
     }
-    // Routed through killChicken like the worker chicken's fence-rebuild
-    // sacrifice, so the wave's death tally treats both self-sacrifices the
-    // same way. NOTE that means a detonating soldier counts as a chicken lost
-    // for the bonus-pick roll.
-    killChicken(c);
+    // Forced: this is the bird ending ITSELF, so the crate shield must not
+    // veto it — an unforced call left a shielded soldier alive to detonate
+    // again on the next frame. Routed through killChicken like the worker's
+    // fence-rebuild sacrifice, so the wave's death tally treats both the same
+    // way. NOTE that means a detonating soldier counts as a chicken lost for
+    // the bonus-pick roll.
+    killChicken(c, true);
     checkWaveDefended(); // the blast may have cleared the last wolf
   }
 

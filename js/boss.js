@@ -1360,7 +1360,7 @@
             // map edge — kill the player a chance to save it by killing the
             // wolf before it slips off. Fat chickens are too heavy to carry,
             // so they're killed outright as before.
-            if (!target.fat && Math.random() < tableAt('snatch')) {
+            if (!target.fat && (target.savedT || 0) <= 0 && Math.random() < tableAt('snatch')) {
               w.fleeing = true;
               w.carrying = true;
               w.carriedChicken = target;
@@ -1453,7 +1453,8 @@
             playChickenDeath();
             explodeChickenMaybe(target);
             corpses.push({ x: target.x, y: target.y, kind: 'chicken', t: 4 });
-          } else {
+          } else if ((target.savedT || 0) <= 0) {
+            // A shielded bird shrugs the fox off rather than being carried.
             f.carrying = true;
             f.carriedChicken = target;
             target.carrier = f;

@@ -141,7 +141,7 @@
 
   // Pumped once per frame from loop().
   function updateMusic() {
-    syncWeatherAmbience(); // the rain/wind bed rides along with the music pump
+    syncAmbience(); // the rain/wind/cricket bed rides along with the music pump
     const want = musicModeForState();
     // Idle: don't even spin up an AudioContext before the player needs one.
     if (want === 'off' && musicMode === 'off') return;
@@ -651,29 +651,34 @@
     osc.start(now); osc.stop(now + 0.18);
   }
 
-  // ---- Weather ambience ---------------------------------------------------
-  // A continuous bed that runs for as long as the event does. Looping noise
-  // buffers through filters, so it costs nothing per frame — only the master
-  // volume and a slow gust LFO move.
+  // ---- Event ambience (weather + the night) -------------------------------
+  // A continuous bed that runs for as long as the event does. Looping buffers
+  // through filters, so it costs nothing per frame — only the master volume
+  // and a slow LFO move.
   //
   // Levels matter more here than for a one-shot: a bed has to sit UNDER
-  // gunfire and still be heard. The game's noise one-shots run around
-  // -19 dBFS rms, so the bed is aimed at roughly -21, about 10 dB louder than
-  // a first pass that measured -32 and was simply inaudible. Rain is split
-  // into a bright spatter plus a low roar, and the blizzard's wind keeps real
-  // energy in the 300-900 Hz band — a bed filtered down to 420 Hz is gone
-  // entirely on laptop speakers, which roll off hard below ~300.
-  const WEATHER_AMB_GUST_HZ = 0.07;   // one gust swell roughly every 14s
-  let weatherAmbSrcs = [];            // every node needing a stop()
-  let weatherAmbGain = null;          // master — the only thing faded
-  let weatherAmbGust = null;          // gust LFO depth, faded along with the master
-  let weatherAmbKind = '';
-  // Looping noise. `brown` integrates it into a low rumble instead of hiss.
-  function weatherNoiseBuffer(ctx, secs, brown) {
+  // gunfire and still be heard, but not fight it. The game's noise one-shots
+  // run around -19 dBFS rms; the beds sit a few dB below that. Rain is split
+  // into a bright spatter plus a low roar, the blizzard's wind keeps real
+  // energy in the 300-900 Hz band (a bed filtered down to 420 Hz is gone
+  // entirely on laptop speakers, which roll off hard below ~300), and the
+  // night is crickets over a soft air hiss.
+  const AMB_LFO_HZ = 0.07;      // one swell roughly every 14s
+  // Per-kind master gain. Rain and snow were measured at ~-21 dBFS rms at
+  // 0.26 and asked to come down a little; the night bed sits lower again,
+  // since crickets are meant to be the quiet behind the wolves, not a wall.
+  const AMB_PEAK = { rain: 0.19, snow: 0.19, night: 0.26 };
+  let ambSrcs = [];             // every node needing a stop()
+  let ambGain = null;           // master — the only thing faded
+  let ambLfoDepth = null;       // LFO depth, faded along with the master
+  let ambKind = '';
+  // Looping noise. `shape` is 'white' (hiss), 'brown' (low rumble) or
+  // 'crickets' (a chirp pattern baked straight into the loop).
+  function ambNoiseBuffer(ctx, secs, shape) {
     const sz = Math.floor(ctx.sampleRate * secs);
     const b = ctx.createBuffer(1, sz, ctx.sampleRate);
     const d = b.getChannelData(0);
-    if (brown) {
+    if (shape === 'brown') {
       let last = 0;
       for (let i = 0; i < sz; i++) {
         last = (last + (Math.random() * 2 - 1) * 0.04) * 0.985;
@@ -685,6 +690,39 @@
       // White noise needs none of this: any sample follows any other.
       const drift = (d[sz - 1] - d[0]) / (sz - 1);
       for (let i = 0; i < sz; i++) d[i] -= drift * i;
+    } else if (shape === 'crickets') {
+      // Crickets are rhythm, not texture, so the pattern is baked into the
+      // buffer and the loop plays it back for free — no per-frame scheduling.
+      // Each chirp is a short burst of a high tone, amplitude-modulated into
+      // the stuttery "zik-zik" a real cricket makes, and several insects are
+      // laid down at slightly different rates and pitches so they drift in and
+      // out of phase with each other instead of chirping in lockstep.
+      const rate = ctx.sampleRate;
+      const CRICKETS = 7;
+      for (let n = 0; n < CRICKETS; n++) {
+        const freq = 3600 + Math.random() * 2200;   // chirp pitch
+        const every = 0.26 + Math.random() * 0.5;   // seconds between chirps
+        const burst = 0.028 + Math.random() * 0.02; // chirp length
+        const trill = 190 + Math.random() * 120;    // the zik-zik flutter
+        const amp = 0.30 + Math.random() * 0.30;
+        const phase = Math.random() * every;
+        for (let t = phase; t < secs; t += every) {
+          const start = Math.floor(t * rate);
+          const len = Math.floor(burst * rate);
+          for (let i = 0; i < len; i++) {
+            // Wrap so a chirp straddling the loop point continues at the top
+            // rather than being clipped — the seam has to be inaudible.
+            const at = (start + i) % sz;
+            const f = i / len;
+            const env = Math.sin(Math.PI * f);                  // soft in/out
+            const mod = 0.55 + 0.45 * Math.sin(f * burst * trill * Math.PI * 2);
+            d[at] += Math.sin((2 * Math.PI * freq * i) / rate) * env * mod * amp;
+          }
+        }
+      }
+      // A whisper of night air underneath so the gaps between chirps aren't
+      // digital silence.
+      for (let i = 0; i < sz; i++) d[i] += (Math.random() * 2 - 1) * 0.05;
     } else {
       for (let i = 0; i < sz; i++) {
         let v = Math.random() * 2 - 1;
@@ -694,13 +732,15 @@
     }
     return b;
   }
-  // One filtered noise layer feeding the master. Returns nothing — the source
-  // is registered for stop() on the way out.
-  function weatherAmbLayer(ctx, master, brown, type, freq, q, gain) {
+  // One filtered layer feeding the master. Returns nothing — the source is
+  // registered for stop() on the way out.
+  function ambLayer(ctx, master, shape, type, freq, q, gain) {
     const src = ctx.createBufferSource();
-    // Four seconds for the brown layers: the integrator's slow wander makes a
-    // short loop audible as a repeating pulse, where plain hiss hides it.
-    src.buffer = weatherNoiseBuffer(ctx, brown ? 4.0 : 2.0, brown);
+    // Longer loops for brown and crickets: the brown integrator's slow wander
+    // makes a short loop audible as a repeating pulse, and a cricket pattern
+    // needs room before the ear starts recognising the bar. Plain hiss hides
+    // its own seam.
+    src.buffer = ambNoiseBuffer(ctx, shape === 'white' ? 2.0 : shape === 'crickets' ? 6.0 : 4.0, shape);
     src.loop = true;
     const f = ctx.createBiquadFilter();
     f.type = type;
@@ -710,76 +750,88 @@
     g.gain.setValueAtTime(gain, ctx.currentTime);
     src.connect(f); f.connect(g); g.connect(master);
     src.start();
-    weatherAmbSrcs.push(src);
+    ambSrcs.push(src);
   }
-  function startWeatherAmbience(kind) {
-    if (weatherAmbKind === kind) return;
+  function startAmbience(kind) {
+    if (ambKind === kind) return;
     const ctx = getAudio();
     if (!ctx) return;
-    stopWeatherAmbience();
+    stopAmbience();
     if (!kind) return;
-    weatherAmbKind = kind;
+    ambKind = kind;
     const now = ctx.currentTime;
     const master = ctx.createGain();
-    // Measures ~-21 dBFS rms, give or take, which is where the game's noise
-    // one-shots sit — loud enough to hear under gunfire, with headroom left
-    // so a fat drop landing on top of a shotgun blast doesn't clip.
-    const peak = 0.26;
+    const peak = AMB_PEAK[kind] || 0.18;
     master.gain.setValueAtTime(0.0001, now);
     // Fade in under the black wipe rather than slamming on.
     master.gain.linearRampToValueAtTime(peak, now + 1.2);
     master.connect(ctx.destination);
-    weatherAmbGain = master;
+    ambGain = master;
     if (kind === 'rain') {
-      weatherAmbLayer(ctx, master, false, 'highpass', 1500, 0.7, 0.85); // spatter on the roofs
-      weatherAmbLayer(ctx, master, false, 'bandpass',  600, 0.8, 0.70); // the body of it
-      weatherAmbLayer(ctx, master, true,  'lowpass',   260, 0.7, 0.55); // distant roar
+      ambLayer(ctx, master, 'white', 'highpass', 1500, 0.7, 0.85); // spatter on the roofs
+      ambLayer(ctx, master, 'white', 'bandpass',  600, 0.8, 0.70); // the body of it
+      ambLayer(ctx, master, 'brown', 'lowpass',   260, 0.7, 0.55); // distant roar
+    } else if (kind === 'snow') {
+      ambLayer(ctx, master, 'brown', 'lowpass',   300, 0.7, 0.80); // low hollow wind
+      ambLayer(ctx, master, 'white', 'bandpass',  700, 0.6, 0.55); // the part small speakers can carry
+      ambLayer(ctx, master, 'white', 'highpass', 2600, 0.7, 0.16); // thin whistle over the top
     } else {
-      weatherAmbLayer(ctx, master, true,  'lowpass',   300, 0.7, 0.80); // low hollow wind
-      weatherAmbLayer(ctx, master, false, 'bandpass',  700, 0.6, 0.55); // the part small speakers can carry
-      weatherAmbLayer(ctx, master, false, 'highpass', 2600, 0.7, 0.16); // thin whistle over the top
+      // Night of the Wolf. Crickets carry it, with just enough low air under
+      // them that the field doesn't sound like a dead room between chirps.
+      ambLayer(ctx, master, 'crickets', 'bandpass', 4200, 0.9, 0.95); // the chorus
+      ambLayer(ctx, master, 'brown',    'lowpass',   180, 0.7, 0.26); // still night air
+      ambLayer(ctx, master, 'white',    'bandpass', 1100, 0.5, 0.07); // faint distant rustle
     }
-    // Gusts: a slow sine summed into the master gain (an AudioParam adds any
+    // A slow sine summed into the master gain (an AudioParam adds any
     // connected signal to its own value), so the bed swells and eases instead
-    // of sitting there as a flat wash.
+    // of sitting there as a flat wash. Wind gusts for the weather; for the
+    // night it's the chorus rising and falling the way real crickets do.
     const lfo = ctx.createOscillator();
     lfo.type = 'sine';
-    lfo.frequency.setValueAtTime(WEATHER_AMB_GUST_HZ, now);
+    lfo.frequency.setValueAtTime(AMB_LFO_HZ, now);
     const lfoAmt = ctx.createGain();
     lfoAmt.gain.setValueAtTime(0.0001, now);
     lfoAmt.gain.linearRampToValueAtTime(peak * 0.35, now + 1.2);
     lfo.connect(lfoAmt); lfoAmt.connect(master.gain);
     lfo.start();
-    weatherAmbSrcs.push(lfo);
-    weatherAmbGust = lfoAmt;
+    ambSrcs.push(lfo);
+    ambLfoDepth = lfoAmt;
   }
-  function stopWeatherAmbience() {
-    weatherAmbKind = '';
-    if (!weatherAmbGain || !audioCtx) return;
-    const srcs = weatherAmbSrcs, g = weatherAmbGain, gust = weatherAmbGust;
-    weatherAmbSrcs = []; weatherAmbGain = null; weatherAmbGust = null;
+  function stopAmbience() {
+    ambKind = '';
+    if (!ambGain || !audioCtx) return;
+    const srcs = ambSrcs, g = ambGain, lfoAmt = ambLfoDepth;
+    ambSrcs = []; ambGain = null; ambLfoDepth = null;
     const t = audioCtx.currentTime;
     try {
       g.gain.cancelScheduledValues(t);
       g.gain.setValueAtTime(g.gain.value, t);
       g.gain.linearRampToValueAtTime(0.0001, t + 0.8); // fade out with the wipe
-      // The gust depth has to come down too. It's summed into master.gain as a
+      // The LFO depth has to come down too. It's summed into master.gain as a
       // connected signal, and cancelScheduledValues only clears the param's
       // own timeline — left running, it would hold the "faded" bed audible.
-      if (gust) {
-        gust.gain.cancelScheduledValues(t);
-        gust.gain.setValueAtTime(gust.gain.value, t);
-        gust.gain.linearRampToValueAtTime(0.0001, t + 0.8);
+      if (lfoAmt) {
+        lfoAmt.gain.cancelScheduledValues(t);
+        lfoAmt.gain.setValueAtTime(lfoAmt.gain.value, t);
+        lfoAmt.gain.linearRampToValueAtTime(0.0001, t + 0.8);
       }
       for (const s of srcs) s.stop(t + 0.85);
     } catch (e) { /* already stopped */ }
   }
-  // Pumped from updateMusic so it tracks `weather` without its own timer.
-  function syncWeatherAmbience() {
-    const want = (gameStarted && !inMenu && !gameOver && weather) ? weather : '';
-    if (want !== weatherAmbKind) {
-      if (want) startWeatherAmbience(want);
-      else stopWeatherAmbience();
+  // Which bed the current game state calls for. The night outranks the
+  // weather: rollWeather already keeps a storm from landing on a night wave,
+  // so this only decides the order if the two ever do overlap.
+  function ambienceKindForState() {
+    if (!gameStarted || inMenu || gameOver) return '';
+    if (nightOfWolf) return 'night';
+    return weather || '';
+  }
+  // Pumped from updateMusic so it tracks the world without its own timer.
+  function syncAmbience() {
+    const want = ambienceKindForState();
+    if (want !== ambKind) {
+      if (want) startAmbience(want);
+      else stopAmbience();
     }
   }
 

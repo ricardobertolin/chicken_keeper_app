@@ -109,16 +109,18 @@ test('the first active frame arms the timer instead of dropping instantly', () =
     'timer armed outside the 15-30s window: ' + armed);
 });
 
-test('boss-fight drops land on the 15-30s cadence', () => {
+test('boss-fight drops land on the configured cadence', () => {
   reset();
   run('bossWaveActive = true; crateDropT = 0;');
   run('updateSupplyDrops(0.016);'); // arm
   // Burn the armed timer, then confirm each expiry produces exactly one crate.
   for (let drop = 1; drop <= 3; drop++) {
     let t = 0;
-    while (run('supplyCrates.length') < drop && t < 60) { run('updateSupplyDrops(0.25);'); t += 0.25; }
+    while (run('supplyCrates.length') < drop && t < 120) { run('updateSupplyDrops(0.25);'); t += 0.25; }
     assert.equal(run('supplyCrates.length'), drop, `drop ${drop} never came`);
-    assert.ok(t >= 15 && t <= 31, `drop ${drop} waited ${t}s, outside 15-30`);
+    // Read from the constants so retuning the cadence doesn't break the test.
+    const lo = run('CRATE_DROP_MIN'), hi = run('CRATE_DROP_MAX');
+    assert.ok(t >= lo && t <= hi + 1, `drop ${drop} waited ${t}s, outside ${lo}-${hi}`);
   }
 });
 
@@ -157,10 +159,12 @@ test('breaking a crate open removes it and yields one of exactly three payloads'
   for (let i = 0; i < 400; i++) {
     run('chickens.length = 0; wolves.length = 0; playerHats = 3; hatColors.length = 0;');
     landedCrate();
-    const hatsBefore = run('playerHats');
+    run('flyHats.length = 0; pendingHatLandings.length = 0;');
     run(`hurtSupplyCrate(supplyCrates[0], ${run('CRATE_HP')});`);
     assert.equal(run('supplyCrates.length'), 0, 'an opened crate was left in the array');
-    const gotHats = run('playerHats') - hatsBefore;
+    // The hat payload is now an arc onto the keeper's head: flyHats for the
+    // visible flight plus a pendingHatLanding that credits it on arrival.
+    const gotHats = run('pendingHatLandings.length');
     const gotBirds = run('chickens.length');
     if (gotHats > 0) { seen.hats++; assert.equal(gotHats, 3, 'hat pack must be 3 hats'); }
     else if (gotBirds > 0) {
@@ -177,10 +181,10 @@ test('breaking a crate open removes it and yields one of exactly three payloads'
 });
 
 // Open a landed crate with the payload roll pinned to `roll`.
-function openWithRoll(roll) {
+function openWithRoll(roll, shooter) {
   const realRandom = Math.random;
   Math.random = () => roll;
-  try { run(`hurtSupplyCrate(supplyCrates[0], ${run('CRATE_HP')});`); }
+  try { run(`hurtSupplyCrate(supplyCrates[0], ${run('CRATE_HP')}, ${shooter === undefined ? 'undefined' : shooter});`); }
   finally { Math.random = realRandom; }
 }
 
@@ -273,4 +277,117 @@ test('one blast opens every crate inside it without skipping any', () => {
   run('openCratesInBlast(0, 0, 2);');
   assert.equal(run('supplyCrates.length'), 1, 'a clustered crate was skipped by the blast');
   assert.ok(run('Math.abs(supplyCrates[0].x) > 10'), 'the wrong crate survived');
+});
+
+// ---- Crate cargo is protected on arrival -------------------------------
+
+test('crate chickens cannot be killed for their first few seconds', () => {
+  reset();
+  run('spawnCrateChicken(0, 0, false);');
+  const c = 'chickens[0]';
+  assert.equal(run(`${c}.savedT`), run('CRATE_CHICK_SHIELD'));
+  // Every death path funnels through killChicken, so the shield covers all of
+  // them at once: jaws, pellets, blasts, the siphon.
+  // The death tally is cumulative across this file's shared context, so
+  // compare against a baseline rather than zero.
+  const deaths0 = run('chickenDeathsThisWave');
+  run(`killChicken(${c});`);
+  assert.equal(run(`${c}.alive`), true, 'a shielded bird was killed');
+  assert.equal(run('chickenDeathsThisWave'), deaths0, 'a refused kill still counted as a death');
+  // Once the shield lapses it is an ordinary chicken again.
+  for (let i = 0; i < 400 && run(`${c}.savedT`) > 0; i++) run(`updateChicken(${c}, 0.016);`);
+  assert.equal(run(`${c}.savedT`), 0, 'the shield never expired');
+  run(`killChicken(${c});`);
+  assert.equal(run(`${c}.alive`), false, 'an unshielded bird must be killable');
+});
+
+test('a shielded bird cannot be snatched or carried off either', () => {
+  reset();
+  run('spawnCrateChicken(0, 0, false);');
+  // Shielded: the Wolf Heist and fox-carry sites both refuse it, so it can
+  // never end up alive-but-abducted (which is not what "cannot die" means).
+  assert.ok(run('chickens[0].savedT') > 0);
+  assert.ok(/target\.savedT \|\| 0\) <= 0/.test(
+    fs.readFileSync(new URL('js/boss.js', ROOT), 'utf8')
+  ), 'the snatch sites do not check the shield');
+});
+
+test('a soldier detonates exactly once even while shielded', () => {
+  reset();
+  hits.wolves.length = 0;
+  run('wolves.push({ x: 1, y: 0, alive: true, hp: 100, maxHp: 100 });');
+  run('spawnCrateChicken(0, 0, true);');
+  assert.ok(run('chickens[0].savedT') > 0, 'crate soldiers should also get the shield');
+  // Its own TNT is a forced kill: an unforced one left it alive to blow up
+  // again on the next frame, which is what this pins down.
+  for (let i = 0; i < 400 && run('chickens[0].alive'); i++) run('updateChicken(chickens[0], 0.016);');
+  assert.equal(run('chickens[0].alive'), false, 'the soldier survived its own TNT');
+  assert.equal(hits.wolves.length, 1, 'the soldier detonated more than once');
+});
+
+test('a worker spending itself on a fence does so once, shield or not', () => {
+  reset();
+  run('upgradeLevels.workerChicken = 5;');
+  run('debris.push({ x: 1, y: 0, kind: "wood", hp: 2 }); debris.push({ x: 1.4, y: 0, kind: "wood", hp: 2 });');
+  run('spawnCrateChicken(0, 0, false); chickens[0].worker = true;');
+  for (let i = 0; i < 300 && run('chickens[0].alive'); i++) run('updateChicken(chickens[0], 0.016);');
+  assert.equal(run('chickens[0].alive'), false, 'the worker survived its own sacrifice');
+  assert.equal(run('fences.length'), 1, 'one worker rebuilt more than one fence');
+  assert.equal(run('debris.length'), 1, 'a shielded worker cleared every pile for free');
+});
+
+// ---- Overdue crates rattle, then pop themselves ------------------------
+
+test('a crate left into the next wave shakes and eventually opens itself', () => {
+  reset();
+  landedCrate();
+  run('supplyCrates[0].bornWave = wave;');
+  // Same wave: it just sits there.
+  for (let i = 0; i < 200; i++) run('updateSupplyCrates(0.05);');
+  assert.equal(run('supplyCrates.length'), 1, 'it opened during its own wave');
+  assert.equal(run('supplyCrates[0].shakeT || 0'), 0, 'it rattled during its own wave');
+  // Next wave: it starts rattling...
+  run('wave += 1;');
+  run('updateSupplyCrates(0.05);');
+  assert.ok(run('supplyCrates[0].shakeT') > 0, 'an overdue crate should rattle');
+  // ...and resolves on its own within a reasonable stretch.
+  let t = 0;
+  for (let i = 0; i < 4000 && run('supplyCrates.length') > 0; i++) { run('updateSupplyCrates(0.05);'); t += 0.05; }
+  assert.equal(run('supplyCrates.length'), 0, 'an overdue crate never opened itself');
+  assert.ok(t < 200, 'self-opening took implausibly long: ' + t + 's');
+});
+
+test('a self-opened hat crate sends its hats to a keeper who is standing', () => {
+  reset();
+  run('player.ghost = false; player2.active = false;');
+  run('flyHats.length = 0; pendingHatLandings.length = 0;');
+  landedCrate();
+  openWithRoll(run('CRATE_PAYLOAD_BOOM') + 0.01); // land inside the hat band
+  assert.equal(run('pendingHatLandings.length'), 3, 'a hat crate should send three hats');
+  assert.equal(run('flyHats.length'), 3, 'each hat should have a visible flight');
+  // Staggered, so they arc over one after another rather than as one blob.
+  const delays = run('pendingHatLandings.map(h => h.delayT).sort((a,b) => a-b)');
+  assert.ok(delays[0] < delays[1] && delays[1] < delays[2], 'hats are not staggered: ' + delays);
+  assert.ok(run('pendingHatLandings.every(h => h.to === player)'), 'hats went to nobody');
+  // The flight credits the hat only on arrival, not instantly.
+  const before = run('playerHats');
+  run('updateFlyHats(0.016);');
+  assert.equal(run('playerHats'), before, 'a hat was credited before it landed');
+  for (let i = 0; i < 200 && run('pendingHatLandings.length') > 0; i++) run('updateFlyHats(0.02);');
+  assert.equal(run('playerHats'), before + 3, 'the hats never landed');
+});
+
+test('a crate shot open by the buddy sends the hats to the buddy', () => {
+  reset();
+  run('player2.active = true; player2.ghost = false; player2.hats = 2;');
+  run('flyHats.length = 0; pendingHatLandings.length = 0;');
+  landedCrate();
+  openWithRoll(run('CRATE_PAYLOAD_BOOM') + 0.01, 2);
+  assert.ok(run('pendingHatLandings.every(h => h.to === player2)'),
+    'the buddy opened it but the hats were addressed elsewhere');
+  const p1 = run('playerHats');
+  for (let i = 0; i < 200 && run('pendingHatLandings.length') > 0; i++) run('updateFlyHats(0.02);');
+  assert.equal(run('player2.hats'), 5, 'the buddy did not receive its three hats');
+  assert.equal(run('playerHats'), p1, 'the host was credited for the buddy\'s crate');
+  run('player2.active = false;');
 });
