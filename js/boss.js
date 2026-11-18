@@ -185,6 +185,28 @@
       if ((k.wolfHitT || 0) > 0) continue; // still in the bite cooldown
       if (dist2(k.x, k.y, b.x, b.y) < BOSS_TOUCH_R * BOSS_TOUCH_R) bossTouchHit(k);
     }
+    // FANGUS flattens robots on contact exactly like it flattens keepers —
+    // it is why a robot is right to be afraid of it (see robotCheckFear).
+    for (const r of robots) {
+      if (!r.alive || r.dying) continue;
+      if (dist2(r.x, r.y, b.x, b.y) < BOSS_TOUCH_R * BOSS_TOUCH_R) {
+        if (hurtRobot(r)) { shake = Math.max(shake, 0.24); playBossCrush(); }
+      }
+    }
+  }
+
+  // Who FANGUS is walking at, charging at and locking its laser fan onto. It
+  // prefers a keeper, but a robot that puts itself much closer gets swatted —
+  // robots can hold its attention, they just can't hold it cheaply.
+  function bossTarget(b) {
+    const k = nearestKeeper(b.x, b.y) || player;
+    let best = null, bd = dist2(b.x, b.y, k.x, k.y) / BOSS_ROBOT_AGGRO;
+    for (const r of robots) {
+      if (!r.alive || r.dying) continue;
+      const d = dist2(b.x, b.y, r.x, r.y);
+      if (d < bd) { bd = d; best = r; }
+    }
+    return best || k;
   }
 
   // Apply damage to the boss, but never more than BOSS_MAX_DPS per rolling
@@ -257,7 +279,7 @@
     }
     b.bornT += dt;
     b.walkT += dt * 3;
-    const k = nearestKeeper(b.x, b.y) || player;
+    const k = bossTarget(b);
     const dx = k.x - b.x, dy = k.y - b.y;
     const d = Math.hypot(dx, dy) || 1;
     if (Math.abs(dx - dy) > 0.05) b.facingLeft = (dx - dy) < 0;
@@ -392,7 +414,7 @@
     // The whole laser fan (middle + both laterals) is telegraphed — lock the
     // keeper's spot now and fire all three together LASER_LOCK_TIME later, so
     // the volley can be dodged as one.
-    const tgt = nearestKeeper(b.x, b.y) || player;
+    const tgt = bossTarget(b);
     b.laserLockX = tgt.x; b.laserLockY = tgt.y; b.laserLockT = LASER_LOCK_TIME;
     for (let i = -2; i <= 2; i++) {
       const a = ang + i * 0.28;
@@ -975,6 +997,12 @@
   function parryDashHitKeeper(w, k) {
     w.parryDashT = 0;            // the lunge connects (or whiffs) — it's spent
     w.parryCd = PARRY_COOLDOWN;
+    // Robots are lunged at too, and a robot that read the lunge is mid-roll
+    // with its own i-frames up — hurtRobot's debounce is what absorbs it.
+    if (k.robot) {
+      if (k.alive && !k.dying) { shake = Math.max(shake, 0.22); hurtRobot(k); }
+      return;
+    }
     if (k.ghost || k.dying) return;
     if ((k.flightT || 0) > 0 || k.lastStandStealth) return; // airborne / cloaked slips it
     if ((k.wolfHitT || 0) > 0) return;                      // shared bite-cooldown
@@ -1208,14 +1236,17 @@
         if (w.sparkleT <= 0) w.parryDashT = PARRY_DASH_DUR; // launch!
         return;
       }
-      // Idle: roll to start a lunge when a keeper is in range and off cooldown.
+      // Idle: roll to start a lunge when a keeper — or a robot standing much
+      // closer than one — is in range and the wolf is off cooldown. Each lunge
+      // carries an id so a robot only gets one chance to read it.
       if ((w.parryCd || 0) <= 0) {
-        const pk = nearestKeeper(w.x, w.y);
+        const pk = parryLungeTarget(w.x, w.y);
         if (pk) {
           const pdist = Math.hypot(pk.x - w.x, pk.y - w.y);
           if (pdist > 0.9 && pdist < PARRY_TRIGGER_RANGE
               && Math.random() < PARRY_CHANCE_PER_SEC * dt) {
             w.parryK = pk;
+            w.parryId = ++parryLungeSeq;
             w.sparkleT = PARRY_SPARKLE_DUR;
             w.parryCd = PARRY_COOLDOWN;
             playSparkle();
@@ -2670,7 +2701,8 @@
         corpses.push({ x: c.x, y: c.y, kind: 'chicken', t: 4, frost: !!p.cold, fried: !!p.hot });
         playChickenDeath();
         explodeChickenMaybe(c);
-        if (!robotShot) toast('You killed a chicken! :(  fine at wave end', 1);
+        if (robotShot) robotChickenKilled(p.robotRef);
+        else toast('You killed a chicken! :(  fine at wave end', 1);
         if (p.hit) p.hit.add(c);
         if (--p.pierce <= 0) return false;
       }

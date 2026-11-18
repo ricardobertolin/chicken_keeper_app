@@ -3996,6 +3996,17 @@
     if (r.dying) {
       const f = Math.min(1, (r.downT || 0) / ROBOT_FALL_DUR);
       ctx.translate(cx, cy - 2); ctx.rotate((1 - (1 - f) ** 2) * 1.48); ctx.translate(-cx, -(cy - 2));
+    } else if ((r.dashT || 0) > 0) {
+      // Parry roll — the same forward tumble the keeper does on SHIFT, so a
+      // robot dodging a lunge reads identically to a player dodging one.
+      const prog = 1 - clamp(r.dashT / ROBOT_DASH_DUR, 0, 1);
+      const spinDir = ((r.dashX || 0) - (r.dashY || 0)) >= 0 ? 1 : -1;
+      const hop = Math.sin(prog * Math.PI) * 6;
+      const pivY = cy - 12;
+      ctx.translate(cx, pivY - hop); ctx.rotate(prog * Math.PI * 2 * spinDir); ctx.translate(-cx, -pivY);
+    } else if ((r.scaredT || 0) > 0) {
+      // Fleeing FANGUS: a panicked judder, legs going faster than the chassis.
+      ctx.translate(Math.sin(Date.now() * 0.045) * 1.2, 0);
     }
     const gun = keeperGunVec(r, cy);
     drawKeeperStock(cx, gun.gunY, gun.gx, gun.gy, r);

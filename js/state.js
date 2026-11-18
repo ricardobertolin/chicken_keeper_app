@@ -481,6 +481,9 @@
   const PARRY_DASH_HOMING    = 7;    // how hard the lunge curves to track the keeper (0 = straight)
   const PARRY_COOLDOWN       = 2.2;  // min seconds between a wolf's lunges
   const PARRY_CHANCE_PER_SEC = 0.135; // per-second chance to start a lunge while in range
+  // Every lunge gets an id so a robot can only try to read a given one once
+  // (see robotTryParry) rather than re-rolling every frame of the wind-up.
+  let parryLungeSeq = 0;
   const CRIT_MG_SHOTS        = 3;    // machine-gun: a crit reload primes up to this many continuous shots
   const SPIN_DMG_MUL         = 3.0;  // max-level Quickdraw twirl: the next burst hits triple
   // Cold Shot / Hot Shot (wave 5, mutually exclusive). Each level raises the
@@ -746,6 +749,10 @@
   let swordWolfSlain = false; // true once any sword wolf has been killed — unlocks Wolf's Blade
   let swordWolfAppeared = false; // true once the single sword wolf for this run has spawned
   let chickensKilledByPlayer = 0; // friendly-fire chicken kills since the last wave payout
+  // Birds the robot allies shot, kept apart from the keepers' own tally. They
+  // still cost the farm the same fine at wave end — a bird is a bird — but
+  // they never touch a keeper's karma: nobody chose to pull that trigger.
+  let chickensShotByRobots = 0;
   // Bonus upgrade screen: counts total chicken deaths this wave (player +
   // wolves + foxes + worker rebuilds + every other source). At wave end the
   // probability of a second upgrade pick is computed from this number — 100%
@@ -1123,6 +1130,12 @@
   const ROBOT_HP        = [0, 3, 4, 5];       // starting hats (one hat per hit)
   const ROBOT_SPEED     = [0, 2.6, 3.1, 3.6];  // tiles/sec
   const ROBOT_FIRE_CD   = [0, 1.15, 0.80, 0.50]; // seconds between volleys
+  // Every robot weapon cadence is multiplied by this. The table above only
+  // sets the marks RELATIVE to each other (robotFire normalises it against
+  // ROBOT_FIRE_CD[1]), so slowing the whole chassis down needs its own knob:
+  // a robot now squeezes the trigger half as often as the keeper whose gun
+  // it borrowed.
+  const ROBOT_ATTACK_SLOW = 2;
   const ROBOT_DMG       = [0, 1.0, 1.4, 1.9];  // per pellet
   const ROBOT_RANGE     = [0, 7, 9, 11];       // tiles it will open fire at
   const ROBOT_STANDOFF  = [0, 2.2, 2.8, 3.4];  // tiles it tries to keep from its target
@@ -1137,8 +1150,51 @@
   const ROBOT_THINK_MAX = 1.6;
   const ROBOT_MAX_ACTIVE = 4;     // how many can be on the field at once
   const ROBOT_REBOOT_T = [0, 15, 10, 5];
-  const ROBOT_FAULT_CHANCE = [0, 0.10, 0.05, 0]; // once per wave, doubled in rain
+  // Once per wave, doubled again in rain. These are twice what they were —
+  // a robot is salvage wearing a gun, and it should feel like it.
+  const ROBOT_FAULT_CHANCE = [0, 0.20, 0.10, 0]; // MK-3 is still faultless
   const ROBOT_FAULT_T = 4;
+  // ---- Fire discipline ----
+  // It is built to guard the flock, so it will not fire through one. The
+  // check is a cone, not a line: the spread is what actually kills birds.
+  const ROBOT_CHICK_CLEAR_R = 0.5;      // tiles of clearance at the muzzle
+  const ROBOT_CHICK_CLEAR_SPREAD = 0.09; // …widening with range (~5°)
+  // Even so, a pellet that does reach a bird mostly passes through: the
+  // discipline above is the aim, this is the safety catch behind it. A
+  // malfunctioning robot gets neither.
+  const ROBOT_SPARE_CHANCE = [0, 0.60, 0.80, 0.95];
+  // ---- Walls ----
+  // A robot that empties its magazine into a stone wall looks broken. It
+  // checks the line of fire for fences and walks for an angle instead,
+  // committing to one side for a few seconds so it doesn't dither.
+  const ROBOT_WALL_STEP = 0.4;     // sampling step along the line of fire
+  const ROBOT_FLANK_COMMIT = 2.5;  // seconds on one side before re-picking
+  // ---- Parry ----
+  // Parry Mode cuts both ways: wolves wind lunges up at robots, and a robot
+  // that reads one rolls out of it. The mark is the reaction time.
+  const ROBOT_DASH_DUR   = 0.22;              // seconds the roll lasts
+  const ROBOT_DASH_CD    = [0, 5.0, 3.6, 2.4]; // seconds between rolls
+  const ROBOT_DASH_MUL   = 3.2;               // speed multiplier during the roll
+  const ROBOT_PARRY_READ = [0, 0.30, 0.60, 0.90]; // odds it reads an incoming lunge
+  // A wolf this close is already inside the standoff and about to be chewing
+  // on the chassis — kept just outside ROBOT_HURT_R so the roll fires when it
+  // is being mauled, not every time one wanders into engagement range.
+  const ROBOT_PARRY_PANIC_R = 1.3;
+  const ROBOT_PARRY_PANIC_PER_SEC = 0.5;
+  // How much closer a robot must be than a keeper before a wolf winds its
+  // lunge up at the robot instead (squared-distance ratio, like the normal
+  // robot aggro discount).
+  const ROBOT_PARRY_AGGRO = 4;
+  // ---- Scared of FANGUS ----
+  // The boss swats robots, and a robot that has just been noticed by it may
+  // simply bolt. MK-1 panics most; MK-3 mostly holds its ground.
+  const ROBOT_FEAR_CHANCE = [0, 0.75, 0.45, 0.18];
+  const ROBOT_FEAR_R      = 8;      // tiles — FANGUS this close is terrifying
+  const ROBOT_FEAR_T      = [0, 3.2, 2.4, 1.6]; // seconds of running away
+  const ROBOT_FEAR_CD     = 6;      // seconds before it can be spooked again
+  const ROBOT_FEAR_SPEED  = 1.35;   // scared sprint multiplier
+  // How much closer a robot must be than a keeper before FANGUS turns on it.
+  const BOSS_ROBOT_AGGRO  = 2;
   const ROBOT_BOOT_T = 0.9;       // spin-up hum before it starts acting
   const ROBOT_FALL_DUR = 0.5;     // topple animation before the chassis is pruned
   // Chassis palettes. MK-1 is salvage, MK-2 is factory steel, MK-3 is the

@@ -1100,6 +1100,7 @@
     swordWolfSlain = false;
     swordWolfAppeared = false;
     chickensKilledByPlayer = 0;
+    chickensShotByRobots = 0;
     chickensAtWaveStart = 0;
     chickensBornThisWave = 0;
     chickenDeathsThisWave = 0;

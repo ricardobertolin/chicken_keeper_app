@@ -20,7 +20,15 @@
     const doubleHelix = loose && tighter; // 3 fanned tight clusters (parity with P1)
     let pelletDmg = isSlug ? (5 + lvls.spreadDown2 * 2) : doubleHelix ? 1.3 : loose ? 0.7 : tighter ? 1.3 : 1;
     const pelletR  = isSlug ? 3.5 : doubleHelix ? TIGHT_PELLET_R : loose ? 1.3 : (tighter ? TIGHT_PELLET_R : 2);
-    const spareChance = lvls.softBullet > 0 ? tableAtFor(who, 'softBullet') : 0;
+    let spareChance = lvls.softBullet > 0 ? tableAtFor(who, 'softBullet') : 0;
+    // A robot's rounds are keyed to the flock it guards: most of them simply
+    // refuse to go off in a chicken. This is the safety catch BEHIND the
+    // fire discipline in updateRobot — it never fires through a bird on
+    // purpose, and the pellets that stray are mostly duds anyway. A
+    // malfunctioning unit gets no such courtesy.
+    if (who.robot && !(who.crazyT > 0)) {
+      spareChance = Math.max(spareChance, ROBOT_SPARE_CHANCE[who.mk]);
+    }
     if (lvls.hardBullet > 0) pelletDmg *= tableAtFor(who, 'hardBullet');
     if (who.spinDmg) { pelletDmg *= SPIN_DMG_MUL; who.spinDmg = false; }
     const isCrit2 = (who.critShots || 0) > 0;
@@ -162,10 +170,15 @@
     if (gameOpts.friendlyFire && !who.robot) for (const r of robots) {
       if (r.alive && inArc(r)) hurtRobot(r);
     }
+    // A robot's blade is as indiscriminate as its pellets — but it tries to
+    // pull the swing when a bird is in the arc, and the ones it does cut down
+    // are tallied against it (see robotChickenKilled).
     if (who.robot) for (const c of chickens) {
       if (!c.alive || c.savedT > 0 || (c.carrier && c.carrier.alive) || !inArc(c)) continue;
+      if (!(who.crazyT > 0) && Math.random() < ROBOT_SPARE_CHANCE[who.mk]) continue;
       killChicken(c); playChickenDeath(); explodeChickenMaybe(c);
       corpses.push({ x: c.x, y: c.y, kind: 'chicken', t: 4 });
+      if (!c.alive) robotChickenKilled(who);
     }
   }
 
@@ -741,7 +754,11 @@
       hurtT: 0, attackT: rand(0.2, 0.6), muzzleT: 0,
       bootT: ROBOT_BOOT_T,       // spin-up before it starts acting
       thinkT: 0, roamTX: bx, roamTY: by,
-      kills: 0,
+      kills: 0, chickensShot: 0,
+      // Dodge-roll (parry) and blocked-line-of-fire bookkeeping.
+      dashT: 0, dashCd: 0, dashX: 0, dashY: 0, parrySeenId: 0,
+      blockedT: 0, flankDir: 0,
+      scaredT: 0, fearCd: 0,
     };
     robots.push(r);
     playRobotBoot();
@@ -797,6 +814,141 @@
     return best;
   }
 
+  // Is a fence sitting between two points? Sampled along the segment; fences
+  // occupy a tile each, so a sub-tile step cannot skip one.
+  function fenceBetween(x1, y1, x2, y2) {
+    if (!fences.length) return false;
+    const dx = x2 - x1, dy = y2 - y1;
+    const steps = Math.ceil(Math.hypot(dx, dy) / ROBOT_WALL_STEP);
+    for (let i = 1; i < steps; i++) {
+      const t = i / steps;
+      if (fenceBlocks(x1 + dx * t, y1 + dy * t)) return true;
+    }
+    return false;
+  }
+
+  // Would this shot go through one of the birds it is here to protect? The
+  // test is a cone opening with range, because the thing that actually kills
+  // chickens is the spread, not the centre line. A bird standing behind the
+  // wolf is safe: the pellets stop at the target often enough, and refusing
+  // those shots would leave the robot paralysed in a busy pen.
+  function chickenInLineOfFire(r, tx, ty) {
+    const dx = tx - r.x, dy = ty - r.y;
+    const m = Math.hypot(dx, dy) || 1;
+    const ux = dx / m, uy = dy / m;
+    for (const c of chickens) {
+      if (!c.alive || (c.carrier && c.carrier.alive)) continue;
+      const cx = c.x - r.x, cy = c.y - r.y;
+      const along = cx * ux + cy * uy;
+      if (along < 0 || along > m) continue;
+      const off = Math.abs(cx * uy - cy * ux);
+      if (off < ROBOT_CHICK_CLEAR_R + along * ROBOT_CHICK_CLEAR_SPREAD) return true;
+    }
+    return false;
+  }
+
+  // Shuffle for a better angle instead of firing. Used both when a wall is in
+  // the way and when a chicken is: the robot circles the obstruction, leaning
+  // in a little so it still closes, and commits to one side for a few seconds
+  // rather than jittering between them. Swaps sides the moment a fence
+  // physically stops the step.
+  function robotSidestep(r, ux, uy, spd, dt) {
+    r.blockedT = (r.blockedT || 0) + dt;
+    if (!r.flankDir || r.blockedT > ROBOT_FLANK_COMMIT) {
+      r.flankDir = Math.random() < 0.5 ? -1 : 1;
+      r.blockedT = 0;
+    }
+    r.vx = (-uy * r.flankDir * 0.9 + ux * 0.35) * spd;
+    r.vy = (ux * r.flankDir * 0.9 + uy * 0.35) * spd;
+    if (robotStep(r, dt)) { r.flankDir = -r.flankDir; r.blockedT = 0; }
+  }
+
+  // A robot shot one of the birds it was built to guard. Counted per unit and
+  // against the farm's wave tally (so the fine still lands), but deliberately
+  // NOT against a keeper's karma — see chickensShotByRobots.
+  function robotChickenKilled(r) {
+    chickensShotByRobots++;
+    if (!r) return;
+    r.chickensShot = (r.chickensShot || 0) + 1;
+    r.eyeFlashT = Math.max(r.eyeFlashT || 0, 0.6); // it knows
+    toast('MK-' + r.mk + ' shot a chicken! :(  fine at wave end', 1);
+    toastGuest('MK-' + r.mk + ' shot a chicken!', 1);
+  }
+
+  // Parry Mode: who a wolf may wind a lunge up at. Keepers first, but a robot
+  // standing meaningfully closer pulls the lunge onto itself — the same
+  // discount the normal wolf target pick gives robots, so a keeper hiding
+  // behind an MK-3 still gets jumped most of the time.
+  function parryLungeTarget(x, y) {
+    const k = nearestKeeper(x, y);
+    let best = null, bd = (k ? dist2(x, y, k.x, k.y) : Infinity) / ROBOT_PARRY_AGGRO;
+    for (const r of robots) {
+      if (!r.alive || r.dying || r.bootT > 0) continue;
+      const d = dist2(x, y, r.x, r.y);
+      if (d < bd) { bd = d; best = r; }
+    }
+    return best || k;
+  }
+
+  // The robot's own dodge-roll. It reads an incoming lunge once per lunge
+  // (ROBOT_PARRY_READ decides whether it reads it at all), and will also
+  // scramble away from a wolf that has simply got on top of it. The roll
+  // carries brief i-frames, so a read lunge is genuinely parried rather than
+  // merely out-run.
+  function robotTryParry(r, dt) {
+    if (r.dashT > 0 || r.dashCd > 0 || r.bootT > 0 || r.crazyT > 0) return false;
+    let lunge = null, panic = null, pd = ROBOT_PARRY_PANIC_R * ROBOT_PARRY_PANIC_R;
+    for (const w of wolves) {
+      if (!w.alive || w.parachuting || w.defective || ninjaIsWatching(w)) continue;
+      if (w.parryK === r && ((w.sparkleT || 0) > 0 || (w.parryDashT || 0) > 0)) { lunge = w; break; }
+      const d = dist2(w.x, w.y, r.x, r.y);
+      if (d < pd) { pd = d; panic = w; }
+    }
+    const threat = lunge || panic;
+    if (!threat) return false;
+    if (lunge) {
+      if (r.parrySeenId === lunge.parryId) return false; // already had its one read
+      r.parrySeenId = lunge.parryId;
+      if (Math.random() >= ROBOT_PARRY_READ[r.mk]) return false;
+    } else if (Math.random() >= ROBOT_PARRY_PANIC_PER_SEC * dt) {
+      return false;
+    }
+    // Roll away from the threat, angled off to the side so it doesn't simply
+    // back down the lane the wolf is already charging.
+    const ax = r.x - threat.x, ay = r.y - threat.y;
+    const am = Math.hypot(ax, ay) || 1;
+    const skew = rand(-0.9, 0.9);
+    const ca = Math.cos(skew), sa = Math.sin(skew);
+    r.dashX = (ax / am) * ca - (ay / am) * sa;
+    r.dashY = (ax / am) * sa + (ay / am) * ca;
+    r.dashT = ROBOT_DASH_DUR;
+    r.dashCd = ROBOT_DASH_CD[r.mk];
+    r.wolfHitT = Math.max(r.wolfHitT || 0, ROBOT_DASH_DUR); // the parry itself
+    playDash();
+    return true;
+  }
+
+  // FANGUS noticed it. A robot is a machine, not a hero: close to the boss it
+  // rolls its nerve, and a failed roll sends it running. The mark is the
+  // nerve — an MK-1 bolts three times out of four.
+  function robotCheckFear(r, dt) {
+    // The fright ends the instant FANGUS does — the caller reads boss.x, and
+    // the boss is spliced out between phases.
+    const fangus = boss && boss.alive && bossPhase === 'fight';
+    if (r.scaredT > 0) {
+      r.scaredT = fangus ? Math.max(0, r.scaredT - dt) : 0;
+      return r.scaredT > 0;
+    }
+    if (r.fearCd > 0) { r.fearCd = Math.max(0, r.fearCd - dt); return false; }
+    if (!fangus) return false;
+    if (dist2(boss.x, boss.y, r.x, r.y) > ROBOT_FEAR_R * ROBOT_FEAR_R) return false;
+    r.fearCd = ROBOT_FEAR_CD;
+    if (Math.random() >= ROBOT_FEAR_CHANCE[r.mk]) return false;
+    r.scaredT = ROBOT_FEAR_T[r.mk];
+    r.eyeFlashT = Math.max(r.eyeFlashT || 0, r.scaredT);
+    return true;
+  }
+
   function updateRobot(r, dt) {
     if (!r.alive) {
       // Scrap-fall: a short topple before the chassis is spliced out.
@@ -816,6 +968,7 @@
     r.jamFlashT = Math.max(0, (r.jamFlashT || 0) - dt);
     r.reloadT = Math.max(0, (r.reloadT || 0) - dt);
     r.reloadingT = Math.max(0, (r.reloadingT || 0) - dt);
+    r.dashCd = Math.max(0, (r.dashCd || 0) - dt);
     if (r.reloadingT <= 0 && (r.shells > 0 || r.ammo > 0)) r.chambered = true;
     // Contact remains dangerous for special wolves too, including during reboot.
     for (const w of wolves) {
@@ -842,26 +995,59 @@
       if (r.attackT <= 0) robotFire(r, { x: r.x + Math.cos(r.dir), y: r.y + Math.sin(r.dir) });
       return;
     }
+    const spd = ROBOT_SPEED[r.mk];
+    // A roll in progress overrides everything — that is the whole point of it.
+    if (r.dashT > 0) {
+      r.dashT = Math.max(0, r.dashT - dt);
+      r.vx = r.dashX * spd * ROBOT_DASH_MUL;
+      r.vy = r.dashY * spd * ROBOT_DASH_MUL;
+      r.facingLeft = (r.dashX - r.dashY) < 0;
+      robotStep(r, dt);
+      return;
+    }
+    if (robotTryParry(r, dt)) return;
+    // Terrified of FANGUS: drop everything and run, glancing back at it.
+    if (robotCheckFear(r, dt)) {
+      const bdx = r.x - boss.x, bdy = r.y - boss.y;
+      const bm = Math.hypot(bdx, bdy) || 1;
+      r.vx = (bdx / bm) * spd * ROBOT_FEAR_SPEED;
+      r.vy = (bdy / bm) * spd * ROBOT_FEAR_SPEED;
+      r.facingLeft = (-bdx + bdy) < 0;
+      robotStep(r, dt);
+      return;
+    }
 
     const target = robotPickTarget(r);
-    const spd = ROBOT_SPEED[r.mk];
     if (target) {
       const dx = target.x - r.x, dy = target.y - r.y;
       const m = Math.hypot(dx, dy) || 1;
+      const ux = dx / m, uy = dy / m;
       r.dir = Math.atan2(dy, dx);
       r.facingLeft = (dx - dy) < 0;
+      // A wall between it and the target: shooting the wall is pointless, so
+      // it walks for an angle instead of standing there chipping at stone.
+      if (fenceBetween(r.x, r.y, target.x, target.y)) {
+        robotSidestep(r, ux, uy, spd, dt);
+        return;
+      }
+      // A bird in the firing cone: same answer, move rather than shoot.
+      if (chickenInLineOfFire(r, target.x, target.y)) {
+        robotSidestep(r, ux, uy, spd, dt);
+        return;
+      }
+      r.blockedT = 0; r.flankDir = 0;
       const stand = lvlsFor(r).sword > 0 ? SWORD_RANGE * 0.55 : ROBOT_STANDOFF[r.mk];
       // Hold a shooter's distance: close in when out of range, back off when
       // something gets inside the standoff. The higher marks keep their
       // spacing more tightly, which is most of why they survive longer.
       let mvx = 0, mvy = 0;
-      if (m > stand + 0.6) { mvx = (dx / m) * spd; mvy = (dy / m) * spd; }
-      else if (m < stand - 0.3) { mvx = -(dx / m) * spd; mvy = -(dy / m) * spd; }
+      if (m > stand + 0.6) { mvx = ux * spd; mvy = uy * spd; }
+      else if (m < stand - 0.3) { mvx = -ux * spd; mvy = -uy * spd; }
       else if (ROBOT_SMART[r.mk] >= 1) {
         // Strafe around the target instead of standing still — a stationary
         // robot gets surrounded.
-        mvx = -(dy / m) * spd * 0.55;
-        mvy = (dx / m) * spd * 0.55;
+        mvx = -uy * spd * 0.55;
+        mvy = ux * spd * 0.55;
       }
       r.vx = mvx; r.vy = mvy;
       robotStep(r, dt);
@@ -870,6 +1056,7 @@
       }
       return;
     }
+    r.blockedT = 0; r.flankDir = 0;
     // Nothing to shoot: patrol the flock. It parks near the chickens it is
     // meant to be protecting rather than wandering off to the treeline.
     r.thinkT -= dt;
@@ -895,12 +1082,15 @@
   // Movement step. Robots respect fences the way wolves do — they're too big
   // and too dumb to climb, and letting them phase through walls would make a
   // walled pen pointless.
+  // Returns true when a fence physically stopped the step — the flanking code
+  // uses that as its cue to try the other way round.
   function robotStep(r, dt) {
-    moveWithFences(r, dt);
+    const hit = moveWithFences(r, dt);
     r.x = clamp(r.x, -HALF_MAP + 1, HALF_MAP - 1);
     r.y = clamp(r.y, -HALF_MAP + 1, HALF_MAP - 1);
     r.moving = Math.hypot(r.vx, r.vy) > 0.05;
     if (r.moving) r.walkT += dt * 11;
+    return hit;
   }
 
   // Weapon effects use the same recipe as the keeper. Mark and training
@@ -909,7 +1099,9 @@
     if (!r.alive || r.bootT > 0 || r.reloadingT > 0) return;
     r.dir = Math.atan2(target.y - r.y, target.x - r.x) + rand(-robotAimErr(r), robotAimErr(r));
     const lvls = lvlsFor(r);
-    const cadence = robotFireCd(r) / ROBOT_FIRE_CD[1];
+    // The table only sets the marks relative to one another; ROBOT_ATTACK_SLOW
+    // is what actually halves a robot's rate of fire against the keeper's.
+    const cadence = (robotFireCd(r) / ROBOT_FIRE_CD[1]) * ROBOT_ATTACK_SLOW;
     if (lvls.sword > 0) {
       swordSwingFor(r);
       r.attackT = SWORD_COOLDOWN * cadence;

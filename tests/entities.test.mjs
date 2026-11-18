@@ -160,6 +160,84 @@ test('robots can accidentally kill chickens without changing the keeper karma', 
     updatePellet({x:2,y:0,vx:0,vy:0,life:1,dmg:1,pierce:1,shooter:'robot',robotRef:robots[0]},0.01)`);
   assert.equal(run('chickens[0].alive'), false);
   assert.equal(run('chickensKilledByPlayer'), 0);
+  // …but the bird is still counted: against the unit, and against the farm's
+  // wave tally, which is what the end-of-wave fine is drawn from.
+  assert.equal(run('chickensShotByRobots'), 1);
+  assert.equal(run('robots[0].chickensShot'), 1);
+});
+
+test('a robot round mostly refuses to go off in a chicken', () => {
+  for (const [roll, dead] of [[0.5, false], [0.99, true]]) {
+    const { run, math } = game();
+    run('spawnRobot(2,0,0); spawnChicken({x:0,y:0}); chickens[0].x=2; chickens[0].y=0; chickens[0].savedT=0;');
+    const spare = run('ROBOT_SPARE_CHANCE[2]'); // 0.8 — so 0.5 spares, 0.99 does not
+    math.random = () => roll;
+    run(`updatePellet({x:2,y:0,vx:0,vy:0,life:1,dmg:1,pierce:1,shooter:'robot',robotRef:robots[0],spareChance:${spare}},0.01)`);
+    assert.equal(run('chickens[0].alive'), !dead, 'roll ' + roll);
+  }
+});
+
+test('wolves lunge at a robot standing much closer than the keeper, and it can roll one', () => {
+  const { run, math } = game();
+  run('spawnRobot(3,1,0); robots[0].bootT=0; player.x=-6; player.y=0; player2.active=false; player2.ghost=true;');
+  assert.equal(run('parryLungeTarget(0,0) === robots[0]'), true, 'a close robot should draw the lunge');
+  run('robots[0].x=5;');
+  assert.equal(run('parryLungeTarget(0,0) === player'), true, 'a distant robot must not steal the lunge');
+  // Wind a lunge up at the robot and give it a reaction it cannot miss.
+  run(`robots[0].x=1; spawnWolf(); wolves[0].x=0; wolves[0].y=0; wolves[0].parachuting=false;
+       wolves[0].parryK=robots[0]; wolves[0].parryId=1; wolves[0].sparkleT=0.5;`);
+  math.random = () => 0;
+  assert.equal(run('robotTryParry(robots[0],0.016)'), true, 'it never read the lunge');
+  assert.ok(run('robots[0].dashT > 0'), 'no roll');
+  assert.ok(run('robots[0].wolfHitT > 0'), 'the roll should carry i-frames');
+  assert.equal(run('robotTryParry(robots[0],0.016)'), false, 'one read per lunge, not one per frame');
+  // …and the lunge that lands while it is rolling costs it nothing.
+  const hats = run('robots[0].hats');
+  run('parryDashHitKeeper(wolves[0], robots[0]);');
+  assert.equal(run('robots[0].hats'), hats, 'a parried lunge should not knock a hat off');
+  // A lunge that lands on a robot which did NOT roll still bites.
+  run('robots[0].wolfHitT=0; parryDashHitKeeper(wolves[0], robots[0]);');
+  assert.equal(run('robots[0].hats'), hats - 1, 'an unread lunge should land');
+});
+
+test('FANGUS turns on a robot that puts itself in reach, and flattens it on contact', () => {
+  const { run } = game();
+  run(`bossWaveActive=true; bossPhase='fight'; spawnBoss(); boss.x=0; boss.y=0;
+       player.x=-9; player.y=0; player2.active=false; player2.ghost=true;
+       spawnRobot(1,2,0); robots[0].bootT=0;`);
+  assert.equal(run('bossTarget(boss) === robots[0]'), true, 'the boss ignored a robot in its face');
+  run('robots[0].x=9; robots[0].y=0;');
+  assert.equal(run('bossTarget(boss) === player'), true, 'a far robot must not pull it off the keeper');
+  run('robots[0].x=0.2; robots[0].y=0; bossContactDamage(boss);');
+  assert.equal(run('robots[0].hats'), run('ROBOT_HP[1]') - 1, 'standing in FANGUS should cost it a hat');
+});
+
+test('a robot can lose its nerve and bolt from FANGUS', () => {
+  const { run, math } = game();
+  run(`bossWaveActive=true; bossPhase='fight'; waveActive=true; spawnBoss(); boss.x=0; boss.y=0;
+       spawnRobot(3,3,0); robots[0].bootT=0;`); // MK-3: no fault roll to confuse this
+  math.random = () => 0; // fails the nerve roll
+  run('updateRobot(robots[0],0.016);');
+  assert.ok(run('robots[0].scaredT > 0'), 'it held its ground against FANGUS');
+  const d0 = run('Math.hypot(robots[0].x - boss.x, robots[0].y - boss.y)');
+  for (let i = 0; i < 40; i++) run('updateRobot(robots[0],0.016);');
+  assert.ok(run('Math.hypot(robots[0].x - boss.x, robots[0].y - boss.y)') > d0 + 0.5, 'it did not run');
+  // Nerve holds when the roll goes the other way.
+  const g2 = game();
+  g2.run(`bossWaveActive=true; bossPhase='fight'; waveActive=true; spawnBoss(); boss.x=0; boss.y=0;
+          spawnRobot(3,3,0); robots[0].bootT=0;`);
+  g2.math.random = () => 0.99;
+  g2.run('updateRobot(robots[0],0.016);');
+  assert.equal(g2.run('robots[0].scaredT'), 0, 'an MK-3 should mostly hold its ground');
+});
+
+test('a robot squeezes the trigger half as often as the gun it carries allows', () => {
+  const { run } = game();
+  assert.equal(run('ROBOT_ATTACK_SLOW'), 2);
+  run('spawnRobot(1,0,0); robots[0].bootT=0; robots[0].shells=1; robotFire(robots[0],{x:3,y:0});');
+  const want = run('shotgunCooldownFor(robots[0]) * (robotFireCd(robots[0]) / ROBOT_FIRE_CD[1]) * ROBOT_ATTACK_SLOW');
+  assert.ok(Math.abs(run('robots[0].attackT') - want) < 1e-9, 'cadence is not the halved one');
+  assert.ok(run('robots[0].attackT') > run('shotgunCooldownFor(robots[0])'), 'it fires at least as fast as a keeper');
 });
 
 test('player pellets, lasers and swords hurt robots only with friendly fire; enemies always can', () => {
@@ -197,7 +275,8 @@ test('wolves pursue robots only at much closer range than the keeper', () => {
 });
 
 test('malfunction rolls once per wave, doubles in rain, and never affects MK3', () => {
-  for (const [mk, rain, roll, expected] of [[1,false,.099,true],[1,false,.1,false],[2,false,.049,true],[2,false,.05,false],[1,true,.199,true],[2,true,.099,true],[3,true,0,false]]) {
+  // Rates are 20% / 10% / 0, doubled again in rain.
+  for (const [mk, rain, roll, expected] of [[1,false,.199,true],[1,false,.2,false],[2,false,.099,true],[2,false,.1,false],[1,true,.399,true],[2,true,.199,true],[3,true,0,false]]) {
     const { run, math } = game();
     run(`spawnRobot(${mk},0,0); robots[0].bootT=0; weather=${rain ? "'rain'" : "''"}; waveActive=true;`);
     let first = true;

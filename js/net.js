@@ -411,8 +411,9 @@
     // animates on the guest; hp/hurtT drive the splits and the hit flash.
     supplyCrates: ['x','y','hp','maxHp','hurtT','para','paraH','paraSway','landT','shakeT'],
     // Robot allies. mk drives the chassis colour and the mark pips; bootT and
-    // muzzleT drive the spin-up flicker and the muzzle flash.
-    robots:   ['x','y','mk','hp','maxHp','hurtT','facingLeft','walkT','dir','alive','dying','downT','bootT','muzzleT','robot','hats','hatColors','wolfHitT','eyeFlashT','crazyT','moving','chambered','reloadingT','reloadT','jamFlashT','spinT','meleeT','meleeDir'],
+    // muzzleT drive the spin-up flicker and the muzzle flash; dashT/dashX/dashY
+    // and scaredT drive the parry tumble and the panic judder.
+    robots:   ['x','y','mk','hp','maxHp','hurtT','facingLeft','walkT','dir','alive','dying','downT','bootT','muzzleT','robot','hats','hatColors','wolfHitT','eyeFlashT','crazyT','moving','chambered','reloadingT','reloadT','jamFlashT','spinT','meleeT','meleeDir','dashT','dashX','dashY','scaredT'],
     // Laser / hit-scan beams (player, wolf, boss — incl. bending & ricochet
     // segments) so the guest sees every beam flash.
     beams:    ['x1','y1','x2','y2','t','life','color','yOff','thick'],

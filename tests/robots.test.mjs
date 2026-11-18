@@ -196,6 +196,66 @@ test('it closes on a distant wolf and backs off one that gets too close', () => 
   assert.ok(n1 > n0 + 0.1, `did not back-pedal from a close wolf: ${n0} -> ${n1}`);
 });
 
+test('it holds fire rather than shooting through the flock it guards', () => {
+  reset();
+  run('spawnRobot(3);'); // MK-3 never malfunctions, so the roll can't muddy this
+  booted('robots[0]');
+  run('robots[0].x = 0; robots[0].y = 0;');
+  run('wolves.push({ x: 5, y: 0, alive: true, hp: 100, maxHp: 100 });');
+  run('chickens.push({ x: 2.5, y: 0, alive: true });');
+  // The gun is re-chambered before each attempt so a reload can't be mistaken
+  // for fire discipline.
+  const tryShot = () => { run('pellets.length = 0; robots[0].attackT = 0; robots[0].shells = 1; robots[0].reloadingT = 0; updateRobot(robots[0], 0.016);'); };
+  tryShot();
+  assert.equal(run('pellets.length'), 0, 'fired straight through a chicken');
+  // Clear the lane and the same shot is taken.
+  run('chickens[0].y = 6;');
+  tryShot();
+  assert.ok(run('pellets.length') > 0, 'held fire with a clear lane');
+  // A bird standing BEHIND the wolf never blocks — the pellets stop first.
+  run('chickens[0].x = 9; chickens[0].y = 0;');
+  tryShot();
+  assert.ok(run('pellets.length') > 0, 'a bird behind the target should not block the shot');
+});
+
+test('a wall in the way sends it looking for an angle, not shooting the wall', () => {
+  reset();
+  run('spawnRobot(3);');
+  booted('robots[0]');
+  run('robots[0].x = 0; robots[0].y = 0;');
+  run('wolves.push({ x: 4, y: 0, alive: true, hp: 100, maxHp: 100 });');
+  run('fences.push({ x: 2, y: 0, hp: 5, kind: "wood" });');
+  const y0 = run('robots[0].y');
+  // While the fence is still in the line of fire it must not shoot.
+  for (let i = 0; i < 8; i++) run('robots[0].attackT = 0; robots[0].shells = 1; updateRobot(robots[0], 0.016);');
+  assert.equal(run('pellets.length'), 0, 'emptied its gun into a fence');
+  assert.ok(Math.abs(run('robots[0].y') - y0) > 0.1, 'never moved to flank the wall');
+  // Keep going and it should walk itself around to a clear angle and open up.
+  for (let i = 0; i < 60 && run('pellets.length') === 0; i++) {
+    run('robots[0].attackT = 0; robots[0].shells = 1; robots[0].reloadingT = 0; updateRobot(robots[0], 0.016);');
+  }
+  assert.ok(run('pellets.length') > 0, 'never found a way round the wall');
+  assert.ok(Math.abs(run('robots[0].y')) > 0.5, 'it should have flanked, not walked through');
+});
+
+test('its rounds carry a mark-scaled safety catch, and a faulty one does not', () => {
+  reset();
+  for (const mk of [1, 2, 3]) {
+    run(`robots.length = 0; pellets.length = 0; wolves.length = 0; spawnRobot(${mk});`);
+    booted('robots[0]');
+    run('robots[0].attackT = 0; wolves.push({ x: 3, y: 0, alive: true, hp: 100, maxHp: 100 });');
+    run('updateRobot(robots[0], 0.016);');
+    assert.equal(run('pellets[0].spareChance'), run(`ROBOT_SPARE_CHANCE[${mk}]`), 'MK-' + mk);
+  }
+  const sp = run('ROBOT_SPARE_CHANCE');
+  assert.ok(sp[1] < sp[2] && sp[2] < sp[3], 'the higher marks should be the safer ones');
+  // A malfunctioning unit sprays like anything else.
+  run('robots.length = 0; pellets.length = 0; spawnRobot(3);');
+  booted('robots[0]');
+  run('robots[0].crazyT = 1; robots[0].attackT = 0; updateRobot(robots[0], 0.016);');
+  assert.equal(run('pellets[0].spareChance'), 0, 'a faulty robot should lose the safety catch');
+});
+
 test('with nothing to shoot it guards the flock instead of wandering off', () => {
   reset();
   run('chickens.push({ x: 9, y: 9, alive: true });');

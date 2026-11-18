@@ -2557,7 +2557,10 @@
     const penaltyMul = Math.pow(2, Math.floor(wave / 5));
     // Each keeper's friendly-fire kills are tracked separately now, so the
     // shared chicken-kill tally is just their sum.
-    const totalShot = chickensKilledByPlayer + (player2.chickensKilledThisWave || 0);
+    // Birds the robots shot are in here too: the farm is out a chicken either
+    // way, so the fine lands. Only the karma below stays keeper-only.
+    const totalShot = chickensKilledByPlayer + (player2.chickensKilledThisWave || 0)
+                    + chickensShotByRobots;
     // Farms grow one step per defended wave; ripe ones pay into this payout.
     // Compute farm income FIRST so it factors into the penalty cap below.
     const farmGold = growFarms(1);
@@ -2621,6 +2624,7 @@
     if (player2.active) advanceKarma(player2, player2.chickensKilledThisWave || 0);
     chickensKilledByPlayer = 0;
     player2.chickensKilledThisWave = 0;
+    chickensShotByRobots = 0; // fined above, never fed to advanceKarma
     // Wrap up the hunter camp: if the whole crew is down OR they were short-paid
     // this wave, they break camp. Camp/fireplace transitions are deferred to
     // the wave boundary (mirrors how map expansion is queued) — the active camp
@@ -2702,13 +2706,17 @@
     if (gameOpts.friendlyFire && !robotRef) {
       for (const r of robots) if (r.alive && segmentDist2(x1, y1, x2, y2, r.x, r.y) < t2) hurtRobot(r);
     }
-    // A malfunctioning robot's laser is as unsafe for the flock as its pellets.
+    // A robot's laser is as unsafe for the flock as its pellets — though a
+    // working unit cuts the beam most of the time, and the birds it does burn
+    // are counted against it rather than against the keeper's karma.
     if (robotRef) {
       for (const c of chickens) {
         if (!c.alive || c.savedT > 0 || (c.carrier && c.carrier.alive)) continue;
         if (segmentDist2(x1, y1, x2, y2, c.x, c.y) < t2) {
+          if (!(robotRef.crazyT > 0) && Math.random() < ROBOT_SPARE_CHANCE[robotRef.mk]) continue;
           killChicken(c); playChickenDeath(); explodeChickenMaybe(c);
           corpses.push({ x: c.x, y: c.y, kind: 'chicken', t: 4 });
+          if (!c.alive) robotChickenKilled(robotRef);
         }
       }
     }
