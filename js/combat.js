@@ -3,46 +3,48 @@
   // All state lives on the player2 object so the two keepers can fire
   // independently. Visual + audio happen on the host as usual; the snapshot
   // ships player2's weapon timers down so the guest sees its own gun.
-  function fireBurstP2(dmgMul = 1, opts = {}) {
-    player2.jamFlashT = 0; // a real shot fired — clear any lingering dud-jam flash
-    if ((lvlsFor(player2).laser || 0) > 0) {
-      fireLaserShot(player2, dmgMul, opts);
+  function fireBurstP2(dmgMul = 1, opts = {}) { fireBurstFor(player2, dmgMul, opts); }
+
+  function fireBurstFor(who, dmgMul = 1, opts = {}) {
+    who.jamFlashT = 0; // a real shot fired — clear any lingering dud-jam flash
+    if ((lvlsFor(who).laser || 0) > 0) {
+      fireLaserShot(who, dmgMul, opts);
       return;
     }
-    playShotgun();
-    player2.runT = 0;
-    const lvls = lvlsFor(player2);
+    if (who.robot) playRobotShot(); else playShotgun();
+    who.runT = 0;
+    const lvls = lvlsFor(who);
     const isSlug = lvls.spreadDown >= MAX_LEVEL;
     const loose = lvls.spreadUp > 0;
     const tighter = lvls.spreadDown > 0;
     const doubleHelix = loose && tighter; // 3 fanned tight clusters (parity with P1)
     let pelletDmg = isSlug ? (5 + lvls.spreadDown2 * 2) : doubleHelix ? 1.3 : loose ? 0.7 : tighter ? 1.3 : 1;
     const pelletR  = isSlug ? 3.5 : doubleHelix ? TIGHT_PELLET_R : loose ? 1.3 : (tighter ? TIGHT_PELLET_R : 2);
-    const spareChance = lvls.softBullet > 0 ? tableAtFor(player2, 'softBullet') : 0;
-    if (lvls.hardBullet > 0) pelletDmg *= tableAtFor(player2, 'hardBullet');
-    if (player2.spinDmg) { pelletDmg *= SPIN_DMG_MUL; player2.spinDmg = false; }
-    const isCrit2 = (player2.critShots || 0) > 0;
-    if (isCrit2) { pelletDmg *= RELOAD_SC_CRIT_DMG; player2.critShots--; playCritShot(); }
+    const spareChance = lvls.softBullet > 0 ? tableAtFor(who, 'softBullet') : 0;
+    if (lvls.hardBullet > 0) pelletDmg *= tableAtFor(who, 'hardBullet');
+    if (who.spinDmg) { pelletDmg *= SPIN_DMG_MUL; who.spinDmg = false; }
+    const isCrit2 = (who.critShots || 0) > 0;
+    if (isCrit2) { pelletDmg *= RELOAD_SC_CRIT_DMG; who.critShots--; playCritShot(); }
     const critCol2 = isCrit2 ? critColor(lvls) : null; // crit tint keyed to current bullet
-    if (lvls.doubleBarrel > 0) pelletDmg *= tableAtFor(player2, 'doubleBarrel');
+    if (lvls.doubleBarrel > 0) pelletDmg *= tableAtFor(who, 'doubleBarrel');
     pelletDmg *= dmgMul;
-    pelletDmg *= lastStandDmgMul(player2);
+    pelletDmg *= lastStandDmgMul(who);
     if (lvls.machineGun > 0) pelletDmg *= MG_DMG_MUL; // softer machine-gun rounds
     const pelletColor = projectileColor(lvls, isSlug);
     const rocketLvl = lvls.rocket;
     const rocketBoom = !!opts.rocketBoom;
-    const rocketChance = rocketBoom ? 1 : (rocketLvl > 0 ? tableAtFor(player2, 'rocket') : 0);
+    const rocketChance = rocketBoom ? 1 : (rocketLvl > 0 ? tableAtFor(who, 'rocket') : 0);
     if (rocketLvl > 0) playRocketWhoosh(); // launcher rounds leave with a jet whoosh
     const homingLvl2 = lvls.homing;
-    const aim = player2.dir;
-    const reach2 = barrelTipOffset(player2);
+    const aim = who.dir;
+    const reach2 = barrelTipOffset(who);
     let speedBase = 18 * (homingLvl2 > 0 ? HOMING_SPEED_MUL : 1) * (rocketLvl > 0 ? ROCKET_SPEED_MUL : 1)
                * (weaponOilCharges > 0 ? WEAPON_OIL_SPEED_MUL : 1); // oil = faster rounds
     if (lvls.machineGun > 0) speedBase *= 0.5; // P2: machine-gun rounds fly slower
     if (tighter && !isSlug) speedBase *= TIGHT_SPEED_MUL; // Tighter Pattern rounds fly faster
-    const ss = spreadStatsFor(player2);
+    const ss = spreadStatsFor(who);
     const critRange2 = isCrit2 ? RELOAD_SC_CRIT_RANGE : 1;
-    const life = (shotgunLifeFor(player2) * (homingLvl2 > 0 ? HOMING_LIFE_MUL : 1) + sizeMattersLifeBonus(player2)) * critRange2;
+    const life = (shotgunLifeFor(who) * (homingLvl2 > 0 ? HOMING_LIFE_MUL : 1) + sizeMattersLifeBonus(who)) * critRange2;
     const sizeBounce2 = (lvls.sizeMatters || 0) >= 5;
     const coldChance2 = Math.min(1, COLD_HOT_CHANCE[Math.min(5, lvls.coldShot || 0)] * statusPotencyMul());
     const hotChance2  = Math.min(1, COLD_HOT_CHANCE[Math.min(5, lvls.hotShot  || 0)] * statusPotencyMul());
@@ -62,8 +64,8 @@
         const a = clusterAim + t * clusterSpread2 + jitter;
         const sp = speedBase + rand(-2, 2) * (homingLvl2 > 0 ? HOMING_SPEED_MUL : 1);
         pellets.push({
-          x: player2.x + Math.cos(aim) * reach2,
-          y: player2.y + Math.sin(aim) * reach2,
+          x: who.x + Math.cos(aim) * reach2,
+          y: who.y + Math.sin(aim) * reach2,
           vx: Math.cos(a) * sp,
           vy: Math.sin(a) * sp,
           life: life,
@@ -74,7 +76,9 @@
           r: rocketLvl > 0 ? pelletR * ROCKET_PELLET_R_MUL : pelletR,
           color: pelletColor,
           trail: !isSlug,
-          shooter: 2, // tags this pellet as player2's (drives friendly-fire checks)
+          shooter: who.robot ? 'robot' : 2,
+          robotMk: who.robot ? who.mk : undefined,
+          robotRef: who.robot ? who : undefined,
           crit: false,  // crit rounds now look like normal bullets (only damage differs)
           critCol: null,
           bounce: sizeBounce2,
@@ -129,24 +133,39 @@
     player2.critStreak = 0; // a jam breaks P2's crit streak (no toast — the sound is the cue)
   }
 
-  function swordSwingP2() {
-    player2.reloadT = SWORD_COOLDOWN;
-    player2.meleeT = MELEE_ANIM_DUR;
-    player2.meleeDir = player2.dir;
-    player2.meleeFull = false;
-    player2.runT = 0;
+  function swordSwingP2() { swordSwingFor(player2); }
+
+  function swordSwingFor(who) {
+    who.reloadT = SWORD_COOLDOWN;
+    who.meleeT = MELEE_ANIM_DUR;
+    who.meleeDir = who.dir;
+    who.meleeFull = false;
+    who.runT = 0;
     playSwordSwing();
     shake = Math.max(shake, 0.18);
     const r2 = SWORD_RANGE * SWORD_RANGE;
     for (const w of wolves) {
       if (!w.alive) continue;
-      const dx = w.x - player2.x, dy = w.y - player2.y;
+      const dx = w.x - who.x, dy = w.y - who.y;
       if (dx * dx + dy * dy > r2) continue;
-      let diff = Math.abs(Math.atan2(dy, dx) - player2.dir);
+      let diff = Math.abs(Math.atan2(dy, dx) - who.dir);
       if (diff > Math.PI) diff = Math.PI * 2 - diff;
       if (diff > SWORD_ARC) continue;
       const m = Math.hypot(dx, dy) || 1;
-      hurtWolf(w, SWORD_DMG, (dx / m) * 0.4, (dy / m) * 0.4, player2);
+      hurtWolf(w, SWORD_DMG * (who.robot ? ROBOT_DMG[who.mk] : 1), (dx / m) * 0.4, (dy / m) * 0.4, who);
+    }
+    const inArc = t => {
+      if (dist2(t.x, t.y, who.x, who.y) > r2) return false;
+      const angle = Math.atan2(t.y - who.y, t.x - who.x) - who.dir;
+      return Math.abs(Math.atan2(Math.sin(angle), Math.cos(angle))) <= SWORD_ARC;
+    };
+    if (gameOpts.friendlyFire && !who.robot) for (const r of robots) {
+      if (r.alive && inArc(r)) hurtRobot(r);
+    }
+    if (who.robot) for (const c of chickens) {
+      if (!c.alive || c.savedT > 0 || (c.carrier && c.carrier.alive) || !inArc(c)) continue;
+      killChicken(c); playChickenDeath(); explodeChickenMaybe(c);
+      corpses.push({ x: c.x, y: c.y, kind: 'chicken', t: 4 });
     }
   }
 
@@ -491,7 +510,7 @@
     // right next to the dog itself (a wolf that close is always engaged).
     let prey = null, nd = Infinity;
     for (const w of wolves) {
-      if (!w.alive || w.boss) continue; // never targets FANGUS — handled by the flee logic above
+      if (!w.alive || w.boss || ninjaIsWatching(w)) continue; // the forest watcher is not attacking
       if (dist2(w.x, w.y, ax, ay) > DOG_LEASH_R2 &&
           dist2(w.x, w.y, d.x, d.y) > DOG_NOTICE_R2) continue;
       const dd = dist2(w.x, w.y, d.x, d.y);
@@ -709,11 +728,14 @@
     const bx = atX !== undefined ? atX : player.x + rand(-1.4, 1.4);
     const by = atY !== undefined ? atY : player.y + rand(-1.4, 1.4);
     const r = {
-      mk: m,
+      robot: true, mk: m,
       x: clamp(bx, -HALF_MAP + 2, HALF_MAP - 2),
       y: clamp(by, -HALF_MAP + 2, HALF_MAP - 2),
       vx: 0, vy: 0,
       hp: ROBOT_HP[m], maxHp: ROBOT_HP[m],
+      hats: ROBOT_HP[m], hatColors: Array(ROBOT_HP[m]).fill('#5a3825'),
+      wolfHitT: 0, eyeFlashT: 0, crazyT: 0, faultWave: -1,
+      shells: 1, ammo: MG_MAG, chambered: true, reloadingT: 0, reloadT: 0,
       alive: true, dying: false, downT: 0,
       facingLeft: false, walkT: 0, dir: 0,
       hurtT: 0, attackT: rand(0.2, 0.6), muzzleT: 0,
@@ -735,7 +757,7 @@
     const reach = ROBOT_RANGE[r.mk] + 6; // it will walk a little way to engage
     let best = null, bestScore = -Infinity;
     for (const w of wolves) {
-      if (!w.alive || w.parachuting) continue;
+      if (!w.alive || w.parachuting || ninjaIsWatching(w)) continue;
       if (w.invulnT > 0) continue;
       const d2w = dist2(r.x, r.y, w.x, w.y);
       if (d2w > reach * reach) continue;
@@ -787,26 +809,38 @@
     if (r.hurtT > 0) r.hurtT = Math.max(0, r.hurtT - dt);
     if (r.muzzleT > 0) r.muzzleT = Math.max(0, r.muzzleT - dt);
     if (r.attackT > 0) r.attackT -= dt;
-    // Spin-up: it stands there humming for a beat after being summoned, which
-    // also stops a fresh robot from instantly volleying into a wolf's face.
+    r.eyeFlashT = Math.max(0, (r.eyeFlashT || 0) - dt);
+    r.wolfHitT = Math.max(0, (r.wolfHitT || 0) - dt);
+    r.meleeT = Math.max(0, (r.meleeT || 0) - dt);
+    r.spinT = Math.max(0, (r.spinT || 0) - dt);
+    r.jamFlashT = Math.max(0, (r.jamFlashT || 0) - dt);
+    r.reloadT = Math.max(0, (r.reloadT || 0) - dt);
+    r.reloadingT = Math.max(0, (r.reloadingT || 0) - dt);
+    if (r.reloadingT <= 0 && (r.shells > 0 || r.ammo > 0)) r.chambered = true;
+    // Contact remains dangerous for special wolves too, including during reboot.
+    for (const w of wolves) {
+      if (!w.alive || w.parachuting || w.defective || w.fleeing || ninjaIsWatching(w)) continue;
+      if (dist2(w.x, w.y, r.x, r.y) < ROBOT_HURT_R * ROBOT_HURT_R
+          && !fenceBlocks((w.x + r.x) / 2, (w.y + r.y) / 2)) hurtRobot(r);
+    }
+    if (!r.alive) return;
     if (r.bootT > 0) {
-      r.bootT -= dt;
-      r.walkT += dt * 2;
+      r.bootT = Math.max(0, r.bootT - dt);
+      r.vx = r.vy = 0; r.moving = false;
       return;
     }
-    // Wolves mauling the chassis. Handled HERE rather than by teaching the
-    // pack a new target type: wolf AI is dense enough already, and a robot
-    // that merely gets chewed on while it stands in the scrum behaves close
-    // enough to the real thing without touching any of it.
-    let mauled = 0;
-    for (const w of wolves) {
-      if (!w.alive || w.parachuting) continue;
-      if (dist2(w.x, w.y, r.x, r.y) < ROBOT_HURT_R * ROBOT_HURT_R) mauled++;
+    // One fault roll per wave. Rain doubles the chance; MK-3 is waterproof.
+    if (waveActive && r.faultWave !== wave) {
+      r.faultWave = wave;
+      const chance = ROBOT_FAULT_CHANCE[r.mk] * (raining() ? 2 : 1);
+      if (Math.random() < chance) { r.crazyT = ROBOT_FAULT_T; r.attackT = 0; }
     }
-    if (mauled > 0) {
-      r.hp -= ROBOT_HURT_DPS * mauled * dt;
-      r.hurtT = 0.12;
-      if (r.hp <= 0) { destroyRobot(r); return; }
+    if (r.crazyT > 0) {
+      r.crazyT = Math.max(0, r.crazyT - dt);
+      r.vx = r.vy = 0; r.moving = false;
+      r.dir = rand(-Math.PI, Math.PI);
+      if (r.attackT <= 0) robotFire(r, { x: r.x + Math.cos(r.dir), y: r.y + Math.sin(r.dir) });
+      return;
     }
 
     const target = robotPickTarget(r);
@@ -816,7 +850,7 @@
       const m = Math.hypot(dx, dy) || 1;
       r.dir = Math.atan2(dy, dx);
       r.facingLeft = (dx - dy) < 0;
-      const stand = ROBOT_STANDOFF[r.mk];
+      const stand = lvlsFor(r).sword > 0 ? SWORD_RANGE * 0.55 : ROBOT_STANDOFF[r.mk];
       // Hold a shooter's distance: close in when out of range, back off when
       // something gets inside the standoff. The higher marks keep their
       // spacing more tightly, which is most of why they survive longer.
@@ -832,7 +866,6 @@
       r.vx = mvx; r.vy = mvy;
       robotStep(r, dt);
       if (r.attackT <= 0 && m <= ROBOT_RANGE[r.mk]) {
-        r.attackT = robotFireCd(r);
         robotFire(r, target);
       }
       return;
@@ -856,7 +889,7 @@
       robotStep(r, dt);
     } else {
       r.vx = 0; r.vy = 0;
-      r.walkT += dt * 2; // idle hum
+      r.moving = false;
     }
   }
   // Movement step. Robots respect fences the way wolves do — they're too big
@@ -866,41 +899,64 @@
     moveWithFences(r, dt);
     r.x = clamp(r.x, -HALF_MAP + 1, HALF_MAP - 1);
     r.y = clamp(r.y, -HALF_MAP + 1, HALF_MAP - 1);
-    r.walkT += dt * 11;
+    r.moving = Math.hypot(r.vx, r.vy) > 0.05;
+    if (r.moving) r.walkT += dt * 11;
   }
 
-  // One volley. Pellets carry shooter 'robot', which updatePellet treats as an
-  // ALLY round: it damages wolves, and passes harmlessly through chickens,
-  // hunters and keepers (a robot has target discrimination — that's the whole
-  // point of the thing).
+  // Weapon effects use the same recipe as the keeper. Mark and training
+  // still set aim, damage and cadence. Automatic reloads respect weapon tiers.
   function robotFire(r, target) {
-    const ang = Math.atan2(target.y - r.y, target.x - r.x);
-    const err = robotAimErr(r);
-    const count = ROBOT_PELLETS[r.mk];
-    const spread = ROBOT_SPREAD[r.mk];
-    const dmg = ROBOT_DMG[r.mk];
-    // One wobble applied to the whole cone, so a bad roll misses as a volley
-    // rather than averaging itself out across the pellets.
-    const aim = ang + rand(-err, err);
-    for (let i = 0; i < count; i++) {
-      const t = count > 1 ? (i / (count - 1)) * 2 - 1 : 0;
-      const a = aim + t * spread + rand(-0.03, 0.03);
-      const sp = 14;
-      pellets.push({
-        x: r.x + Math.cos(aim) * 0.45, y: r.y + Math.sin(aim) * 0.45,
-        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
-        life: 0.62, dmg, pierce: 1, hit: null, spareChance: 0,
-        r: 2.0, color: '#7ecbff', trail: true, shooter: 'robot',
-        robotMk: r.mk, robotRef: r,
-      });
+    if (!r.alive || r.bootT > 0 || r.reloadingT > 0) return;
+    r.dir = Math.atan2(target.y - r.y, target.x - r.x) + rand(-robotAimErr(r), robotAimErr(r));
+    const lvls = lvlsFor(r);
+    const cadence = robotFireCd(r) / ROBOT_FIRE_CD[1];
+    if (lvls.sword > 0) {
+      swordSwingFor(r);
+      r.attackT = SWORD_COOLDOWN * cadence;
+      return;
     }
+    const mg = lvls.machineGun > 0;
+    if ((mg ? r.ammo : r.shells) <= 0) {
+      r.ammo = mgMagSize(r);
+      r.shells = shotgunMagFor(r);
+      const twirl = lvls.spinReload > 0 && Math.random() < tableAtFor(r, 'spinReload');
+      r.reloadingT = (twirl ? SPIN_RELOAD_TIME : 0.9) * cadence;
+      r.chambered = false;
+      if (twirl) { r.spinT = SPIN_RELOAD_TIME; if (lvls.spinReload >= 5) r.spinDmg = true; }
+      r.mgSpinT = 0;
+      return;
+    }
+    r.attackT = (mg ? mgShotCooldown(r) : shotgunCooldownFor(r)
+      * (lvls.minigun > 0 ? tableAtFor(r, 'minigun') : 1)) * cadence;
+    r.reloadT = r.attackT;
+    if (Math.random() < jamChanceFor(r) * (mg ? MG_JAM_MUL : 1)) {
+      r.jamFlashT = 0.6; playReloadJam(); return;
+    }
+    if (mg) r.ammo--; else r.shells--;
+    r.chambered = mg ? r.ammo > 0 : r.shells > 0;
+    if (mg) r.mgSpinT = (r.mgSpinT || 0) + r.attackT;
+    fireBurstFor(r, ROBOT_DMG[r.mk]);
     r.muzzleT = 0.09;
-    playRobotShot();
   }
+
+  // Hats are the robot's HP: one hit knocks off one, with a brief volley guard.
+  // Eyes react even when a second pellet arrives during that guard.
+  function hurtRobot(r) {
+    if (!r.alive) return false;
+    r.eyeFlashT = 1.2;
+    if (r.wolfHitT > 0) return false;
+    r.wolfHitT = 0.7;
+    r.hurtT = 0.22;
+    r.hatColors.pop();
+    r.hats = Math.max(0, r.hats - 1); r.hp = r.hats;
+    if (r.hats <= 0) destroyRobot(r);
+    return true;
+  }
+
   // Credit a robot for a kill and let it learn from it. Called from the wolf
   // death path when the killing pellet came from a robot.
   function robotCreditKill(r) {
-    if (!r) return;
+    if (!r || !r.alive) return;
     r.kills = (r.kills || 0) + 1;
     const before = robotSkill(r.mk);
     robotTraining[r.mk] = Math.min(1, (robotTraining[r.mk] || 0) + ROBOT_TRAIN_PER_KILL);
@@ -908,6 +964,12 @@
     const after = robotSkill(r.mk);
     const step = 0.25;
     if (Math.floor(after / step) > Math.floor(before / step)) {
+      // All live units of this mark install the shared training update.
+      for (const unit of robots) if (unit.alive && unit.mk === r.mk) {
+        unit.bootT = ROBOT_REBOOT_T[unit.mk];
+        unit.vx = unit.vy = 0; unit.moving = false;
+      }
+      playRobotBoot();
       const pct = Math.round(after * 100);
       toast('MK-' + r.mk + ' combat data: ' + pct + '% trained', 1.6);
       toastGuest('MK-' + r.mk + ' combat data: ' + pct + '% trained', 1.6);
@@ -919,7 +981,8 @@
     r.alive = false;
     r.dying = true;
     r.downT = 0;
-    r.hp = 0;
+    r.hp = r.hats = 0;
+    r.hatColors.length = 0;
     spawnBlast(r.x, r.y);
     spawnSmoke(r.x, r.y, 10);
     playExplosion();

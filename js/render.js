@@ -777,6 +777,7 @@
 
     items.sort((a, b) => a.depth - b.depth);
     for (const it of items) it.draw();
+    drawNinjaForestHints();
     // Explosions and gunsmoke float above the scene.
     for (const b of blasts) drawBlast(b);
     for (const s of smoke) drawSmoke(s);
@@ -2307,7 +2308,19 @@
     const isWitch = color === NIGHT_OF_WOLF_WITCH_HAT_COLOR;
     const isLeprechaun = color === LEPRECHAUN_HAT_COLOR;
     ctx.fillStyle = fill;
-    if (isWitch && isTop) {
+    if (color === NINJA_STRAW_HAT_COLOR && isTop) {
+      ctx.save();
+      ctx.beginPath(); ctx.ellipse(cx, by, 11, 2.5, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(cx - 11, by); ctx.lineTo(cx, by - 8); ctx.lineTo(cx + 11, by);
+      ctx.closePath(); ctx.fill();
+      ctx.strokeStyle = hurt ? '#7a1a1a' : '#9c783b'; ctx.lineWidth = 0.65;
+      for (const offset of [-8, -4, 0, 4, 8]) {
+        ctx.beginPath(); ctx.moveTo(cx, by - 7.5); ctx.lineTo(cx + offset, by + 0.8); ctx.stroke();
+      }
+      ctx.beginPath(); ctx.ellipse(cx, by, 11, 2.5, 0, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    } else if (isWitch && isTop) {
       // Wide brim.
       ctx.beginPath();
       ctx.ellipse(cx, by, 10, 2.6, 0, 0, Math.PI * 2);
@@ -3960,158 +3973,70 @@
     }
   }
 
-  // A robot ally. Deliberately built on the KEEPER's proportions — same 0.9
-  // scale, same body box at cy-25 and head at cy-30 — so it reads as "another
-  // player 2" at a glance and only resolves into a machine up close: boxed
-  // head, antenna, plated torso, piston legs. The chassis colour is the mark
-  // (MK-1 salvage rust, MK-2 factory gray, MK-3 blacked out) and the eyes are
-  // the same icy blue pulse a possessed/turncoat wolf has.
+  // Compact hunter-style pips, shared by ally health and robot training.
+  function drawAllyPips(cx, y, full, filled, color = '#6ad068', empty = '#5a2a2a') {
+    const count = Math.max(1, Math.min(20, full));
+    const lit = filled / Math.max(1, full) * count;
+    const width = count * 4 - 1;
+    for (let i = 0; i < count; i++) {
+      ctx.fillStyle = i < lit ? color : empty;
+      ctx.beginPath(); ctx.arc(cx - width / 2 + i * 4 + 1.5, y, 1.5, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  // Keeper body and weapon, with a mark-colored mechanical head and blue eyes.
   function drawRobot(r) {
     const pal = ROBOT_PALETTE[r.mk] || ROBOT_PALETTE[1];
-    const p = worldToScreen(r.x, r.y);
-    const cx = p.x;
-    const cy = p.y + TILE_H / 2;
+    const p = worldToScreen(r.x, r.y), cx = p.x, cy = p.y + TILE_H / 2;
     drawShadow(r.x, r.y, 0.3);
-    const hurt = (r.hurtT || 0) > 0;
-    const plate = hurt ? '#ff6a5a' : pal.plate;
+    const hurt = r.hurtT > 0, booting = r.bootT > 0;
+    const red = robotEyesRed(r);
     ctx.save();
-    const PLAYER_SCALE = 0.9; // matches drawPlayer2 so the two read as a pair
-    ctx.translate(cx, cy);
-    ctx.scale(PLAYER_SCALE, PLAYER_SCALE);
-    ctx.translate(-cx, -cy);
-    // Topple on destruction — the same fall the keepers and hunters use.
+    ctx.translate(cx, cy); ctx.scale(0.9, 0.9); ctx.translate(-cx, -cy);
     if (r.dying) {
       const f = Math.min(1, (r.downT || 0) / ROBOT_FALL_DUR);
-      const ease = 1 - (1 - f) * (1 - f);
-      ctx.translate(cx, cy - 2);
-      ctx.rotate(ease * 1.48);
-      ctx.translate(-cx, -(cy - 2));
+      ctx.translate(cx, cy - 2); ctx.rotate((1 - (1 - f) ** 2) * 1.48); ctx.translate(-cx, -(cy - 2));
     }
-    // Spin-up wobble while booting, then a walk bob.
-    const booting = (r.bootT || 0) > 0;
-    const bob = booting ? Math.sin((r.walkT || 0) * 6) * 0.8
-                        : Math.sin((r.walkT || 0) * 0.5) * 0.7;
-    if (r.facingLeft) {
-      ctx.translate(cx, 0);
-      ctx.scale(-1, 1);
-      ctx.translate(-cx, 0);
-    }
-    const bodyY = cy - 25 + bob;
-    // Piston legs — two struts with a knee block, swinging on the walk clock.
-    const leg = Math.sin((r.walkT || 0) * 0.5) * 2.6;
-    ctx.strokeStyle = pal.shade;
-    ctx.lineWidth = 3.2;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(cx - 3, cy - 9);
-    ctx.lineTo(cx - 3 - leg * 0.5, cy - 2);
-    ctx.moveTo(cx + 3, cy - 9);
-    ctx.lineTo(cx + 3 + leg * 0.5, cy - 2);
-    ctx.stroke();
-    // Feet pads.
+    const gun = keeperGunVec(r, cy);
+    drawKeeperStock(cx, gun.gunY, gun.gx, gun.gy, r);
+    // Same shirt, legs, proportions and weapon as a keeper; only the head is mechanical.
+    ctx.fillStyle = hurt ? '#ff5555' : shirtColorOf(player);
+    roundedRect(cx - 7, cy - 25, 14, 17, 3);
+    const leg = r.moving ? Math.sin(r.walkT) : 0;
+    ctx.fillStyle = hurt ? '#7a1a1a' : '#222';
+    ctx.fillRect(cx - 5, cy - 10, 3, 8 - Math.max(0, leg) * 2);
+    ctx.fillRect(cx + 2, cy - 10, 3, 8 - Math.max(0, -leg) * 2);
+    const headY = cy - 30;
+    ctx.fillStyle = pal.plate;
+    roundedRect(cx - 6, headY - 6, 12, 12, 2);
     ctx.fillStyle = pal.shade;
-    ctx.fillRect(cx - 6 - leg * 0.5, cy - 2.5, 6, 2.4);
-    ctx.fillRect(cx + 0.5 + leg * 0.5, cy - 2.5, 6, 2.4);
-    // Torso — a plated box with a lighter chest panel and two bolts.
-    ctx.fillStyle = plate;
-    roundedRect(cx - 7, bodyY, 14, 17, 2);
-    ctx.fillStyle = hurt ? '#ffb0a0' : pal.trim;
-    ctx.fillRect(cx - 4.5, bodyY + 3, 9, 7);
-    ctx.fillStyle = pal.shade;
-    ctx.fillRect(cx - 4.5, bodyY + 11, 9, 2);
+    ctx.fillRect(cx - 5, headY - 2, 10, 4);
+    ctx.fillStyle = pal.trim;
+    ctx.fillRect(cx - 4, headY + 3.5, 8, 1);
     ctx.fillStyle = pal.bolt;
-    ctx.fillRect(cx - 6, bodyY + 1.5, 1.6, 1.6);
-    ctx.fillRect(cx + 4.4, bodyY + 1.5, 1.6, 1.6);
-    // Mark pips stamped on the chest — one bar per mark, so you can tell an
-    // MK-2 from an MK-3 even in the dark where the chassis colour is lost.
-    ctx.fillStyle = pal.bolt;
-    for (let i = 0; i < r.mk; i++) ctx.fillRect(cx - 3.5 + i * 2.6, bodyY + 5, 1.6, 3);
-    // Head — a boxed skull with a visor slot rather than a face.
-    const headY = cy - 30 + bob;
-    ctx.fillStyle = plate;
-    roundedRect(cx - 5.5, headY - 5, 11, 10, 2);
-    ctx.fillStyle = pal.shade;
-    ctx.fillRect(cx - 4.5, headY - 2.4, 9, 4.4); // visor recess
-    // Antenna with a tip light.
-    ctx.strokeStyle = pal.trim;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(cx + 3.5, headY - 5);
-    ctx.lineTo(cx + 5.5, headY - 11);
-    ctx.stroke();
-    // Eyes — the icy blue pulse a turncoat wolf has, so a possessed machine
-    // reads as the same kind of thing. Dimmer while it's still booting.
-    const pulse = 0.65 + 0.35 * Math.sin(Date.now() * 0.006 + (r.x - r.y) * 0.4);
-    const eg = Math.round(120 + 70 * pulse);
-    const eb = Math.round(180 + 60 * pulse);
-    const eye = 'rgb(40,' + eg + ',' + eb + ')';
+    for (let i = 0; i < r.mk; i++) ctx.fillRect(cx - 3 + i * 2.5, headY - 4.5, 1.5, 1);
     ctx.save();
-    if (booting) ctx.globalAlpha = 0.35 + 0.4 * Math.abs(Math.sin((r.walkT || 0) * 4));
-    // Bloom first so the lenses sit inside a glow.
-    ctx.globalCompositeOperation = 'lighter';
-    const g = ctx.createRadialGradient(cx, headY, 0, cx, headY, 9);
-    g.addColorStop(0, 'rgba(90,200,255,0.55)');
-    g.addColorStop(1, 'rgba(60,170,255,0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(cx - 9, headY - 9, 18, 18);
+    if (booting) ctx.globalAlpha *= 0.25 + 0.5 * Math.abs(Math.sin(Date.now() * 0.008));
+    ctx.fillStyle = red ? '#ff3333' : '#57caff';
+    ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 5;
+    ctx.fillRect(cx - 4, headY - 1, 2.8, 2);
+    ctx.fillRect(cx + 1.2, headY - 1, 2.8, 2);
     ctx.restore();
     ctx.save();
-    if (booting) ctx.globalAlpha = 0.45 + 0.4 * Math.abs(Math.sin((r.walkT || 0) * 4));
-    ctx.fillStyle = eye;
-    ctx.fillRect(cx - 3.4, headY - 1.4, 2.6, 2.4);
-    ctx.fillRect(cx + 1.0, headY - 1.4, 2.6, 2.4);
-    ctx.fillStyle = pal.bolt;
-    ctx.fillRect(cx + 5, headY - 12.4, 1.8, 1.8); // antenna tip light
+    if (r.wolfHitT > 0) ctx.globalAlpha *= 0.25 + (Math.floor(Date.now() / 90) % 2) * 0.4;
+    for (let i = 0; i < r.hats; i++) drawHat(cx, cy - 34 - i * 5, r.hatColors[i] || '#5a3825', hurt, i === r.hats - 1);
     ctx.restore();
-    // Arm cannon, aimed along r.dir. Unmirrored locally so the world-space
-    // angle still applies when the chassis is facing left (same treatment the
-    // rooftopper's rifle gets).
-    ctx.save();
-    if (r.facingLeft) {
-      ctx.translate(cx, 0);
-      ctx.scale(-1, 1);
-      ctx.translate(-cx, 0);
-    }
-    const shoulderY = bodyY + 6;
-    ctx.translate(cx, shoulderY);
-    ctx.rotate(r.dir || 0);
-    ctx.fillStyle = pal.shade;
-    ctx.fillRect(-3, -2.6, 7, 5.2);          // shoulder housing
-    ctx.fillStyle = hurt ? '#ff8a7a' : pal.trim;
-    ctx.fillRect(3, -1.8, 13, 3.6);          // barrel
-    ctx.fillStyle = pal.shade;
-    ctx.fillRect(12, -2.6, 2.4, 5.2);        // muzzle brake
-    if ((r.muzzleT || 0) > 0) {
-      ctx.fillStyle = 'rgba(126,203,255,0.85)';
-      ctx.beginPath();
-      ctx.arc(17, 0, 3.6, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    drawKeeperWeapon(r, cx, cy, gun.gunY, gun.gx, gun.gy);
+    if (r.meleeT > 0) drawMeleeArc(cx, cy - 16, r.meleeDir, false, r.meleeT);
     ctx.restore();
-    ctx.restore();
-    // Status tag above the head: the mark, a plating bar, and the training bar
-    // once it has learned anything. Drawn outside the mirror/scale transform so
-    // the text is never flipped or stretched.
-    if (!r.dying) {
-      const tagY = cy - 42;
+    if (!r.dying && allyReadoutVisible(r)) {
       ctx.save();
-      ctx.font = 'bold 8px "Lucida Console", Consolas, monospace';
-      ctx.textAlign = 'center';
-      ctx.fillStyle = 'rgba(126,203,255,0.95)';
-      ctx.fillText('MK-' + r.mk, cx, tagY);
-      // Plating bar.
-      const bw = 18, frac = Math.max(0, r.hp) / (r.maxHp || 1);
-      ctx.fillStyle = 'rgba(0,0,0,0.5)';
-      ctx.fillRect(cx - bw / 2, tagY + 2, bw, 2.4);
-      ctx.fillStyle = frac > 0.5 ? '#6fd3ff' : frac > 0.25 ? '#ffd166' : '#ff6a5a';
-      ctx.fillRect(cx - bw / 2, tagY + 2, bw * frac, 2.4);
-      // Training bar — only once there is something to show.
+      const tagY = cy - 42 - Math.max(0, r.hats - 1) * 4.5;
+      drawAllyPips(cx, tagY, r.maxHp, r.hats);
       const sk = robotSkill(r.mk);
       if (sk > 0) {
-        ctx.fillStyle = 'rgba(0,0,0,0.5)';
-        ctx.fillRect(cx - bw / 2, tagY + 5.4, bw, 1.8);
-        ctx.fillStyle = '#9dffbe';
-        ctx.fillRect(cx - bw / 2, tagY + 5.4, bw * sk, 1.8);
+        const progress = booting ? 1 - r.bootT / ROBOT_REBOOT_T[r.mk] : sk;
+        drawAllyPips(cx, tagY + 5, 4, booting ? progress * 4 : Math.floor(sk * 4), booting ? '#ffd166' : '#7ecbff', '#273b4a');
       }
       ctx.restore();
     }
@@ -4758,7 +4683,23 @@
     }
   }
 
+  function drawNinjaForestHints() {
+    for (const w of wolves) {
+      if (!w.alive || !ninjaIsWatching(w)) continue;
+      const p = worldToScreen(w.x, w.y);
+      const alpha = w.ninjaPhase === 'retreating'
+        ? Math.max(0, w.ninjaRetreatT / 0.7) * 0.7
+        : 0.48 + 0.22 * Math.sin(Date.now() * 0.0018 + w.ninjaSlot * 9);
+      ctx.save(); ctx.globalAlpha *= alpha;
+      ctx.fillStyle = '#171d24'; ctx.fillRect(p.x - 5, p.y - 5, 10, 5);
+      ctx.fillStyle = '#e9d995';
+      ctx.fillRect(p.x - 3, p.y - 3, 2, 1.2); ctx.fillRect(p.x + 1, p.y - 3, 2, 1.2);
+      ctx.restore();
+    }
+  }
+
   function drawWolf(w) {
+    if (ninjaIsWatching(w)) return;
     if (w.boss) { drawBoss(w); return; }
     if (w.dpsDummy) { drawDpsDummy(w); return; }
     if (w.hunterWolf) { drawHunterWolf(w); return; }
@@ -4777,7 +4718,7 @@
     // Fox jumps over fences — lift the sprite along a short sin arc while
     // the jump timer ticks down. Shadow stays on the ground so it reads.
     let jumpLift = 0;
-    if ((w.fox || w.jumper) && w.jumpT > 0 && w.jumpDur > 0) {
+    if ((w.fox || w.ninja || w.jumper) && w.jumpT > 0 && w.jumpDur > 0) {
       const t = 1 - (w.jumpT / w.jumpDur);
       jumpLift = Math.sin(t * Math.PI) * 22 * s; // higher hop over walls
     }
@@ -4827,6 +4768,10 @@
       headColor = '#2e2e34';
       darkColor = '#1a1a1e';
       tailColor = '#4a4a52';
+    }
+    if (w.ninja) {
+      bodyColor = '#202734'; bellyColor = '#30394a'; headColor = '#1b2230';
+      darkColor = '#101620'; tailColor = '#242c3b';
     }
     // Pup — same grey palette, just smaller (size handles the scale-down).
     if (w.pup) {
@@ -4967,6 +4912,15 @@
     else                   eyeColor = (f > 0 ? blendToWhite([207,207,214], f) : '#cfcfd6');
     ctx.fillStyle = eyeColor;
     ctx.fillRect(cx + 11 * s, cy - 15 * s, 1.6 * s, 1.6 * s);
+    if (w.ninja) {
+      ctx.fillStyle = w.hurtT > 0 ? '#b64242' : '#9e3038';
+      ctx.fillRect(cx + 4 * s, cy - 12 * s, 12 * s, 2.1 * s);
+      ctx.beginPath();
+      ctx.moveTo(cx + 4 * s, cy - 11 * s); ctx.lineTo(cx - 5 * s, cy - 16 * s);
+      ctx.lineTo(cx - 2 * s, cy - 10 * s); ctx.closePath(); ctx.fill();
+      ctx.save(); ctx.translate(cx + 10 * s, cy - 20 * s); ctx.scale(s * 0.9, s * 0.9);
+      drawHat(0, 0, NINJA_STRAW_HAT_COLOR, w.hurtT > 0, true); ctx.restore();
+    }
     // Brute: a heavy slanted brow over the eye — the one tell that this wolf
     // is carrying ten times the usual health.
     if (w.brute) {
@@ -5053,7 +5007,7 @@
     ctx.fillStyle = darkColor;
     const wLegX = [-8, -3, 3, 7];
     for (let i = 0; i < 4; i++) {
-      const lift = w.fox ? Math.max(0, Math.sin((w.bob || 0) + (i % 2) * Math.PI)) * 2.2 : 0;
+      const lift = (w.fox || w.ninja) ? Math.max(0, Math.sin((w.bob || 0) + (i % 2) * Math.PI)) * 2.2 : 0;
       ctx.fillRect(cx + wLegX[i] * s, cy - 4 * s, 2 * s, (6 - lift) * s);
     }
     // Tail — assassin and bomb wolves carry it flipped upside-down.

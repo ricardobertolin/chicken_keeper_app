@@ -24,7 +24,7 @@ function stub() {
 }
 
 const seed = {
-  Math, JSON, Object, Array, Set, Map, Number, String, Boolean, console, Symbol,
+  Math: Object.assign(Object.create(Math), { random: () => 0.99 }), JSON, Object, Array, Set, Map, Number, String, Boolean, console, Symbol,
   Date, RegExp, isNaN, parseInt, parseFloat, Infinity, NaN, undefined,
   MAP_SIZE: 40, HALF_MAP: 20, TILE_W: 32, TILE_H: 16,
   playerHats: 3, hatsBought: 0, hatColors: [], shake: 0,
@@ -118,7 +118,7 @@ test('it spins up before acting, then engages', () => {
   assert.ok(run('robots[0].bootT') <= 0);
 });
 
-test('a volley is ally fire: right pellet count, damage and shooter tag', () => {
+test('a volley uses the keeper weapon recipe with mark damage and robot credit', () => {
   reset();
   for (const mk of [1, 2, 3]) {
     run(`robots.length = 0; pellets.length = 0; wolves.length = 0; spawnRobot(${mk});`);
@@ -126,7 +126,7 @@ test('a volley is ally fire: right pellet count, damage and shooter tag', () => 
     run('wolves.push({ x: 3, y: 0, alive: true, hp: 100, maxHp: 100 });');
     run('robots[0].attackT = 0;');
     run('updateRobot(robots[0], 0.016);');
-    assert.equal(run('pellets.length'), run(`ROBOT_PELLETS[${mk}]`), 'wrong pellet count for MK-' + mk);
+    assert.equal(run('pellets.length'), run('spreadStatsFor(robots[0]).count'), 'wrong pellet count for MK-' + mk);
     const p = run('pellets[0]');
     assert.equal(p.shooter, 'robot', 'robot pellets must be tagged as such');
     assert.equal(p.dmg, run(`ROBOT_DMG[${mk}]`));
@@ -220,7 +220,7 @@ test('wolves mauling the chassis destroy it, leaving scrap and no corpse', () =>
   const hp0 = run('robots[0].hp');
   run('updateRobot(robots[0], 0.5);');
   const dropped = hp0 - run('robots[0].hp');
-  const expect = run('ROBOT_HURT_DPS') * 2 * 0.5;
+  const expect = 1; // one hat per hit; the volley guard covers the second wolf
   assert.ok(Math.abs(dropped - expect) < 1e-6, `contact damage was ${dropped}, expected ${expect}`);
   // Keep going until the plating is gone. The robot is pinned back onto the
   // wolves each tick: left alone it successfully back-pedals out of contact

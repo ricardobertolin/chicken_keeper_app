@@ -427,6 +427,7 @@
   // airborne (Rocket Boots) keepers are still skipped.
   function explosionHitKeepers(x, y, radius) {
     const r2 = radius * radius;
+    for (const r of robots) if (r.alive && dist2(r.x, r.y, x, y) < r2) hurtRobot(r);
     if (!player.ghost && (player.flightT || 0) <= 0 &&
         dist2(player.x, player.y, x, y) < r2) applyFriendlyFireHit(player);
     if (player2.active && !player2.ghost && (player2.flightT || 0) <= 0 &&
@@ -1004,6 +1005,68 @@
     });
   }
 
+  // A ninja first watches from the forest, outside the walkable farm. A hit
+  // drives it away; only its return on the following day can earn the hat.
+  function ninjaEdgePosition(side, slot, raiding = false) {
+    const edge = HALF_MAP + (raiding ? -2 : 0.2);
+    const along = clamp(slot, -0.8, 0.8) * (HALF_MAP - 3);
+    return side === 0 ? { x: -edge, y: along }
+      : side === 1 ? { x: edge, y: along }
+      : side === 2 ? { x: along, y: -edge } : { x: along, y: edge };
+  }
+
+  function spawnNinjaWolf(raiding = false, side, slot) {
+    if (multiplayer && !isHost) return null;
+    if (wolves.some(w => w.alive && w.ninja) || (!raiding && pendingNinjaReturn)) return null;
+    side = side === undefined ? Math.floor(Math.random() * 4) : side;
+    slot = slot === undefined ? rand(-0.8, 0.8) : slot;
+    const p = ninjaEdgePosition(side, slot, raiding);
+    const w = {
+      x: p.x, y: p.y, vx: 0, vy: 0, alive: true, hp: NINJA_HP, maxHp: NINJA_HP,
+      ninja: true, ninjaPhase: raiding ? 'raiding' : 'hidden', ninjaSide: side,
+      ninjaSlot: slot, ninjaRetreatT: 0, facingLeft: side === 1,
+      target: null, attackT: 0, aggroT: 0, playerFocusT: 0, hurtT: 0,
+      detourT: 0, siegeT: 0, fasterLevel: 0, resistLevel: 0,
+      speedMul: NINJA_SPEED_MUL, size: 0.9, fleeing: false,
+      bob: Math.random() * Math.PI * 2,
+    };
+    wolves.push(w);
+    return w;
+  }
+
+  function provokeNinjaWolf(w) {
+    if (!w.alive || !w.ninja || w.ninjaPhase !== 'hidden') return;
+    w.ninjaPhase = 'retreating';
+    w.ninjaRetreatT = 0.7;
+    w.hurtT = 0.15;
+    pendingNinjaReturn = { wave: wave + 1, side: w.ninjaSide, slot: w.ninjaSlot };
+    spawnSmoke(w.x, w.y, 5);
+    playGhostVanish();
+  }
+
+  function advanceNinjaDay() {
+    if (!pendingNinjaReturn || wave < pendingNinjaReturn.wave) return;
+    const returning = pendingNinjaReturn;
+    pendingNinjaReturn = null;
+    // A debug wave jump can happen before the retreat animation finishes.
+    for (const w of wolves) if (w.ninja && ninjaIsWatching(w)) w.alive = false;
+    spawnNinjaWolf(true, returning.side, returning.slot);
+  }
+
+  function updateNinjaWolf(w, dt) {
+    if (w.ninjaPhase === 'raiding') { updateFox(w, dt); return; }
+    w.bob += dt * 2;
+    if (w.hurtT > 0) w.hurtT -= dt;
+    if (w.ninjaPhase === 'retreating') {
+      w.ninjaRetreatT -= dt;
+      if (w.ninjaRetreatT <= 0) w.alive = false;
+      return;
+    }
+    // Keep the hiding spot in the treeline when building expands the farm.
+    const p = ninjaEdgePosition(w.ninjaSide, w.ninjaSlot);
+    w.x = p.x; w.y = p.y;
+  }
+
   // A bomb wolf — a slow wall-sapper that beelines to the nearest wall and
   // detonates against it. Appears from wave 50 once walls are standing.
   function spawnBombWolf() {
@@ -1455,7 +1518,7 @@
     // shots on pups when an assassin is bearing down.
     let target = null, bestScore = -Infinity;
     for (const w of wolves) {
-      if (!w.alive || w.pup || w.fox) continue;
+      if (!w.alive || w.pup || w.fox || ninjaIsWatching(w)) continue;
       const d = dist2(w.x, w.y, r.x, r.y);
       if (d < ROOFTOP_MIN_RANGE2) continue; // unlimited range, but never point-blank
       // Prefer dangerous variants AND closer wolves.
@@ -1657,7 +1720,7 @@
     let best = null, bd = Infinity;
     const bossReach = (HALF_MAP * 2) * (HALF_MAP * 2);
     for (const w of wolves) {
-      if (!w.alive || w.fleeing) continue;
+      if (!w.alive || w.fleeing || ninjaIsWatching(w)) continue;
       const reach = w.boss ? bossReach : HUNTER_RANGE2;
       const d = dist2(w.x, w.y, x, y);
       if (d <= reach && d < bd) { bd = d; best = w; }
@@ -2032,6 +2095,7 @@
     // and startWave counts it down.
     if (was === 'snow') snowLeftover = SNOW_LEFTOVER_WAVES + 1;
     else snowTrails.length = 0;
+    if (was === 'snow') startBlackFade(null, 0.55);
     _tileColorCache.clear(); // repaint the ground at the new cover level
     toast(was === 'rain'
       ? 'The rain passes — the pack steadies itself.'
@@ -2106,6 +2170,7 @@
 
   function startWave(skipCount = 1) {
     wave += skipCount;
+    advanceNinjaDay();
     // Walls are patched up between waves — chips taken last round don't carry
     // over, so a surviving fence always starts the wave uncracked.
     for (const f of fences) {
@@ -2118,7 +2183,7 @@
     // Age out the post-blizzard dusting.
     if (snowLeftover > 0) {
       snowLeftover--;
-      if (snowLeftover === 0) snowTrails.length = 0;
+      if (snowLeftover === 0) { snowTrails.length = 0; startBlackFade(null, 0.55); }
       _tileColorCache.clear();
     }
     morphChickens();
@@ -2231,6 +2296,10 @@
     // Cryptid Radar boosts the per-wave roll for every rare wolf variant —
     // including the moonwalker and the brute (see their rolls below).
     const cryptidMul = CRYPTID_RADAR_MUL[Math.min(5, upgradeLevels.cryptidRadar || 0)];
+    if (wave >= NINJA_MIN_WAVE && !pendingNinjaReturn &&
+        !wolves.some(w => w.alive && w.ninja) && Math.random() < NINJA_SPAWN_CHANCE * cryptidMul) {
+      spawnNinjaWolf();
+    }
     // Rare: a fox slips in alongside the pack (6% per wave × cryptid mul).
     // Foxes are scarce in the opening waves (when a snatched chicken hurts
     // most) and ramp up to the full rate by ~wave 12.
@@ -2460,7 +2529,7 @@
     // Turncoats fight FOR the keeper, so they don't hold the wave open — the
     // player shouldn't have to execute their own ally to finish a round.
     let live = 0;
-    for (const w of wolves) if (w.alive && !w.dpsDummy && !w.turncoat) live++; // debug dummy never blocks the wave
+    for (const w of wolves) if (w.alive && !w.dpsDummy && !w.turncoat && !ninjaIsWatching(w)) live++;
     if (live > 0) return;
 
     waveActive = false;
@@ -2605,8 +2674,8 @@
   // and friendly-fires any hunters it sweeps (unless `homing` — the bending
   // homing-laser spares allies). Used by the Laser Bullets upgrade — drops the
   // pellet system and shoots like a ranged wolf.
-  function applyPlayerBeam(x1, y1, x2, y2, dmg, shooter, homing, cratesHit) {
-    const shooterObj = shooter === 2 ? player2 : player;
+  function applyPlayerBeam(x1, y1, x2, y2, dmg, shooter, homing, cratesHit, robotRef) {
+    const shooterObj = robotRef || (shooter === 2 ? player2 : player);
     const sLvls = lvlsFor(shooterObj);
     // Laser beam gets a bit thicker with every Laser Bullets tier — at max
     // the beam reliably clips through wolves it sweeps past.
@@ -2630,13 +2699,26 @@
         if (w.alive && rocketChance && Math.random() < rocketChance) rocketBlastAt(w.x, w.y, shooterObj);
       }
     }
+    if (gameOpts.friendlyFire && !robotRef) {
+      for (const r of robots) if (r.alive && segmentDist2(x1, y1, x2, y2, r.x, r.y) < t2) hurtRobot(r);
+    }
+    // A malfunctioning robot's laser is as unsafe for the flock as its pellets.
+    if (robotRef) {
+      for (const c of chickens) {
+        if (!c.alive || c.savedT > 0 || (c.carrier && c.carrier.alive)) continue;
+        if (segmentDist2(x1, y1, x2, y2, c.x, c.y) < t2) {
+          killChicken(c); playChickenDeath(); explodeChickenMaybe(c);
+          corpses.push({ x: c.x, y: c.y, kind: 'chicken', t: 4 });
+        }
+      }
+    }
     // Friendly fire: the keeper's beam burns any hunter it sweeps across too —
     // parity with the pellet system, so spraying the laser into your own crew
     // mows them down. Only the bending homing-laser spares allies (it seeks
     // wolves, mirroring how homing pellets pass through hunters).
     // Mirrors the pellet path: the beam only burns the crew when friendly fire
     // is on, and half of the hits that do land are shrugged off.
-    if (!homing && gameOpts.friendlyFire && hunters.length) {
+    if (!robotRef && !homing && gameOpts.friendlyFire && hunters.length) {
       for (const h of hunters) {
         if (!h.alive) continue;
         if (segmentDist2(x1, y1, x2, y2, h.x, h.y) < t2) {
@@ -2834,7 +2916,7 @@
     if (who === player) who.dir = aim;
     // Start the beam at the visible muzzle, not the body centre.
     const muzzle = barrelTipOffset(who);
-    const shooterId = who === player2 ? 2 : 1;
+    const shooterId = who.robot ? 'robot' : who === player2 ? 2 : 1;
     const beamColor = projectileColor(lvls, false); // yOff 18 lifts it to the barrel tip
     // The spread pattern reshapes the laser, mirroring the shotgun:
     //  - Loose Pattern → a FAN of several thinner beams across the spread arc.
@@ -2879,7 +2961,7 @@
         : tracedBeamSegments(bx1, by1, a, reach, useBounce);
       const cratesHit = new Set();
       for (const s of segs) {
-        applyPlayerBeam(s.x1, s.y1, s.x2, s.y2, dmgPer, shooterId, useHoming, cratesHit);
+        applyPlayerBeam(s.x1, s.y1, s.x2, s.y2, dmgPer, shooterId, useHoming, cratesHit, who.robot ? who : null);
         beams.push({ x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2, t: 0, life: 0.22, color: beamColor, yOff: 18 });
       }
     }
@@ -3091,7 +3173,7 @@
   function maybeRocketExplode(p) {
     if (!p || !p.didHit) return; // no end-of-life detonation
     if (!(p.rocketBoom || (p.rocketChance && Math.random() < p.rocketChance))) return;
-    rocketBlastAt(p.x, p.y, p.shooter === 2 ? player2 : player);
+    rocketBlastAt(p.x, p.y, p.robotRef || (p.shooter === 2 ? player2 : player));
   }
 
   // Gunsmoke: a few drifting puffs at a world position (the gun muzzle).
@@ -3342,6 +3424,9 @@
   }
 
   function applyBeamDamage(x1, y1, x2, y2) {
+    for (const r of robots) {
+      if (r.alive && segmentDist2(x1, y1, x2, y2, r.x, r.y) < 0.25) hurtRobot(r);
+    }
     const thickness = 0.32;
     const t2 = thickness * thickness;
     hurtCratesAlongBeam(x1, y1, x2, y2, 1, 'wolf');
@@ -3439,25 +3524,7 @@
   // Wolf's Blade: a melee swing that replaces shooting — huge damage to every
   // wolf caught in a wide arc in front of the player.
   function swordSwing() {
-    player.reloadT = SWORD_COOLDOWN; // reuse reloadT as the swing cooldown
-    player.meleeT = MELEE_ANIM_DUR;
-    player.meleeDir = player.dir;
-    player.meleeFull = false;
-    player.runT = 0;                 // swinging breaks the run, like firing
-    playSwordSwing();
-    shake = Math.max(shake, 0.18);
-    const r2 = SWORD_RANGE * SWORD_RANGE;
-    for (const w of wolves) {
-      if (!w.alive) continue;
-      const dx = w.x - player.x, dy = w.y - player.y;
-      if (dx * dx + dy * dy > r2) continue;
-      // Only wolves within the swing's frontal arc.
-      let diff = Math.abs(Math.atan2(dy, dx) - player.dir);
-      if (diff > Math.PI) diff = Math.PI * 2 - diff;
-      if (diff > SWORD_ARC) continue;
-      const m = Math.hypot(dx, dy) || 1;
-      hurtWolf(w, SWORD_DMG, (dx / m) * 0.4, (dy / m) * 0.4);
-    }
+    swordSwingFor(player);
   }
 
   // Shotgun magazine size: Double-Barrel loads two shells, everything else one.

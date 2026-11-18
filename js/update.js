@@ -65,6 +65,7 @@
       // Refresh player1's weapon-mirror on the player object so the keeper-draw
       // helpers can read everything from one place.
       syncP1Weapon();
+      refreshDebugKarma();
       // Net sync runs even when update() bails out (paused / upgrade / gameOver)
       // so the guest keeps receiving fresh state and game-over propagates.
       if (gameStarted && multiplayer && conn && conn.open) {

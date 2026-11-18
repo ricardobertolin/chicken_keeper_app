@@ -388,7 +388,7 @@
     return out;
   }
   const SNAP_FIELDS = {
-    wolves:   ['x','y','size','fasterLevel','hurtT','facingLeft','alive','fox','bomb','sword','assassin','hatted','aggroT','carrying','fleeing','meleeT','meleeDir','bob','smokeT','defective','turncoat','coldT','burnT','boss','aimDir','walkT','missileWolf','missilePhase','missileChargeT','jumper','jumpT','jumpDur','hunterWolf','muzzleT','maxHp','hp','hatColor','gunColor','pup','ranged','homer','parachuting','parachuteH','parachuteSway','crawler','legPhase','sparkleT','moonwalk','brute'],
+    wolves:   ['x','y','size','fasterLevel','hurtT','facingLeft','alive','fox','ninja','ninjaPhase','ninjaSlot','ninjaRetreatT','bomb','sword','assassin','hatted','aggroT','carrying','fleeing','meleeT','meleeDir','bob','smokeT','defective','turncoat','coldT','burnT','boss','aimDir','walkT','missileWolf','missilePhase','missileChargeT','jumper','jumpT','jumpDur','hunterWolf','muzzleT','maxHp','hp','hatColor','gunColor','pup','ranged','homer','parachuting','parachuteH','parachuteSway','crawler','legPhase','sparkleT','moonwalk','brute'],
     chickens: ['x','y','alive','facingLeft','fat','worker','rich','bob','fleeT','soldier','fuseT'],
     coops:    ['x','y','level','dirtR','builtWave','shakeT','igniteT','launching','laying'],
     fences:   ['x','y','kind','hp','maxHp','hurtT'], // maxHp drives the half-health cracks
@@ -405,13 +405,14 @@
     mines:    ['x','y','level','_decoy'],
     holes:    ['x','y'],
     scorches: ['x','y','t','life','r'],
+    wolfScrap: ['x','y','vx','vy','z','vz','spin','spinV','t','kind','size'],
     rooftoppers: ['x','y','fireT','dir','aimDir','facingLeft','alive','coopLevel','aiming','targetX','targetY'],
     // Wartime supply crates. para/paraH/paraSway carry the descent so the drop
     // animates on the guest; hp/hurtT drive the splits and the hit flash.
     supplyCrates: ['x','y','hp','maxHp','hurtT','para','paraH','paraSway','landT','shakeT'],
     // Robot allies. mk drives the chassis colour and the mark pips; bootT and
     // muzzleT drive the spin-up flicker and the muzzle flash.
-    robots:   ['x','y','mk','hp','maxHp','hurtT','facingLeft','walkT','dir','alive','dying','downT','bootT','muzzleT'],
+    robots:   ['x','y','mk','hp','maxHp','hurtT','facingLeft','walkT','dir','alive','dying','downT','bootT','muzzleT','robot','hats','hatColors','wolfHitT','eyeFlashT','crazyT','moving','chambered','reloadingT','reloadT','jamFlashT','spinT','meleeT','meleeDir'],
     // Laser / hit-scan beams (player, wolf, boss — incl. bending & ricochet
     // segments) so the guest sees every beam flash.
     beams:    ['x1','y1','x2','y2','t','life','color','yOff','thick'],
@@ -438,6 +439,7 @@
           dying: !!player.dying, // mid-fall before the ghost — guest mirrors it
           karma: player.karma,    // per-player karma drives the shirt tint
           transcendentKarma: !!player.transcendentKarma,
+          lastKarmaRescueWave: player.lastKarmaRescueWave,
           kills: player.kills || 0,
           deaths: player.deaths || 0,
           chickensShot: player.chickensShot || 0,
@@ -477,6 +479,7 @@
           meleeFull:   !!player2.meleeFull,
           karma:       player2.karma,
           transcendentKarma: !!player2.transcendentKarma,
+          lastKarmaRescueWave: player2.lastKarmaRescueWave,
           hatColors: (player2.hatColors || []).slice(),
           kills:       player2.kills || 0,
           deaths:      player2.deaths || 0,
@@ -535,6 +538,7 @@
         rooftoppers: snapList(rooftoppers, SNAP_FIELDS.rooftoppers),
         supplyCrates: snapList(supplyCrates, SNAP_FIELDS.supplyCrates),
         robots:   snapList(robots,   SNAP_FIELDS.robots),
+        wolfScrap: snapList(wolfScrap, SNAP_FIELDS.wolfScrap),
         robotTraining: robotTraining,
         beams:    snapList(beams,    SNAP_FIELDS.beams),
         hunters:  snapList(hunters,  SNAP_FIELDS.hunters),
@@ -571,6 +575,7 @@
         parryMode: parryMode,
         nightOfWolf: nightOfWolf,
         weather: weather, // '' | 'rain' | 'snow' — guest runs its own particles
+        snowLeftover: snowLeftover,
         // Host's own dash so the guest can render the hat-scatter animation.
         hostDashT: player.dashT || 0,
         hostDashX: player.dashX || 0,
@@ -618,6 +623,7 @@
       }
       if (typeof msg.host.karma === 'number') player2.karma = msg.host.karma;
       if (typeof msg.host.transcendentKarma === 'boolean') player2.transcendentKarma = msg.host.transcendentKarma;
+      if ('lastKarmaRescueWave' in msg.host) player2.lastKarmaRescueWave = msg.host.lastKarmaRescueWave;
       if (typeof msg.host.kills === 'number') player2.kills = msg.host.kills;
       if (typeof msg.host.deaths === 'number') player2.deaths = msg.host.deaths;
       if (typeof msg.host.chickensShot === 'number') player2.chickensShot = msg.host.chickensShot;
@@ -670,6 +676,7 @@
       player.meleeFull   = !!msg.guestWeapon.meleeFull;
       if (typeof msg.guestWeapon.karma === 'number') player.karma = msg.guestWeapon.karma;
       if (typeof msg.guestWeapon.transcendentKarma === 'boolean') player.transcendentKarma = msg.guestWeapon.transcendentKarma;
+      if ('lastKarmaRescueWave' in msg.guestWeapon) player.lastKarmaRescueWave = msg.guestWeapon.lastKarmaRescueWave;
       if (typeof msg.guestWeapon.kills === 'number') player.kills = msg.guestWeapon.kills;
       if (typeof msg.guestWeapon.deaths === 'number') player.deaths = msg.guestWeapon.deaths;
       if (typeof msg.guestWeapon.chickensShot === 'number') player.chickensShot = msg.guestWeapon.chickensShot;
@@ -741,8 +748,8 @@
     if (msg.rooftoppers) replaceArray(rooftoppers, msg.rooftoppers);
     if (msg.supplyCrates) replaceArray(supplyCrates, msg.supplyCrates);
     if (msg.robots) replaceArray(robots, msg.robots);
-    // Training is a plain per-mark map, not an entity list — copy the values so
-    // the guest's robot tags show the same trained percentage the host sees.
+    if (msg.wolfScrap) replaceArray(wolfScrap, msg.wolfScrap);
+    // Training is a per-mark map; both screens use it for the nearby pips.
     if (msg.robotTraining) for (const k in robotTraining) robotTraining[k] = msg.robotTraining[k] || 0;
     if (msg.beams)  replaceArray(beams,  msg.beams);
     if (msg.hunters) replaceArray(hunters, msg.hunters);
@@ -757,6 +764,10 @@
       _tileColorCache.clear(); // snow goes on/comes off the ground on the guest too
       rainDrops.length = 0;
       snowFlakes.length = 0;
+    }
+    if (typeof msg.snowLeftover === 'number' && msg.snowLeftover !== snowLeftover) {
+      snowLeftover = msg.snowLeftover;
+      _tileColorCache.clear();
     }
     // Host's dash state so the guest renders the hat-scatter on the host's keeper.
     if (typeof msg.hostDashT === 'number') { player2.dashT = msg.hostDashT; player2.dashX = msg.hostDashX || 0; player2.dashY = msg.hostDashY || 0; }

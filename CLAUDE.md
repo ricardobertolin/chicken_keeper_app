@@ -40,9 +40,14 @@ Summoned by typing `robot1` / `robot2` / `robot3` in-game, or from the debug pan
 
 - Every stat table in state.js is indexed `[_, mk1, mk2, mk3]`, so index 0 is unused and a robot's stats are a straight lookup on `r.mk`. The mark **is** the intelligence: `ROBOT_AIM_ERR` and `ROBOT_SMART` are the real differences.
 - **Host-authoritative.** A guest typing the phrase forwards a `debug-action` (`spawn-robot-N`) over the existing channel, which net.js turns into a synthetic click on the debug handler. That's what makes the phrase work in multiplayer.
-- Pellets carry `shooter: 'robot'`, treated as **ally fire** in `updatePellet`: damages wolves, passes through keepers, hunters and the flock. Adding a new shooter kind means auditing every `p.shooter` branch in boss.js.
-- Wolf AI is untouched. Robots take contact damage in their own update loop and from ranged-wolf bullets, rather than being taught to the pack as a new target type.
+- Robots use keeper bodies with mark-colored mechanical heads, hat HP (3/4/5 initially), and the host keeper's weapon upgrades through `fireBurstFor` / `swordSwingFor` / `fireLaserShot`. Robot shots can kill chickens. Keepers can hurt robots only with friendly fire enabled; wolf melee, bullets, beams and hostile explosions can always hurt them. `hurtRobot` centralizes hat loss and red eye flickering.
+- Wolves consider robots at 1/16 of normal squared-distance priority. Contact damage also covers special wolves, respects fences, and stays active during boot/reboot. Shared 25% training milestones reboot all live units of that mark for 15/10/5 seconds. Each wave rolls a 10/5/0% malfunction chance (double in rain), lasting four seconds with random fire. Death always throws scrap; snapshots include hats, eye/reboot/fault state and flying parts.
 - `robotTraining` is held **per mark**, not per unit, so rebuilding a destroyed MK-2 keeps what the last one learned. Reset by `resetWorld`.
+- Robot health and training/reboot progress use hunter-style pips, with no overhead names. Both hunters and robots show their readouts only within four tiles of a living keeper. Robot and possessed-wolf eyes are drawn above the night mask.
+
+Ninja wolves hide in the outer treeline (8% per wave from wave 10, boosted by Cryptid Radar). A hit makes one retreat without dying, then raid on the next wave with fox AI. Killing the raider awards a conical straw hat to the killer; the debug panel can spawn the encounter or grant the hat. Hidden ninjas do not block wave completion.
+
+Transcendence requires Metaverse, 30 uninterrupted seconds in Last Stand, and a personal good/bad karma rescue on the current wave or within the previous two waves. Current karma does not matter; transcendence freezes it at zero. Debug can force the state for the selected keeper(s). Respawn and buddy revival grant five seconds of both melee and projectile protection.
 
 Covered by `tests/robots.test.mjs`, which also lifts the typed-phrase matcher out of input.js by text (input.js can't be loaded whole — its top level wires DOM listeners).
 

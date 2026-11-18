@@ -30,6 +30,7 @@
     karma: 0,           // per-player karma — drives the shirt tint (mirrors the legacy `karma` global)
     transcendentKarma: false,
     transcendStandT: 0,
+    lastKarmaRescueWave: null,
     chickensKilledThisWave: 0,
     chickensShot: 0,    // lifetime chickens shot (for the end-of-run scoreboard)
     deathCause: '',     // last reason this keeper fell — 'wolf', 'friendly fire', ...
@@ -95,6 +96,7 @@
     karma: 0,
     transcendentKarma: false,
     transcendStandT: 0,
+    lastKarmaRescueWave: null,
     chickensKilledThisWave: 0,
     chickensShot: 0,
     deathCause: '',
@@ -772,13 +774,11 @@
   function advanceKarma(who, chickensShot) {
     who.karma = who.transcendentKarma ? 0
       : clamp(who.karma + (chickensShot > 0 ? -1 : 1), -KARMA_HARD_CAP, KARMA_HARD_CAP);
-    // A change away from zero breaks the continuous Last Stand requirement.
-    if (who.karma !== 0) who.transcendStandT = 0;
     if (who === player) karma = who.karma;
   }
 
   // The host owns both keepers' unlocks; the guest receives the lasting state
-  // through snapshots. Only time actually spent in Last Stand at zero counts.
+  // through snapshots. A rescue opens a two-wave window to hold Last Stand.
   function updateTranscendentKarma(who, dt) {
     if (multiplayer && !isHost) return;
     if (who.transcendentKarma) {
@@ -786,13 +786,19 @@
       if (who === player) karma = 0;
       return;
     }
-    if (inMenu || who.ghost || who.dying || who.karma !== 0
+    const recentRescue = Number.isFinite(who.lastKarmaRescueWave)
+      && wave >= who.lastKarmaRescueWave && wave - who.lastKarmaRescueWave <= 2;
+    if (inMenu || who.ghost || who.dying || !recentRescue
         || !(lvlsFor(who).metaverse > 0) || !lastStandCrouched(who)) {
       who.transcendStandT = 0;
       return;
     }
     who.transcendStandT = (who.transcendStandT || 0) + dt;
     if (who.transcendStandT < TRANSCEND_STAND_SECONDS) return;
+    transcendKeeper(who);
+  }
+  function transcendKeeper(who) {
+    if (who.transcendentKarma) return;
     who.transcendentKarma = true;
     who.karma = 0;
     if (who === player) karma = 0;
@@ -844,6 +850,16 @@
   const LEPRECHAUN_HAT_COLOR = '#1f6b1f';
   const LEPRECHAUN_BUY_CHANCE = 0.06;              // chance a bought hat comes out leprechaun (was 0.01)
   const LEPRECHAUN_PAYOUT = 100;
+  const NINJA_STRAW_HAT_COLOR = '#d7b46a';
+  const NINJA_MIN_WAVE = 10;
+  const NINJA_SPAWN_CHANCE = 0.08;
+  const NINJA_HP = 6;
+  const NINJA_SPEED_MUL = 2.1;
+  let pendingNinjaReturn = null; // { wave, side, slot }; host-authoritative
+
+  function ninjaIsWatching(w) {
+    return !!(w.ninja && w.ninjaPhase !== 'raiding');
+  }
   // ---- Weather events ----------------------------------------------------
   // Two siblings of Night of the Wolf, rolled on exactly the same gate (see
   // WEATHER_* below). At most ONE weather event runs per wave, and never
@@ -1102,11 +1118,11 @@
   // every number below is indexed [_, mk1, mk2, mk3] so index 0 is unused and
   // a robot's stats are a straight table lookup on its mark.
   const ROBOT_MAX_MK = 3;
-  const ROBOT_HP        = [0, 14, 22, 34];     // plating — wolves wear it down on contact
+  const ALLY_READOUT_RANGE = 4; // world tiles from a living keeper
+  const RESPAWN_PROTECTION_SECONDS = 5;
+  const ROBOT_HP        = [0, 3, 4, 5];       // starting hats (one hat per hit)
   const ROBOT_SPEED     = [0, 2.6, 3.1, 3.6];  // tiles/sec
   const ROBOT_FIRE_CD   = [0, 1.15, 0.80, 0.50]; // seconds between volleys
-  const ROBOT_PELLETS   = [0, 3, 4, 6];        // pellets per volley
-  const ROBOT_SPREAD    = [0, 0.34, 0.26, 0.18]; // radians, half-cone
   const ROBOT_DMG       = [0, 1.0, 1.4, 1.9];  // per pellet
   const ROBOT_RANGE     = [0, 7, 9, 11];       // tiles it will open fire at
   const ROBOT_STANDOFF  = [0, 2.2, 2.8, 3.4];  // tiles it tries to keep from its target
@@ -1117,11 +1133,12 @@
   // higher marks weigh up what actually needs shooting (see robotPickTarget).
   const ROBOT_SMART     = [0, 0, 1, 2];
   const ROBOT_HURT_R    = 0.85;   // tiles — a wolf this close is mauling the robot
-  const ROBOT_HURT_DPS  = 4.5;    // plating lost per second of contact
   const ROBOT_THINK_MIN = 0.5;    // seconds between re-picking a roam target
   const ROBOT_THINK_MAX = 1.6;
   const ROBOT_MAX_ACTIVE = 4;     // how many can be on the field at once
-  const ROBOT_BULLET_DMG = 3.5;   // plating lost to one ranged-wolf round
+  const ROBOT_REBOOT_T = [0, 15, 10, 5];
+  const ROBOT_FAULT_CHANCE = [0, 0.10, 0.05, 0]; // once per wave, doubled in rain
+  const ROBOT_FAULT_T = 4;
   const ROBOT_BOOT_T = 0.9;       // spin-up hum before it starts acting
   const ROBOT_FALL_DUR = 0.5;     // topple animation before the chassis is pruned
   // Chassis palettes. MK-1 is salvage, MK-2 is factory steel, MK-3 is the
@@ -1140,6 +1157,9 @@
   const ROBOT_TRAIN_PER_KILL = 0.035; // skill gained per wolf it puts down
   const ROBOT_TRAIN_CAP = 0.75;       // most of the aim error it can train away
   function robotSkill(mk) { return Math.min(1, robotTraining[mk] || 0); }
+  function robotEyesRed(r) {
+    return (r.eyeFlashT > 0 || r.crazyT > 0) && Math.floor(Date.now() / 75) % 2 === 0;
+  }
   function robotAimErr(r) {
     return ROBOT_AIM_ERR[r.mk] * (1 - robotSkill(r.mk) * ROBOT_TRAIN_CAP);
   }

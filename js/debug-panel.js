@@ -1,3 +1,16 @@
+  function refreshDebugKarma() {
+    if (!DEBUG) return;
+    const root = document.getElementById('debug');
+    const label = document.getElementById('debug-karma');
+    if (!label || !root || !root.classList.contains('open')) return;
+    const value = who => (who.karma > 0 ? '+' : '') + (who.karma || 0)
+      + (who.transcendentKarma ? ' ✧' : '');
+    const text = player2.active ? 'P1: ' + value(isHost ? player : player2)
+      + ' P2: ' + value(isHost ? player2 : player) : 'Karma: ' + value(player);
+    if (label.textContent !== text) label.textContent = text;
+    label.style.color = player.transcendentKarma ? '#c28bff' : '';
+  }
+
   // ---------- DEBUG PANEL — gated by the DEBUG flag at top of the IIFE ----------
   if (DEBUG) (function setupDebugPanel() {
     const root = document.getElementById('debug');
@@ -75,7 +88,7 @@
       refreshBuyAllButton();
     }
 
-    toggle.addEventListener('click', () => root.classList.toggle('open'));
+    toggle.addEventListener('click', () => { root.classList.toggle('open'); refreshDebugKarma(); });
 
     const toolsRow = document.getElementById('debug-tools');
 
@@ -155,6 +168,7 @@
       ['spawn-wolf-fast', 'Spawn very fast wolf',  'Spawn a single extremely fast (pale) wolf'],
       ['spawn-wolf-big',  'Spawn very big wolf',   'Spawn a single extremely big (resistant) wolf'],
       ['spawn-fox',       'Spawn fox',             'Spawn a single fox raider'],
+      ['spawn-ninja',     'Spawn ninja wolf',      'Hide a ninja in the outer trees; shoot it, then start the next wave to face its raid'],
       ['spawn-assassin',  'Spawn assassin wolf',   'Spawn a single assassin wolf'],
       ['spawn-sword',     'Spawn sword wolf',      'Spawn a single sword wolf'],
       ['spawn-bomb',      'Spawn exploding wolf',  'Spawn a single bomb wolf (wall sapper)'],
@@ -249,6 +263,8 @@
         spawnChicken(home);
       } else if (action === 'spawn-fox') {
         spawnFox();
+      } else if (action === 'spawn-ninja') {
+        spawnNinjaWolf();
       } else if (action === 'spawn-assassin') {
         spawnWolf();
         const wa = wolves[wolves.length - 1];
@@ -313,14 +329,19 @@
         p2Cameo = { x: s.x, y: s.y, vx: 0, vy: 0, walkT: 0, facingLeft: false,
           lifeT: P2_CAMEO_LIFE, phase: 'wander',
           tx: t.x, ty: t.y, retargetT: rand(1.5, 3) };
-      } else if (action === 'karma-max') {
-        karma = KARMA_MAX;
-        player.karma = KARMA_MAX;
-        toast('Karma = +' + KARMA_MAX, 1.0);
-      } else if (action === 'karma-min') {
-        karma = -KARMA_MAX;
-        player.karma = -KARMA_MAX;
-        toast('Karma = -' + KARMA_MAX, 1.0);
+      } else if (action === 'karma-transcend' || action === 'karma-max' || action === 'karma-min') {
+        const targets = debugUpgradeTarget === 'p2' ? [player2]
+          : debugUpgradeTarget === 'both' ? [player, player2] : [player];
+        for (const who of targets) {
+          if (action === 'karma-transcend') transcendKeeper(who);
+          else {
+            who.transcendentKarma = false;
+            who.transcendStandT = 0;
+            who.karma = action === 'karma-max' ? KARMA_MAX : -KARMA_MAX;
+            if (who === player) karma = who.karma;
+          }
+        }
+        refreshDebugKarma();
       } else if (action === 'spawn-wolf-fast') {
         spawnWolf();
         // Boost the last spawned wolf to an extreme faster level
@@ -380,6 +401,13 @@
         playerHats++;
         hatColors.push(NIGHT_OF_WOLF_WITCH_HAT_COLOR);
         toast('Witch hat added — ' + playerHats + ' hats', 0.6);
+      } else if (action === 'add-hat-ninja') {
+        const targets = debugUpgradeTarget === 'both' ? [player, player2]
+          : [debugUpgradeTarget === 'p2' ? player2 : player];
+        for (const who of targets) {
+          if (who === player2 && !player2.active) continue;
+          awardHatTo(who, undefined, undefined, NINJA_STRAW_HAT_COLOR);
+        }
       } else if (action === 'grow-mustache') {
         // Each press = finishing another run: the mustache grows one level AND
         // ages one notch (greys a little), like surviving into a fresh run.
@@ -429,6 +457,7 @@
         // and lifting the game-over screen.
         const forceRevive = (who) => {
           who.ghost = false; who.dying = false; who.downT = 0; who.hurtT = 0;
+          protectRespawn(who);
           if (who === player) {
             playerHats = Math.max(playerHats, 3);
             hatColors.length = 0;

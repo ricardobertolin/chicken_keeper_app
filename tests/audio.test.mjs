@@ -113,14 +113,17 @@ test('musical loops are cached, stereo, and have smooth wrapped tails', () => {
   }
 });
 
-test('the night event has no opening or closing cue while FANGUS retains its warning cue', () => {
+test('night and FANGUS keep their spooky intro while night has no closing chime', () => {
   const {run, nodes} = audioGame();
-  run('playNightOfWolfStart()');
-  assert.ok(nodes.some(n => n.kind === 'oscillator' && n.type === 'sawtooth'));
+  for (const night of [false, true]) {
+    nodes.length = 0;
+    run(`nightOfWolf = ${night}; playNightOfWolfStart()`);
+    assert.ok(nodes.some(n => n.kind === 'oscillator' && n.type === 'sawtooth'), 'missing howl');
+    assert.ok(nodes.some(n => n.kind === 'oscillator' && n.type === 'sine'), 'missing rumble');
+  }
   nodes.length = 0;
-  run('nightOfWolf = true; playNightOfWolfStart(); playNightOfWolfEnd()');
-  const oscillators = nodes.filter(n => n.kind === 'oscillator');
-  assert.equal(oscillators.length, 0, 'night should have no howl or chime cue');
+  run('playNightOfWolfEnd()');
+  assert.equal(nodes.filter(n => n.kind === 'oscillator').length, 0, 'night should still have no closing chime');
 });
 
 test('music, effects and ambience share one output bus with the new 20% volume cut', () => {

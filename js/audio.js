@@ -1462,7 +1462,6 @@
   // wolf-howl glide. Distinctively ominous so it reads as "things just got
   // bad" without being a single jump scare.
   function playNightOfWolfStart() {
-    if (nightOfWolf) return; // the night event now has cricket ambience only
     queueNetSound('nightOfWolfStart');
     const ctx = getAudio();
     if (!ctx) return;

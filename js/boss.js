@@ -998,6 +998,7 @@
 
   function updateWolf(w, dt) {
     if (!w.alive) return;
+    if (ninjaIsWatching(w)) { updateNinjaWolf(w, dt); return; }
     if (w.boss) return; // the boss is driven by bossTick, not the generic wolf AI
     // Post-wave-50 damage-soak window — refreshes the per-second cap (see
     // cappedWolfDamage). Ticked here for every wolf variant.
@@ -1020,7 +1021,7 @@
       if (w.burnTickT <= 0) {
         w.burnTickT = BURN_TICK;
         playFireCrackle(); // self-throttled — one crackle however many are alight
-        hurtWolf(w, burnTickDmg(w), 0, 0, player); // credits P1; handles death/scoring
+        hurtWolf(w, burnTickDmg(w), 0, 0, w.burnAttacker || player); // preserve the incendiary shooter's credit
         if (!w.alive) return;
       }
     }
@@ -1046,6 +1047,7 @@
     if (w.missileWolf) { updateMissileWolf(w, dt); return; }
     if (w.parachuting) { updateParachuteWolf(w, dt); return; }
     if (w.crawler) { updateThingCrawler(w, dt); return; }
+    if (w.ninja) { updateNinjaWolf(w, dt); return; }
     if (w.fox) { updateFox(w, dt); return; }
     if (w.bomb) { updateBombWolf(w, dt); return; }
     if (w.pup) { updatePupWolf(w, dt); return; }
@@ -1141,6 +1143,19 @@
         const curD = target ? dist2(target.x, target.y, w.x, w.y) : Infinity;
         if (bestHd < curD * 0.9) target = bestH;
       }
+    }
+
+    // Robots draw much less attention: they must be four times closer
+    // than the current target, and never override an assassin's keeper focus.
+    if (!w.assassin) {
+      const currentD = target ? dist2(target.x, target.y, w.x, w.y) : Infinity;
+      let robotD = Math.min(16, currentD / 16), robotTarget = null;
+      for (const r of robots) {
+        if (!r.alive) continue;
+        const d = dist2(r.x, r.y, w.x, w.y);
+        if (d < robotD) { robotD = d; robotTarget = r; }
+      }
+      if (robotTarget) target = robotTarget;
     }
 
     const targetIsPlayer = (target === player || target === player2);
@@ -1363,6 +1378,8 @@
                 }
               }
             }
+          } else if (target && target.robot && !w.fleeing) {
+            hurtRobot(target);
           } else if (target && target._hunter) {
             // Wolves chew through a hunter's HP rather than knocking off hats.
             // A wolf kill never breaks the camp (byPlayer = false).
@@ -1473,7 +1490,7 @@
             f.carriedChicken = target;
             target.carrier = f;
           }
-          toast('A fox snatched a chicken!', 1.4);
+          toast(f.ninja ? 'A ninja wolf snatched a chicken!' : 'A fox snatched a chicken!', 1.4);
         }
       }
     }
@@ -1631,18 +1648,23 @@
   // Drop a fresh brown hat onto a specific keeper's stack (respecting the cap).
   // Player 1's count lives in the `playerHats`/`hatColors` globals; player 2
   // carries its own `hats`/`hatColors` on the keeper object.
-  function awardHatTo(keeper, fromWx, fromWy) {
-    if (keeper === player2) {
+  function awardHatTo(keeper, fromWx, fromWy, color = '#5a3825') {
+    if (keeper && keeper.robot) {
+      if (keeper.alive && keeper.hats < MAX_HATS) {
+        keeper.hats++; keeper.hp = keeper.hats;
+        keeper.maxHp = Math.max(keeper.maxHp, keeper.hats);
+        keeper.hatColors.push(color);
+      }
+    } else if (keeper === player2) {
       if ((player2.hats || 0) < MAX_HATS) {
         player2.hats = (player2.hats || 0) + 1;
         if (!Array.isArray(player2.hatColors)) player2.hatColors = [];
-        player2.hatColors.push('#5a3825');
+        player2.hatColors.push(color);
         toast('Buddy grabbed a hat! Now ' + player2.hats, 1.6);
         toastGuest('You grabbed a hat! Now ' + player2.hats, 1.6);
       }
     } else {
       if (playerHats + pendingHatLandings.length < MAX_HATS) {
-        const color = '#5a3825';
         if (fromWx !== undefined) {
           // Defer the increment until the hat arc animation lands.
           spawnFlyHat(fromWx, fromWy, color);
@@ -1662,6 +1684,11 @@
   // carrying as a corpse rather than letting it leave the map.
   function onWolfKilled(w, killer, karmaSweep = false) {
     killer = killer || player;
+    if (killer.robot) { robotCreditKill(killer); player.kills = (player.kills || 0) + 1; }
+    if (w.ninja && w.ninjaPhase === 'raiding' && !w.ninjaHatDropped) {
+      w.ninjaHatDropped = true;
+      awardHatTo(killer, w.x, w.y, NINJA_STRAW_HAT_COLOR);
+    }
     if (w.sword) swordWolfSlain = true;
     // Killing a snatcher mid-flight saves the chicken: drop it alive where
     // the wolf/fox fell. No corpse — the player rescued it.
@@ -1766,7 +1793,7 @@
   }
 
   // Is this a cryptid the Cryptid Radar should pick up?
-  function isCryptid(w) { return !!(w.fox || w.sword || w.hatted || w.thing || w.hunterWolf); }
+  function isCryptid(w) { return !!(w.fox || w.sword || w.hatted || w.thing || w.hunterWolf || w.ninja); }
   // Fire the radar: alarm + start the antennas emitting for RADAR_EMIT_TIME.
   // Used both by the wolf scan and the player-2 cameo. Host / single-player
   // only so the guest's snapshot churn can't re-trigger it every frame.
@@ -1834,6 +1861,7 @@
 
   function hurtWolf(w, dmg, kx, ky, attacker) {
     if (!w.alive) return;
+    if (ninjaIsWatching(w)) { if (dmg > 0) provokeNinjaWolf(w); return; }
     // The boss takes capped, status-immune damage and never dies here
     // (bossTick decides when a side is beaten); no knockback either.
     if (w.boss) { bossTakeDamage(w, dmg); return; }
@@ -2019,6 +2047,11 @@
       gameOverMsg = 'Both keepers fell! ' + (isMobileMode ? 'Use the buttons below.' : 'Press Q for menu or F5 to restart.');
     }
   }
+  function protectRespawn(who) {
+    who.wolfHitT = RESPAWN_PROTECTION_SECONDS;
+    who.bulletHitT = RESPAWN_PROTECTION_SECONDS;
+  }
+
   // Used by the resurrect upgrade to bring a ghost back with a fresh stack.
   function reviveKeeper(who) {
     if (who === player && player.ghost) {
@@ -2027,6 +2060,7 @@
       hatColors.length = 0;
       for (let i = 0; i < 3; i++) hatColors.push('#5a3825');
       player.hurtT = 0;
+      protectRespawn(player);
       playBuddyResurrect();
       toast('You rose again! +3 hats', 2.6);
     } else if (who === player2 && player2.ghost) {
@@ -2034,6 +2068,7 @@
       player2.hats = 3;
       player2.hatColors = Array(3).fill('#5a3825');
       player2.hurtT = 0;
+      protectRespawn(player2);
       playBuddyResurrect();
       toast('Buddy rose again! +3 hats', 2.6);
     }
@@ -2050,10 +2085,11 @@
   // ghost and hat-armoured wolves while keeping drops and rescues intact.
   function killWolf(w, attacker, deferWaveCheck = false, karmaSweep = false) {
     if (!w.alive || w.boss || w.dpsDummy) return;
+    if (ninjaIsWatching(w)) { provokeNinjaWolf(w); return; }
     w.alive = false;
     w.hp = 0;
     kills++;
-    attacker.kills = (attacker.kills || 0) + 1;
+    if (!attacker.robot) attacker.kills = (attacker.kills || 0) + 1;
     onWolfKilled(w, attacker, karmaSweep);
     if (!w.thing && !tryWolfDisassemble(w)) corpses.push({ x: w.x, y: w.y, kind: w.fox ? 'fox' : 'wolf', t: 5 });
     if (w.fox) {
@@ -2085,6 +2121,7 @@
     }
     shake = Math.max(shake, 0.9);
     who.hurtT = 0;
+    who.lastKarmaRescueWave = wave;
     who.transcendStandT = 0;
     breakLastStand(who);
     playKarma();
@@ -2155,8 +2192,8 @@
     player.dying = false;
     player.downT = 0;
     player.ghost = false;
-    player.hurtT = 2.5;
-    player.wolfHitT = 2.5;
+    player.hurtT = 0;
+    protectRespawn(player);
     // Death may have landed mid-reload — drop the leftover reload state so
     // the revived keeper doesn't come back with a stuck skill-check bar.
     cancelReloadMinigame();
@@ -2333,7 +2370,8 @@
       else if (p.x > B) { p.x = B; p.vx = -Math.abs(p.vx); }
       if (p.y < -B) { p.y = -B; p.vy = Math.abs(p.vy); }
       else if (p.y > B) { p.y = B; p.vy = -Math.abs(p.vy); }
-    } else if (!inBounds(p.x, p.y)) return false;
+    // Shots can reach the outer trees even though keepers cannot walk there.
+    } else if (Math.abs(p.x) > HALF_MAP + 1 || Math.abs(p.y) > HALF_MAP + 1) return false;
     // ignoreWalls rounds (the rooftopper's, fired from a roof) sail straight
     // over stone — they'd otherwise bury themselves in the player's own wall.
     if (!p.ignoreWalls && stoneFenceBlocks(p.x, p.y)) {
@@ -2404,6 +2442,13 @@
       const bossBoost = w.boss ? BOSS_HIT_BONUS : 0; // big, easy-to-hit boss hitbox
       const hitRadius = (0.35 + slugBoost + bossBoost) * (w.size || 1);
       if (dist2(p.x, p.y, w.x, w.y) < hitRadius) {
+        if (ninjaIsWatching(w)) {
+          provokeNinjaWolf(w);
+          p.didHit = true;
+          if (p.hit) p.hit.add(w);
+          if (--p.pierce <= 0) return false;
+          continue;
+        }
         // The boss soaks pellets (capped DPS, immune to cold/hot) and never
         // dies on the normal kill path — bossTick decides when a side is beaten.
         if (w.boss) {
@@ -2444,7 +2489,7 @@
         w.hurtT = 0.12;
         // Cold Shot / Hot Shot: chill (slow + blue) or ignite (burn-over-time).
         if (p.cold) { const fresh = !(w.coldT > 0); w.coldT = p.coldDur || 3; if (fresh) playFreeze(); }
-        if (p.hot)  { w.burnT = p.hotDur || 3; if (!(w.burnTickT > 0)) w.burnTickT = BURN_TICK; }
+        if (p.hot)  { w.burnAttacker = p.robotRef || (p.shooter === 2 ? player2 : player); w.burnT = p.hotDur || 3; if (!(w.burnTickT > 0)) w.burnTickT = BURN_TICK; }
         if (w.hp <= 0) {
           w.alive = false;
           kills++;
@@ -2453,12 +2498,11 @@
           // or pad the scoreboard for the player.
           const hunterKill = p.shooter === 'hunter';
           const shooter = p.shooter === 2 ? player2 : player;
-          if (!hunterKill) shooter.kills = (shooter.kills || 0) + 1;
+          if (!hunterKill && !p.robotRef) shooter.kills = (shooter.kills || 0) + 1;
           // A robot's kill still credits the keeper who built it, and the
           // robot learns from it — that's the "training" in MK-n (see
           // robotCreditKill / robotTraining).
-          if (p.shooter === 'robot') robotCreditKill(p.robotRef);
-          onWolfKilled(w, shooter);
+          onWolfKilled(w, p.robotRef || shooter);
           // Late-game wolves sometimes fly apart instead of leaving a body.
       if (!w.thing && !tryWolfDisassemble(w)) corpses.push({ x: w.x, y: w.y, kind: w.fox ? 'fox' : 'wolf', t: 5 });
           if (w.fox && !hunterKill) {
@@ -2548,9 +2592,7 @@
       for (const r of robots) {
         if (!r.alive) continue;
         if (dist2(p.x, p.y, r.x, r.y) < 0.22) {
-          r.hp -= ROBOT_BULLET_DMG;
-          r.hurtT = 0.16;
-          if (r.hp <= 0) destroyRobot(r);
+          hurtRobot(r);
           return false;
         }
       }
@@ -2567,18 +2609,25 @@
       }
       return true;
     }
-    // Robot rounds stop here: they've already had their shot at the wolves and
-    // must not reach a keeper, a hunter or the flock. Returning true keeps the
-    // pellet alive so it flies on through and expires naturally.
-    if (robotShot) return true;
+    // A keeper's shots can cost a robot a hat only with friendly fire on.
+    if (keeperShot && gameOpts.friendlyFire) {
+      for (const r of robots) {
+        if (!r.alive || (p.hit && p.hit.has(r))) continue;
+        if (dist2(p.x, p.y, r.x, r.y) < 0.22) {
+          hurtRobot(r);
+          if (p.hit) p.hit.add(r);
+          if (--p.pierce <= 0) return false;
+        }
+      }
+    }
     // Friendly fire — pellets can knock hats off the OTHER keeper.
-    if (gameOpts.friendlyFire && player2.active) {
+    if (gameOpts.friendlyFire && (player2.active || robotShot)) {
       if (p.shooter !== 1 && !player.ghost &&
           dist2(p.x, p.y, player.x, player.y) < 0.18) {
         applyFriendlyFireHit(player, FRIENDLY_FIRE_HAT_CHANCE);
         return false;
       }
-      if (p.shooter !== 2 && !player2.ghost &&
+      if (p.shooter !== 2 && player2.active && !player2.ghost &&
           dist2(p.x, p.y, player2.x, player2.y) < 0.18) {
         applyFriendlyFireHit(player2, FRIENDLY_FIRE_HAT_CHANCE);
         return false;
@@ -2613,7 +2662,7 @@
         if (p.shooter === 2) {
           player2.chickensKilledThisWave++;
           player2.chickensShot++;
-        } else {
+        } else if (!robotShot) {
           chickensKilledByPlayer++;
           player.chickensShot++;
         }
@@ -2621,7 +2670,7 @@
         corpses.push({ x: c.x, y: c.y, kind: 'chicken', t: 4, frost: !!p.cold, fried: !!p.hot });
         playChickenDeath();
         explodeChickenMaybe(c);
-        toast('You killed a chicken! :(  fine at wave end', 1);
+        if (!robotShot) toast('You killed a chicken! :(  fine at wave end', 1);
         if (p.hit) p.hit.add(c);
         if (--p.pierce <= 0) return false;
       }

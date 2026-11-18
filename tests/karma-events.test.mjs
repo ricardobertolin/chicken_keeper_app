@@ -215,7 +215,7 @@ test('rescue applies to boss contact, parry dash and pup bites for player 2', ()
   }
 });
 
-test('transcendence needs personal Metaverse, zero karma and 30 continuous seconds of active Last Stand', () => {
+test('transcendence needs personal Metaverse, a recent rescue and 30 continuous seconds of active Last Stand', () => {
   for (const who of ['player', 'player2']) {
     const g = game(); const { run } = g;
     const levels = who === 'player' ? 'upgradeLevels' : 'upgradeLevels2';
@@ -224,7 +224,7 @@ test('transcendence needs personal Metaverse, zero karma and 30 continuous secon
     assert.equal(run(`${who}.transcendentKarma`), false);
     run(`${levels}.metaverse = 1; ${who}.karma = 1; updateTranscendentKarma(${who}, 30)`);
     assert.equal(run(`${who}.transcendentKarma`), false);
-    run(`${who}.karma = 0; updateTranscendentKarma(${who}, 20); breakLastStand(${who});
+    run(`${who}.lastKarmaRescueWave = wave; updateTranscendentKarma(${who}, 20); breakLastStand(${who});
       updateTranscendentKarma(${who}, 30)`);
     assert.equal(run(`${who}.transcendentKarma`), false);
     run(`${who}.lastStandIdleT = LAST_STAND_CHARGE; updateTranscendentKarma(${who}, 29.9)`);

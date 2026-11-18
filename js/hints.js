@@ -25,6 +25,8 @@
     'Reloading is harder when you are running. Try planting your boots first.',
     'You can see behind the coops if you look at the farm like a builder.',
 
+    'A fallen buddy can find their way back if another keeper is still standing.',
+
     // --- Karma, chickens and the flock ---
     'Every chicken you save, and every one you shoot, moves your karma.',
     'Karma pushed far enough either way starts handing out unnatural powers...',
@@ -52,6 +54,8 @@
     'Maybe ghosts really can possess things...',
     'I could swear I saw Buddy out there — and there was nobody else on this site. Hmm.',
 
+    'Disturb the eyes hiding in the trees, and tomorrow a masked thief may come for your chickens.',
+
     // --- Weather ---
     'When it snows, Christmas comes early, and the emptier your pockets the bigger the gift.',
     'The pack doesn\'t care for rain. Whatever\'s under that fur, it doesn\'t take to water.',
@@ -63,6 +67,8 @@
     'Show enough strength and more hunters will pitch camp on your land.',
     'Missiles are about the only thing that will knock a sniper off your roof.',
     'A well-upgraded scarecrow earns its keep after dark.',
+
+    'Guard a robot while it reboots, and mind where it points that gun in the rain.',
 
     // --- Guns and gear ---
     'With this oil my gun will never jam on me again!',

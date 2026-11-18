@@ -65,7 +65,7 @@
       <!-- Keep this in lockstep with VERSION in sw.js — they drifted apart once
            (title said v0.9.3 while the cache was on v0.9.5) and the visible
            number is the only one players can report back to you. -->
-      <p class="menu-version">v0.16.5 <span class="by">·  made by ricardobertolin</span></p>
+      <p class="menu-version">v0.16.6 <span class="by">·  made by ricardobertolin</span></p>
     </section>
 
     <!-- How to play — controls -->
@@ -169,7 +169,10 @@
 
 <!-- DEBUG PANEL — remove for production -->
 <div id="debug">
-  <button id="debug-toggle" type="button">🛠 DEBUG</button>
+  <div id="debug-heading">
+    <button id="debug-toggle" type="button">🛠 DEBUG</button>
+    <span id="debug-karma" aria-live="polite"></span>
+  </div>
   <div id="debug-body">
     <div class="debug-row">
       <span class="debug-label">Money</span>
@@ -185,11 +188,13 @@
       <button data-debug="add-hat">Add hat</button>
       <button data-debug="add-hat-leprechaun">Leprechaun hat</button>
       <button data-debug="add-hat-witch">Witch hat</button>
+      <button data-debug="add-hat-ninja" title="Add the ninja wolf's conical straw hat to the selected keeper">Conical straw hat</button>
       <button data-debug="grow-mustache">Grow mustache</button>
       <button data-debug="reset-mustache">Reset mustache</button>
       <button data-debug="toggle-immortal" id="debug-immortal-btn">Immortal: OFF</button>
       <button data-debug="toggle-autocrit" id="debug-autocrit-btn">Auto reload+crit: OFF</button>
       <button data-debug="resurrect-both">Resurrect both</button>
+      <button data-debug="karma-transcend" title="Immediately transcend the selected keeper's karma for testing">Transcend Karma</button>
       <button data-debug="force-night">Force Night of the Wolf</button>
       <button data-debug="force-rain" title="Next wave is a downpour — the pack short-circuits">Force Rain</button>
       <button data-debug="force-snow" title="Next wave is a blizzard — everything slows, cold/hot shots bite harder">Force Snow</button>

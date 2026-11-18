@@ -137,8 +137,22 @@
   // the eyes show through without the wolf becoming a light source. Skipped
   // when a building hides the wolf so eyes don't float in front of coops/trees.
   function drawWolfEyesOverlay() {
+    drawNinjaForestHints();
+    // Robot lenses use the same overlay pass as wolf eyes, above the darkness.
+    for (const r of robots) {
+      if (!r.alive || isOccludedByBuilding(r.x, r.y)) continue;
+      const p = worldToScreen(r.x, r.y), cy = p.y + TILE_H / 2;
+      ctx.save();
+      ctx.translate(p.x, cy); ctx.scale(0.9, 0.9); ctx.translate(-p.x, -cy);
+      if (r.bootT > 0) ctx.globalAlpha *= 0.25 + 0.5 * Math.abs(Math.sin(Date.now() * 0.008));
+      ctx.fillStyle = robotEyesRed(r) ? '#ff3333' : '#57caff';
+      ctx.shadowColor = ctx.fillStyle; ctx.shadowBlur = 3;
+      ctx.fillRect(p.x - 4, cy - 31, 2.8, 2);
+      ctx.fillRect(p.x + 1.2, cy - 31, 2.8, 2);
+      ctx.restore();
+    }
     for (const w of wolves) {
-      if (!w.alive || w.fox) continue;
+      if (!w.alive || (w.fox && !w.turncoat) || ninjaIsWatching(w)) continue;
       if (isOccludedByBuilding(w.x, w.y)) continue;
       const s = w.size || 1;
       const p = worldToScreen(w.x, w.y);
@@ -906,19 +920,9 @@
       ctx.fillText('!', cx, cy - 40 + Math.sin(tt * 12));
       ctx.restore();
     }
-    // HP pip readout — overhead dots that drain as a hunter takes hits.
-    // Hidden in normal play; only shown when the debug panel is unlocked.
-    if (debugUnlocked) {
-      const pipFull = Math.max(1, h.maxHp || HUNTER_HP);
-      const pipR = 1.5;
-      const totalW = pipFull * (pipR * 2 + 1) - 1;
-      for (let i = 0; i < pipFull; i++) {
-        const px = cx - totalW / 2 + i * (pipR * 2 + 1) + pipR;
-        ctx.fillStyle = (i < h.hp) ? '#6ad068' : '#5a2a2a';
-        ctx.beginPath();
-        ctx.arc(px, cy - 45, pipR, 0, Math.PI * 2);
-        ctx.fill();
-      }
+    // Health is readable up close without cluttering distant allies.
+    if (!downed && allyReadoutVisible(h)) {
+      drawAllyPips(cx, cy - 45, h.maxHp || HUNTER_HP, h.hp);
     }
   }
 
@@ -994,6 +998,7 @@
     // Invalidate any in-flight spawn timeouts from the previous run.
     runGen++;
     pendingSpawns = 0;
+    pendingNinjaReturn = null;
     // Wave scheduling is reset here too (belt-and-suspenders with resetWorld):
     // a fresh run must always let waves auto-start again. In particular
     // waveAutoStartPaused is a debug toggle that otherwise persists across every
@@ -1064,7 +1069,9 @@
     player2.karma = 0;
     player2.hatColors = [];
     player.transcendentKarma = false; player.transcendStandT = 0;
+    player.lastKarmaRescueWave = null;
     player2.transcendentKarma = false; player2.transcendStandT = 0;
+    player2.lastKarmaRescueWave = null;
     player2.chickensKilledThisWave = 0;
     player.bulletHitT = 0;
     player2.bulletHitT = 0;

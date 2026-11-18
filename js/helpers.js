@@ -1170,3 +1170,9 @@
     return !!(option && !metaverseOn() && LOCKS_OUT[option.id] && ((levels || upgradeLevels)[option.id] || 0) === 0);
   }
 
+  function allyReadoutVisible(ally) {
+    const range2 = ALLY_READOUT_RANGE * ALLY_READOUT_RANGE;
+    return (!player.ghost && dist2(ally.x, ally.y, player.x, player.y) <= range2)
+      || (player2.active && !player2.ghost && dist2(ally.x, ally.y, player2.x, player2.y) <= range2);
+  }
+
