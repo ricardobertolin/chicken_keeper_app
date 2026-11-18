@@ -324,15 +324,14 @@
   // wolf-bites-keeper bookkeeping so death/ghost transitions still trigger.
   // A short debounce window keeps a single shotgun blast (multiple pellets
   // landing on the same frame) from removing more than one hat.
-  // Hidden survivability: a flat ~10% chance to shrug off a hit without losing a
-  // hat, nudged by karma — +0.1% per point of good karma, +0.2% per point of bad
-  // karma (so a run going badly quietly earns a little more cushion). Karma is
-  // capped at ±100, so the chance tops out at 20% (good) / 30% (bad). No toast,
-  // no tell — the keeper just keeps the hat.
+  // Independent rolls on a registered hit: transcendence can clear the pack
+  // even when the keeper avoids losing a hat. No popup accompanies either.
   function keeperDodgesHatLoss(keeper) {
-    const k = (keeper === player) ? player.karma : (keeper.karma || 0);
-    const bonus = k >= 0 ? k * 0.001 : (-k) * 0.002;
-    return Math.random() < (0.10 + bonus);
+    const k = keeper.karma || 0;
+    const bonus = k >= 0 ? k * 0.002 : (-k) * 0.004;
+    const dodged = Math.random() < (keeper.transcendentKarma ? 0.75 : 0.10 + bonus);
+    if (keeper.transcendentKarma && Math.random() < 0.25) karmaWolfSweep(keeper);
+    return dodged;
   }
 
   // `hatChance` (optional) is the odds this hit actually costs a hat. Buddy-on-
@@ -341,7 +340,7 @@
   function applyFriendlyFireHit(target, hatChance) {
     if (target.ghost) return;
     if (target.bulletHitT > 0) return; // already debited by an earlier pellet this blast
-    target.bulletHitT = 0.18;          // ~one blast window
+    target.bulletHitT = 0.18 * (target.transcendentKarma ? 2 : 1);
     shake = Math.max(shake, 0.18);
     target.hurtT = 0.22;
     playKeeperHit();
@@ -356,10 +355,11 @@
       hatColors.pop();
       onHatLost(lost);
       if (playerHats <= 0) {
-        if (!tryKarmaResurrect()) killKeeper(player, 'host', 'friendly fire');
+        killKeeper(player, 'host', 'friendly fire');
       }
     } else if (target === player2) {
       player2.hats--;
+      if (Array.isArray(player2.hatColors)) player2.hatColors.pop();
       if (player2.hats <= 0) {
         killKeeper(player2, 'guest', 'friendly fire');
       }
@@ -372,7 +372,7 @@
   function applyWolfBulletHit(target) {
     if (target.ghost) return;
     if (target.bulletHitT > 0) return;
-    target.bulletHitT = 0.18;
+    target.bulletHitT = 0.18 * (target.transcendentKarma ? 2 : 1);
     shake = Math.max(shake, 0.18);
     target.hurtT = 0.22;
     playKeeperHit();
@@ -385,10 +385,11 @@
       hatColors.pop();
       onHatLost(lost);
       if (playerHats <= 0) {
-        if (!tryKarmaResurrect()) killKeeper(player, 'host', 'shot by a wolf');
+        killKeeper(player, 'host', 'shot by a wolf');
       }
     } else if (target === player2) {
       player2.hats--;
+      if (Array.isArray(player2.hatColors)) player2.hatColors.pop();
       if (player2.hats <= 0) {
         killKeeper(player2, 'guest', 'shot by a wolf');
       }
@@ -998,6 +999,11 @@
   // booby-trapped payload is the thing that bites the player; see
   // openSupplyCrate.)
   function detonateSoldierChicken(c) {
+    if (c.soldierDetonated) return;
+    c.soldierDetonated = true;
+    // Count the death before the blast can clear the wave. killChicken also
+    // calls this on an enemy kill; the guard prevents a second detonation.
+    killChicken(c, true);
     spawnBlast(c.x, c.y);
     spawnSmoke(c.x, c.y, 8);
     spawnScorch(c.x, c.y);
@@ -1011,14 +1017,7 @@
       const m = Math.hypot(dx, dy) || 1;
       hurtWolf(w, SOLDIER_BLAST_DMG, (dx / m) * 0.38, (dy / m) * 0.38);
     }
-    // Forced: this is the bird ending ITSELF, so the crate shield must not
-    // veto it — an unforced call left a shielded soldier alive to detonate
-    // again on the next frame. Routed through killChicken like the worker's
-    // fence-rebuild sacrifice, so the wave's death tally treats both the same
-    // way. NOTE that means a detonating soldier counts as a chicken lost for
-    // the bonus-pick roll.
-    killChicken(c, true);
-    checkWaveDefended(); // the blast may have cleared the last wolf
+    // hurtWolf checks wave completion whenever the blast kills a wolf.
   }
 
   // Fat Chickens at max tier: a slain chicken may burst, blasting nearby
@@ -1160,9 +1159,10 @@
       playerHats--;
       hatColors.pop();
       onHatLost(lost);
-      if (playerHats <= 0) { if (!tryKarmaResurrect()) killKeeper(player, 'host', 'wolf'); }
+      if (playerHats <= 0) killKeeper(player, 'host', 'wolf');
     } else if (keeper === player2) {
       player2.hats--;
+      if (Array.isArray(player2.hatColors)) player2.hatColors.pop();
       if (player2.hats <= 0) killKeeper(player2, 'guest', 'wolf');
     }
   }

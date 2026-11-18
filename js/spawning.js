@@ -571,11 +571,34 @@
     }
     return null;
   }
+
+  // Find the first landed crate along a shot's path. Sweeping the whole step
+  // keeps fast rounds from skipping straight over a crate between frames.
+  function supplyCrateAlongSegment(x1, y1, x2, y2, radius) {
+    let best = null, nearest = Infinity;
+    const dx = x2 - x1, dy = y2 - y1;
+    const len2 = dx * dx + dy * dy || 1;
+    for (const cr of supplyCrates) {
+      if (cr.para || cr.landT > 0 || cr.opened) continue;
+      if (segmentDist2(x1, y1, x2, y2, cr.x, cr.y) >= radius * radius) continue;
+      const along = clamp(((cr.x - x1) * dx + (cr.y - y1) * dy) / len2, 0, 1);
+      if (along < nearest) { nearest = along; best = cr; }
+    }
+    return best;
+  }
+
+  function hurtCratesAlongBeam(x1, y1, x2, y2, dmg, shooter, hit = new Set()) {
+    for (const cr of supplyCrates.slice()) {
+      if (hit.has(cr) || segmentDist2(x1, y1, x2, y2, cr.x, cr.y) >= 0.55 * 0.55) continue;
+      if (hurtSupplyCrate(cr, dmg, shooter)) hit.add(cr);
+    }
+  }
   // Break it open and roll what was inside. The roll happens HERE rather than
   // at drop time so nothing about the crate on the ground can tell the player
   // whether it's worth opening — that gamble is the whole point of making them
   // shoot it.
   function openSupplyCrate(cr, shooter) {
+    if (cr.opened) return;
     cr.opened = true;
     const i = supplyCrates.indexOf(cr);
     if (i >= 0) supplyCrates.splice(i, 1);
@@ -601,8 +624,8 @@
       return;
     }
     if (roll < CRATE_PAYLOAD_BOOM + CRATE_PAYLOAD_HATS) {
-      // A hat pack — same three hats, same rare-colour rolls as the shop
-      // version, but free, and they ARC ONTO THE KEEPER'S HEAD rather than
+      // One hat or a three-hat pack, with the shop's rare-colour rolls, free.
+      // They ARC ONTO THE KEEPER'S HEAD rather than
       // appearing on the stack. Same flight the hatted-wolf drop uses: a
       // flyHat for the visible arc, plus a pendingHatLanding that actually
       // credits the hat when the arc lands.
@@ -612,11 +635,12 @@
       // is fine for something bought from a shared wallet, but a guest
       // shooting a crate and watching the HOST get the hats reads as broken.
       const to = hatRecipientFor(shooter);
+      const count = Math.random() < CRATE_SINGLE_HAT_CHANCE ? 1 : 3;
       const held = (to === player2 && player2.active)
         ? (player2.hats || 0)
         : playerHats + pendingHatLandings.length;
       let got = 0;
-      for (let n = 0; n < 3 && held + got < MAX_HATS; n++) {
+      for (let n = 0; n < count && held + got < MAX_HATS; n++) {
         let col = '#5a3825';
         if (to === player2 && player2.active) {
           col = GUEST_HAT_COLOR;
@@ -768,6 +792,7 @@
     if (!force && (c.savedT || 0) > 0) return;
     c.alive = false;
     chickenDeathsThisWave++;
+    if (c.soldier) detonateSoldierChicken(c);
   }
 
   function spawnChicken(coop, silent = false) {
@@ -1896,32 +1921,43 @@
     }
   }
 
-  // Does `kind` fire this wave? Deliberately the same gate Night of the Wolf
-  // uses: inside the pre-50 band a capped per-wave roll (steepened by each
-  // resurrection, like the night), past 50 one pre-rolled wave per 5-wave
-  // block. Never on the boss wave, debug force included.
-  function weatherRollFor(kind) {
-    const st = weatherEvents[kind];
-    if (wave === BOSS_WAVE) return false;
-    // The wave straight after FANGUS is a breather: the fight already ends on
-    // a cutscene and a sky fade, and opening the very next round in a downpour
-    // trampled all of that.
-    if (wave === BOSS_WAVE + 1) return false;
-    if (st.force) { st.force = false; return true; }
-    if (wave >= WEATHER_MIN_WAVE && wave <= WEATHER_MAX_WAVE) {
-      if (st.count >= WEATHER_MAX_PER_RUN) return false;
-      return Math.random() < Math.min(1, WEATHER_PER_WAVE_CHANCE * Math.pow(2, resurrectCount));
+  // All three events obey the quiet boss window, the post-snow rest day and
+  // a rolling five-wave cooldown, including debug-forced events.
+  function eventRollFor(kind) {
+    const isNight = kind === 'night';
+    const st = isNight ? nightEvent : weatherEvents[kind];
+    if (wave >= BOSS_WAVE - 2 && wave <= BOSS_WAVE + 1) return false;
+    if (snowLeftover > 0 || wave - st.lastWave < EVENT_COOLDOWN_WAVES) return false;
+    const forced = isNight ? nightOfWolfDebugForce : st.force;
+    if (forced) {
+      if (isNight) nightOfWolfDebugForce = false;
+      else st.force = false;
+      return true;
     }
-    if (wave > WEATHER_MAX_WAVE) {
+    const minWave = isNight ? NIGHT_OF_WOLF_MIN_WAVE : WEATHER_MIN_WAVE;
+    const maxWave = isNight ? NIGHT_OF_WOLF_MAX_WAVE : WEATHER_MAX_WAVE;
+    if (wave >= minWave && wave <= maxWave) {
+      const count = isNight ? nightOfWolfCount : st.count;
+      const cap = isNight ? NIGHT_OF_WOLF_MAX_PER_RUN : WEATHER_MAX_PER_RUN;
+      const chance = isNight ? NIGHT_OF_WOLF_PER_WAVE_CHANCE : WEATHER_PER_WAVE_CHANCE;
+      return count < cap && Math.random() < Math.min(1, chance * Math.pow(2, resurrectCount));
+    }
+    if (wave > maxWave) {
       const blockStart = Math.floor((wave - 1) / 5) * 5 + 1;
       if (st.blockStart !== blockStart) {
         st.blockStart = blockStart;
-        st.nextWave = blockStart + Math.floor(Math.random() * 5);
+        // Only schedule a future/remaining eligible wave. In particular, the
+        // first endless block cannot accidentally select the excluded wave 51.
+        const first = Math.max(wave, blockStart, st.lastWave + EVENT_COOLDOWN_WAVES);
+        const remaining = blockStart + 5 - first;
+        st.nextWave = remaining > 0 ? first + Math.floor(Math.random() * remaining) : -1;
       }
       return wave === st.nextWave;
     }
     return false;
   }
+
+  function weatherRollFor(kind) { return eventRollFor(kind); }
 
   // Pick this wave's weather. A night wave stays clear — stacking a blizzard on
   // top of the darkness buries the one visual cue the night is built around.
@@ -1940,10 +1976,12 @@
       if (pick === 'rain') {
         weather = 'rain';
         weatherEvents.rain.count++;
+        weatherEvents.rain.lastWave = wave;
         toast('A downpour rolls in — the pack is shorting out!', 3.2);
       } else if (pick === 'snow') {
         weather = 'snow';
         weatherEvents.snow.count++;
+        weatherEvents.snow.lastWave = wave;
         giveSnowGift();
       }
     }
@@ -2124,33 +2162,14 @@
     // debug skip advances them for the bypassed waves too, paid out silently.
     // Routed through addSharedMoney so Fast mode's 5× (and the co-op split) apply.
     if (skipCount > 1) addSharedMoney(growFarms(skipCount - 1));
-    // Night of the Wolf — flip the wave dark + buff wolves. Triggered by:
-    //  (a) the debug force flag,
-    //  (b) a probabilistic roll within the pre-50 band, capped to 3/run, or
-    //  (c) the pre-rolled wave inside the current post-50 5-wave block.
+    // Night takes priority over weather, but shares its eligibility rules.
     nightOfWolf = false;
-    let triggerNight = nightOfWolfDebugForce;
-    if (wave === BOSS_WAVE) triggerNight = false; // the boss wave is never night
-    if (!triggerNight && wave !== BOSS_WAVE) {
-      if (wave >= NIGHT_OF_WOLF_MIN_WAVE && wave <= NIGHT_OF_WOLF_MAX_WAVE) {
-        if (nightOfWolfCount < NIGHT_OF_WOLF_MAX_PER_RUN &&
-            Math.random() < Math.min(1, NIGHT_OF_WOLF_PER_WAVE_CHANCE * Math.pow(2, resurrectCount))) {
-          triggerNight = true;
-        }
-      } else if (wave > NIGHT_OF_WOLF_MAX_WAVE) {
-        // Pre-roll one Night per 5-wave block: 51-55, 56-60, …
-        const blockStart = Math.floor((wave - 1) / 5) * 5 + 1;
-        if (lateNightBlockStart !== blockStart) {
-          lateNightBlockStart = blockStart;
-          nextLateNightWave = blockStart + Math.floor(Math.random() * 5);
-        }
-        if (wave === nextLateNightWave) triggerNight = true;
-      }
-    }
+    const triggerNight = eventRollFor('night');
     if (triggerNight) {
       nightOfWolf = true;
       nightOfWolfDebugForce = false;
       nightOfWolfCount++;
+      nightEvent.lastWave = wave;
       toast('Night of the Wolf — survive the dark!', 3.2);
       playNightOfWolfStart();
     }
@@ -2529,24 +2548,8 @@
       toast('Night of the Wolf survived — payout doubled!', 3.2);
     }
     endWeather(); // the rain/snow lifts with the wave, and says so
-    // Per-player karma drift — each keeper's tint reacts to their own kills,
-    // not the buddy's. The legacy `karma` global mirrors player1's so older
-    // call sites (Karma Resurrect, debug buttons) keep working.
-    // Karma can now climb past ±KARMA_MAX (only the hard cap bounds it). The
-    // resurrect still fires at the ±KARMA_MAX threshold and resets karma to 0.
-    if (chickensKilledByPlayer > 0) {
-      player.karma = Math.max(-KARMA_HARD_CAP, player.karma - 1);
-    } else {
-      player.karma = Math.min(KARMA_HARD_CAP, player.karma + 1);
-    }
-    karma = player.karma;
-    if (player2.active) {
-      if ((player2.chickensKilledThisWave || 0) > 0) {
-        player2.karma = Math.max(-KARMA_HARD_CAP, player2.karma - 1);
-      } else {
-        player2.karma = Math.min(KARMA_HARD_CAP, player2.karma + 1);
-      }
-    }
+    advanceKarma(player, chickensKilledByPlayer);
+    if (player2.active) advanceKarma(player2, player2.chickensKilledThisWave || 0);
     chickensKilledByPlayer = 0;
     player2.chickensKilledThisWave = 0;
     // Wrap up the hunter camp: if the whole crew is down OR they were short-paid
@@ -2602,7 +2605,7 @@
   // and friendly-fires any hunters it sweeps (unless `homing` — the bending
   // homing-laser spares allies). Used by the Laser Bullets upgrade — drops the
   // pellet system and shoots like a ranged wolf.
-  function applyPlayerBeam(x1, y1, x2, y2, dmg, shooter, homing) {
+  function applyPlayerBeam(x1, y1, x2, y2, dmg, shooter, homing, cratesHit) {
     const shooterObj = shooter === 2 ? player2 : player;
     const sLvls = lvlsFor(shooterObj);
     // Laser beam gets a bit thicker with every Laser Bullets tier — at max
@@ -2613,6 +2616,7 @@
     // Rocket Launcher also owned? Each wolf the beam burns rolls the rocket
     // chance and detonates a blast at that wolf — so the laser keeps its boom.
     const rocketChance = (sLvls.rocket > 0) ? tableAtFor(shooterObj, 'rocket') : 0;
+    hurtCratesAlongBeam(x1, y1, x2, y2, dmg, shooter, cratesHit);
     // A beam sweeping across the buddy cameo spooks it into a ghost too.
     if (p2Cameo && !p2Cameo.ghost && segmentDist2(x1, y1, x2, y2, p2Cameo.x, p2Cameo.y) < t2) {
       spookCameo();
@@ -2702,6 +2706,8 @@
     const turnPerStep = 0.18 + hl * 0.06;        // sharper bend at higher level
     const seek2 = (HOMING_SEEK_BY_LVL[hl] || 6) * (HOMING_SEEK_BY_LVL[hl] || 6);
     const hitSet = new Set(); // don't keep yanking toward a wolf already swept
+    // A beam aimed at a crate reaches it before bending toward the pack.
+    let crateTarget = supplyCrateAlongSegment(x, y, x + dx * reach, y + dy * reach, 0.55);
     const B = HALF_MAP + SIZE_MATTERS_BOUNCE_PAD;
     let guard = 0;
     while (remaining > 0.05 && guard++ < 120) {
@@ -2711,6 +2717,11 @@
         if (!w.alive || w.fox || w.parachuting || hitSet.has(w)) continue;
         const d = dist2(w.x, w.y, x, y);
         if (d < bd) { bd = d; best = w; }
+      }
+      if (crateTarget && !hitSet.has(crateTarget)) {
+        best = crateTarget;
+        bd = dist2(best.x, best.y, x, y);
+        if (bd < 0.55 * 0.55) { hitSet.add(best); crateTarget = null; }
       }
       if (best) {
         if (bd < 0.7 * 0.7) hitSet.add(best); // close enough — release and seek the next
@@ -2866,8 +2877,9 @@
       const segs = useHoming
         ? tracedHomingBeam(bx1, by1, a, reach, lvls.homing, useBounce)
         : tracedBeamSegments(bx1, by1, a, reach, useBounce);
+      const cratesHit = new Set();
       for (const s of segs) {
-        applyPlayerBeam(s.x1, s.y1, s.x2, s.y2, dmgPer, shooterId, useHoming);
+        applyPlayerBeam(s.x1, s.y1, s.x2, s.y2, dmgPer, shooterId, useHoming, cratesHit);
         beams.push({ x1: s.x1, y1: s.y1, x2: s.x2, y2: s.y2, t: 0, life: 0.22, color: beamColor, yOff: 18 });
       }
     }
@@ -2892,6 +2904,7 @@
   // Taking a hit knocks the keeper out of the Last Stand pose — the crouch
   // charge (and any cloak) resets and has to be rebuilt by standing still.
   function breakLastStand(who) {
+    who.transcendStandT = 0;
     who.lastStandIdleT = 0;
     who.lastStandNoShootT = 0;
     who.lastStandStealth = false;
@@ -3116,9 +3129,11 @@
       const ph = pendingHatLandings[i];
       ph.delayT -= dt;
       if (ph.delayT > 0) continue;
-      // player2's hats are a plain count with no colour stack (see drawPlayer2).
       if (ph.to === player2 && player2.active) {
-        if ((player2.hats || 0) < MAX_HATS) player2.hats = (player2.hats || 0) + 1;
+        if ((player2.hats || 0) < MAX_HATS) {
+          player2.hats = (player2.hats || 0) + 1;
+          if (Array.isArray(player2.hatColors)) player2.hatColors.push(ph.color);
+        }
         pendingHatLandings.splice(i, 1);
       } else if (playerHats < MAX_HATS) {
         playerHats++;
@@ -3177,7 +3192,8 @@
     if (dt1 > 0 && !player.ghost && !player.dying) {
       const isGuestSelf = multiplayer && !isHost;
       _scatterHatsAt(player.x, player.y, player.dashX || 0, player.dashY || 0, dt1,
-        playerHats, i => isGuestSelf ? GUEST_HAT_COLOR : (hatColors[i] || '#5a3825'));
+        playerHats, i => isGuestSelf && (!hatColors[i] || hatColors[i] === '#5a3825')
+          ? GUEST_HAT_COLOR : (hatColors[i] || '#5a3825'));
     }
     // Player 2's dash scatter (buddy visible on both screens via synced dashT).
     const dt2 = player2.dashT || 0;
@@ -3186,7 +3202,10 @@
       const haveColors = Array.isArray(player2.hatColors) && player2.hatColors.length > 0;
       const fallbackHat = isHost ? GUEST_HAT_COLOR : '#5a3825';
       _scatterHatsAt(player2.x, player2.y, player2.dashX || 0, player2.dashY || 0, dt2,
-        hatCount, i => haveColors ? (player2.hatColors[i] || fallbackHat) : fallbackHat);
+        hatCount, i => {
+          const color = haveColors ? (player2.hatColors[i] || fallbackHat) : fallbackHat;
+          return isHost && color === '#5a3825' ? GUEST_HAT_COLOR : color;
+        });
     }
   }
 
@@ -3325,6 +3344,7 @@
   function applyBeamDamage(x1, y1, x2, y2) {
     const thickness = 0.32;
     const t2 = thickness * thickness;
+    hurtCratesAlongBeam(x1, y1, x2, y2, 1, 'wolf');
     if (!player.ghost && segmentDist2(x1, y1, x2, y2, player.x, player.y) < t2) {
       applyWolfBulletHit(player);
     }

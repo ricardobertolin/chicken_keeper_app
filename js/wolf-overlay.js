@@ -44,14 +44,16 @@
       const r = 48 + flash * 80;
       lights.push({ x: player.x, y: player.y, r, color: [255, 220, 150] });
       // Karma aura at the extremes — saintly blue at +KARMA_MAX, hellish red at -KARMA_MAX.
-      if (player.karma >= KARMA_MAX)       lights.push({ x: player.x, y: player.y, r: 46, color: [70, 150, 255] });
+      if (player.transcendentKarma)       lights.push({ x: player.x, y: player.y, r: 46, color: [180, 70, 255] });
+      else if (player.karma >= KARMA_MAX) lights.push({ x: player.x, y: player.y, r: 46, color: [70, 150, 255] });
       else if (player.karma <= -KARMA_MAX) lights.push({ x: player.x, y: player.y, r: 46, color: [255, 55, 45] });
     }
     if (player2.active && !player2.ghost) {
       const flash = player2.reloadT > 0 ? Math.min(1, player2.reloadT / 0.15) : 0;
       const r = 48 + flash * 80;
       lights.push({ x: player2.x, y: player2.y, r, color: [180, 210, 255] });
-      if (player2.karma >= KARMA_MAX)       lights.push({ x: player2.x, y: player2.y, r: 46, color: [70, 150, 255] });
+      if (player2.transcendentKarma)       lights.push({ x: player2.x, y: player2.y, r: 46, color: [180, 70, 255] });
+      else if (player2.karma >= KARMA_MAX) lights.push({ x: player2.x, y: player2.y, r: 46, color: [70, 150, 255] });
       else if (player2.karma <= -KARMA_MAX) lights.push({ x: player2.x, y: player2.y, r: 46, color: [255, 55, 45] });
     }
     for (const h of hunters) {
@@ -1060,6 +1062,9 @@
     karma = 0;
     player.karma = 0;
     player2.karma = 0;
+    player2.hatColors = [];
+    player.transcendentKarma = false; player.transcendStandT = 0;
+    player2.transcendentKarma = false; player2.transcendStandT = 0;
     player2.chickensKilledThisWave = 0;
     player.bulletHitT = 0;
     player2.bulletHitT = 0;
@@ -1123,6 +1128,7 @@
       weatherEvents[k].count = 0;
       weatherEvents[k].blockStart = -1;
       weatherEvents[k].nextWave = -1;
+      weatherEvents[k].lastWave = -5;
       weatherEvents[k].force = false;
     }
     _tileColorCache.clear(); // drop any snowed-over tiles
@@ -1130,8 +1136,9 @@
     resurrectLastWave = -99;
     bossWaveActive = false; bossPhase = ''; bossPhaseT = 0; bossSidesDone = 0;
     boss = null; bossTint = 0; endScreen = false;
-    lateNightBlockStart = 0;
-    nextLateNightWave = 0;
+    nightEvent.blockStart = -1;
+    nightEvent.nextWave = -1;
+    nightEvent.lastWave = -5;
     enemyIntroToastShown.fox = false;
     enemyIntroToastShown.bomb = false;
     enemyIntroToastShown.breeder = false;

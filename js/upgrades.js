@@ -20,6 +20,9 @@
     { id: 'spreadDown', tier: 1,  max: 5, note: 'Tighter cone, ends as a piercing slug' },
     { id: 'focusUp',    tier: 1,  max: 5, note: 'Wolves come for you, and fast' },
     { id: 'focusDown',  tier: 1,  max: 5, note: 'Wolves lose interest in you' },
+    { id: 'scroll', tier: 1, max: 1, supply: true,
+      note: 'Farm lore — bonus picks; all picks from wave 51',
+      held: () => hintsRead.size ? hintsRead.size + '/' + GAME_HINTS.length + ' read' : null },
     { id: 'woodFence',  tier: 1,  max: 5, note: 'Unlocks wooden fences' },
     // Consumables aren't a ladder, so instead of a level they carry held():
     // null until the player has actually bought one, then whatever the live
@@ -105,11 +108,6 @@
     { id: 'bribeWolves',   tier: 51, max: 1, supply: true, note: 'Pay the pack off for one lighter wave',
       held: () => bribePrice > 300 ? 'next costs $' + bribePrice : null },
     { id: 'metaverse',     tier: 51, max: 1, note: 'Dissolves every either/or lock — buy both sides' },
-    // Only ever offered on the bonus (third) pick, so the note says so — the
-    // tree is where a player goes to work out why they've never seen a card.
-    { id: 'scroll',        tier: 51, max: 1, supply: true,
-      note: 'Farm lore, one scroll at a time — bonus pick only',
-      held: () => hintsRead.size ? hintsRead.size + '/' + GAME_HINTS.length + ' read' : null },
   ];
   const SKILL_TREE_BY_ID = (() => {
     const m = Object.create(null);
@@ -596,6 +594,7 @@
           hatPrice += 5;
           hatsBought++;
           player2.hats = (player2.hats || 0) + 1;
+          if (Array.isArray(player2.hatColors)) player2.hatColors.push('#5a3825');
         } },
       weaponOil: { id: 'weaponOil', title: 'Weapon Oil',
         available: () => (l.rust === 0 || l.rust >= 5) && weaponOilCharges === 0,

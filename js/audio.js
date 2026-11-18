@@ -1,5 +1,17 @@
   // ---------- Audio (Web Audio synthesized) ----------
   let audioCtx = null;
+  const GAME_AUDIO_LEVEL = 0.80; // another 20% reduction for music and all effects
+  let gameAudioBus = null;
+  let gameAudioBusContext = null;
+  function audioOutput(ctx) {
+    if (!gameAudioBus || gameAudioBusContext !== ctx) {
+      gameAudioBus = ctx.createGain();
+      gameAudioBus.gain.value = GAME_AUDIO_LEVEL;
+      gameAudioBus.connect(ctx.destination);
+      gameAudioBusContext = ctx;
+    }
+    return gameAudioBus;
+  }
   function getAudio() {
     if (!audioCtx) {
       const AC = window.AudioContext || window.webkitAudioContext;
@@ -61,7 +73,7 @@
     musicBus = ctx.createGain();
     musicBus.gain.setValueAtTime(0, ctx.currentTime);
     musicLp.connect(musicBus);
-    musicBus.connect(ctx.destination);
+    musicBus.connect(audioOutput(ctx));
   }
 
   // Crossfade rather than cut, so a phase flip never clicks. Re-applied when
@@ -207,6 +219,8 @@
       case 'nightOfWolfEnd':   playNightOfWolfEnd(); break;
       case 'laser':            playLaser(); break;
       case 'magic':            playMagic(); break;
+      case 'karma':            playKarma(); break;
+      case 'buddyResurrect':   playBuddyResurrect(); break;
       case 'chickenPop':       playChickenPop(); break;
       case 'waveStart':        playWaveStart(); break;
       case 'keeperDeath':      playKeeperDeath(); break;
@@ -250,7 +264,7 @@
       g.gain.setValueAtTime(0.0001, now + off);
       g.gain.exponentialRampToValueAtTime(0.06, now + off + 0.005);
       g.gain.exponentialRampToValueAtTime(0.0001, now + off + 0.09);
-      osc.connect(g); g.connect(ctx.destination);
+      osc.connect(g); g.connect(audioOutput(ctx));
       osc.start(now + off); osc.stop(now + off + 0.1);
     });
   }
@@ -275,7 +289,7 @@
         g.gain.setValueAtTime(0.0001, now + off);
         g.gain.exponentialRampToValueAtTime(peak, now + off + 0.006);
         g.gain.exponentialRampToValueAtTime(0.0001, now + off + 0.55);
-        osc.connect(g); g.connect(ctx.destination);
+        osc.connect(g); g.connect(audioOutput(ctx));
         osc.start(now + off); osc.stop(now + off + 0.6);
       });
     });
@@ -291,7 +305,7 @@
     const ng = ctx.createGain();
     ng.gain.setValueAtTime(0.22, now);
     ng.gain.exponentialRampToValueAtTime(0.0001, now + dur);
-    src.connect(lp); lp.connect(ng); ng.connect(ctx.destination);
+    src.connect(lp); lp.connect(ng); ng.connect(audioOutput(ctx));
     src.start(now); src.stop(now + dur);
     // Coin shimmer tail — three quick high blips skipping upward.
     [0.13, 0.19, 0.25].forEach((off, i) => {
@@ -302,7 +316,7 @@
       g.gain.setValueAtTime(0.0001, now + off);
       g.gain.exponentialRampToValueAtTime(0.022, now + off + 0.004);
       g.gain.exponentialRampToValueAtTime(0.0001, now + off + 0.05);
-      osc.connect(g); g.connect(ctx.destination);
+      osc.connect(g); g.connect(audioOutput(ctx));
       osc.start(now + off); osc.stop(now + off + 0.06);
     });
   }
@@ -328,7 +342,7 @@
       const g = ctx.createGain();
       g.gain.setValueAtTime(0.3, now + off);
       g.gain.exponentialRampToValueAtTime(0.0001, now + off + dur);
-      src.connect(bp); bp.connect(g); g.connect(ctx.destination);
+      src.connect(bp); bp.connect(g); g.connect(audioOutput(ctx));
       src.start(now + off); src.stop(now + off + dur);
       // Woody thunk under each bite.
       const osc = ctx.createOscillator();
@@ -339,7 +353,7 @@
       og.gain.setValueAtTime(0.0001, now + off);
       og.gain.exponentialRampToValueAtTime(0.11, now + off + 0.005);
       og.gain.exponentialRampToValueAtTime(0.0001, now + off + 0.11);
-      osc.connect(og); og.connect(ctx.destination);
+      osc.connect(og); og.connect(audioOutput(ctx));
       osc.start(now + off); osc.stop(now + off + 0.12);
     });
     // The trunk hitting the ground — a low whump with a noise tail.
@@ -352,7 +366,7 @@
     g.gain.setValueAtTime(0.0001, fall);
     g.gain.exponentialRampToValueAtTime(0.2, fall + 0.02);
     g.gain.exponentialRampToValueAtTime(0.0001, fall + 0.36);
-    osc.connect(g); g.connect(ctx.destination);
+    osc.connect(g); g.connect(audioOutput(ctx));
     osc.start(fall); osc.stop(fall + 0.38);
   }
 
@@ -378,7 +392,7 @@
     const g = ctx.createGain();
     g.gain.setValueAtTime(0.42, now);
     g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
-    src.connect(bp); bp.connect(g); g.connect(ctx.destination);
+    src.connect(bp); bp.connect(g); g.connect(audioOutput(ctx));
     src.start(now); src.stop(now + dur);
     // Punch underneath so it lands with weight.
     const osc = ctx.createOscillator();
@@ -389,7 +403,7 @@
     og.gain.setValueAtTime(0.0001, now);
     og.gain.exponentialRampToValueAtTime(0.3, now + 0.005);
     og.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
-    osc.connect(og); og.connect(ctx.destination);
+    osc.connect(og); og.connect(audioOutput(ctx));
     osc.start(now); osc.stop(now + 0.22);
   }
 
@@ -411,7 +425,7 @@
       g.gain.setValueAtTime(0.0001, now);
       g.gain.exponentialRampToValueAtTime(i === 0 ? 0.11 : 0.07, now + 0.07);
       g.gain.exponentialRampToValueAtTime(0.0001, now + 0.9);
-      osc.connect(g); g.connect(ctx.destination);
+      osc.connect(g); g.connect(audioOutput(ctx));
       osc.start(now); osc.stop(now + 0.95);
     });
     // Airy hiss underneath — the body coming apart into nothing.
@@ -427,7 +441,7 @@
     const ng = ctx.createGain();
     ng.gain.setValueAtTime(0.07, now);
     ng.gain.exponentialRampToValueAtTime(0.0001, now + dur);
-    src.connect(bp); bp.connect(ng); ng.connect(ctx.destination);
+    src.connect(bp); bp.connect(ng); ng.connect(audioOutput(ctx));
     src.start(now); src.stop(now + dur);
   }
 
@@ -448,7 +462,7 @@
     g.gain.setValueAtTime(0.0001, now);
     g.gain.exponentialRampToValueAtTime(0.17, now + 0.02);
     g.gain.exponentialRampToValueAtTime(0.0001, now + 0.34);
-    osc.connect(lp); lp.connect(g); g.connect(ctx.destination);
+    osc.connect(lp); lp.connect(g); g.connect(audioOutput(ctx));
     osc.start(now); osc.stop(now + 0.36);
     // Body hitting the dirt a beat later.
     const at = now + 0.22;
@@ -463,7 +477,7 @@
     const ng = ctx.createGain();
     ng.gain.setValueAtTime(0.2, at);
     ng.gain.exponentialRampToValueAtTime(0.0001, at + dur);
-    src.connect(lp2); lp2.connect(ng); ng.connect(ctx.destination);
+    src.connect(lp2); lp2.connect(ng); ng.connect(audioOutput(ctx));
     src.start(at); src.stop(at + dur);
   }
 
@@ -487,7 +501,7 @@
     g.gain.setValueAtTime(0.0001, now);
     g.gain.exponentialRampToValueAtTime(0.11, now + 0.07);
     g.gain.exponentialRampToValueAtTime(0.0001, now + 0.62);
-    osc.connect(lp); lp.connect(g); g.connect(ctx.destination);
+    osc.connect(lp); lp.connect(g); g.connect(audioOutput(ctx));
     osc.start(now); osc.stop(now + 0.65);
     // Two confirmation blips once it's up.
     [0.56, 0.68].forEach((at, i) => {
@@ -498,7 +512,7 @@
       bg.gain.setValueAtTime(0.0001, now + at);
       bg.gain.exponentialRampToValueAtTime(0.08, now + at + 0.015);
       bg.gain.exponentialRampToValueAtTime(0.0001, now + at + 0.1);
-      b.connect(bg); bg.connect(ctx.destination);
+      b.connect(bg); bg.connect(audioOutput(ctx));
       b.start(now + at); b.stop(now + at + 0.12);
     });
   }
@@ -519,7 +533,7 @@
     g.gain.setValueAtTime(0.0001, now);
     g.gain.exponentialRampToValueAtTime(0.13, now + 0.008);
     g.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
-    osc.connect(bp); bp.connect(g); g.connect(ctx.destination);
+    osc.connect(bp); bp.connect(g); g.connect(audioOutput(ctx));
     osc.start(now); osc.stop(now + 0.14);
     // Short noise transient so it has some snap on small speakers.
     const dur = 0.07;
@@ -533,7 +547,7 @@
     const ng = ctx.createGain();
     ng.gain.setValueAtTime(0.10, now);
     ng.gain.exponentialRampToValueAtTime(0.0001, now + dur);
-    src.connect(hp); hp.connect(ng); ng.connect(ctx.destination);
+    src.connect(hp); hp.connect(ng); ng.connect(audioOutput(ctx));
     src.start(now); src.stop(now + dur);
   }
 
@@ -563,7 +577,7 @@
     bp.Q.setValueAtTime(0.8, now);
     const ng = ctx.createGain();
     ng.gain.setValueAtTime(0.26, now);
-    src.connect(bp); bp.connect(ng); ng.connect(ctx.destination);
+    src.connect(bp); bp.connect(ng); ng.connect(audioOutput(ctx));
     src.start(now); src.stop(now + dur);
     // Distant transport drone underneath.
     const osc = ctx.createOscillator();
@@ -574,7 +588,7 @@
     g.gain.setValueAtTime(0.0001, now);
     g.gain.exponentialRampToValueAtTime(0.10, now + 0.25);
     g.gain.exponentialRampToValueAtTime(0.0001, now + 1.2);
-    osc.connect(g); g.connect(ctx.destination);
+    osc.connect(g); g.connect(audioOutput(ctx));
     osc.start(now); osc.stop(now + 1.25);
   }
   // The crate touching down: a flat wooden slap with a short tail of grit.
@@ -593,7 +607,7 @@
     g.gain.setValueAtTime(0.0001, now);
     g.gain.exponentialRampToValueAtTime(0.20, now + 0.012);
     g.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
-    osc.connect(lp); lp.connect(g); g.connect(ctx.destination);
+    osc.connect(lp); lp.connect(g); g.connect(audioOutput(ctx));
     osc.start(now); osc.stop(now + 0.22);
     // Grit and dust thrown out from under it.
     const dur = 0.22;
@@ -607,7 +621,7 @@
     const ng = ctx.createGain();
     ng.gain.setValueAtTime(0.13, now);
     ng.gain.exponentialRampToValueAtTime(0.0001, now + dur);
-    src.connect(hp); hp.connect(ng); ng.connect(ctx.destination);
+    src.connect(hp); hp.connect(ng); ng.connect(audioOutput(ctx));
     src.start(now); src.stop(now + dur);
   }
   // A soldier chicken lighting its fuse — rising hiss plus a nervous cluck, so
@@ -635,7 +649,7 @@
     const ng = ctx.createGain();
     ng.gain.setValueAtTime(0.09, now);
     ng.gain.linearRampToValueAtTime(0.15, now + dur);
-    src.connect(bp); bp.connect(ng); ng.connect(ctx.destination);
+    src.connect(bp); bp.connect(ng); ng.connect(audioOutput(ctx));
     src.start(now); src.stop(now + dur);
     // One clipped cluck on top — it knows exactly what it signed up for.
     const osc = ctx.createOscillator();
@@ -647,27 +661,19 @@
     g.gain.setValueAtTime(0.0001, now);
     g.gain.exponentialRampToValueAtTime(0.09, now + 0.02);
     g.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
-    osc.connect(g); g.connect(ctx.destination);
+    osc.connect(g); g.connect(audioOutput(ctx));
     osc.start(now); osc.stop(now + 0.18);
   }
 
   // ---- Event ambience (weather + the night) -------------------------------
-  // A continuous bed that runs for as long as the event does. Looping buffers
-  // through filters, so it costs nothing per frame — only the master volume
-  // and a slow LFO move.
-  //
-  // Levels matter more here than for a one-shot: a bed has to sit UNDER
-  // gunfire and still be heard, but not fight it. The game's noise one-shots
-  // run around -19 dBFS rms; the beds sit a few dB below that. Rain is split
-  // into a bright spatter plus a low roar, the blizzard's wind keeps real
-  // energy in the 300-900 Hz band (a bed filtered down to 420 Hz is gone
-  // entirely on laptop speakers, which roll off hard below ~300), and the
-  // night is crickets over a soft air hiss.
+  // S1 snow bells with a very quiet wind bed; night has only sparse crickets.
+  // All layers loop for the event and share its fade, without frame timers.
   const AMB_LFO_HZ = 0.07;      // one swell roughly every 14s
-  // Per-kind master gain. Rain and snow were measured at ~-21 dBFS rms at
-  // 0.26 and asked to come down a little; the night bed sits lower again,
-  // since crickets are meant to be the quiet behind the wolves, not a wall.
-  const AMB_PEAK = { rain: 0.19, snow: 0.19, night: 0.26 };
+  const EVENT_AUDIO_LEVEL = 0.80;
+  const AMB_NOISE_LEVEL = 0.65;
+  const AMB_PEAK = { rain: 0.19 * EVENT_AUDIO_LEVEL,
+                     snow: 0.19 * EVENT_AUDIO_LEVEL,
+                     night: 0.19 * 1.6 * EVENT_AUDIO_LEVEL };
   let ambSrcs = [];             // every node needing a stop()
   let ambGain = null;           // master — the only thing faded
   let ambLfoDepth = null;       // LFO depth, faded along with the master
@@ -690,7 +696,7 @@
       // White noise needs none of this: any sample follows any other.
       const drift = (d[sz - 1] - d[0]) / (sz - 1);
       for (let i = 0; i < sz; i++) d[i] -= drift * i;
-    } else if (shape === 'crickets') {
+    } else if (shape === 'crickets' || shape === 'cricketsSparse') {
       // Crickets are rhythm, not texture, so the pattern is baked into the
       // buffer and the loop plays it back for free — no per-frame scheduling.
       // Each chirp is a short burst of a high tone, amplitude-modulated into
@@ -698,13 +704,14 @@
       // laid down at slightly different rates and pitches so they drift in and
       // out of phase with each other instead of chirping in lockstep.
       const rate = ctx.sampleRate;
-      const CRICKETS = 7;
+      const sparse = shape === 'cricketsSparse';
+      const CRICKETS = sparse ? 2 : 7;
       for (let n = 0; n < CRICKETS; n++) {
-        const freq = 3600 + Math.random() * 2200;   // chirp pitch
-        const every = 0.26 + Math.random() * 0.5;   // seconds between chirps
-        const burst = 0.028 + Math.random() * 0.02; // chirp length
+        const freq = sparse ? 2900 + Math.random() * 1100 : 3600 + Math.random() * 2200;
+        const every = sparse ? 2.1 + Math.random() * 1.2 : 0.26 + Math.random() * 0.5;
+        const burst = sparse ? 0.05 + Math.random() * 0.02 : 0.028 + Math.random() * 0.02;
         const trill = 190 + Math.random() * 120;    // the zik-zik flutter
-        const amp = 0.30 + Math.random() * 0.30;
+        const amp = sparse ? 0.22 + Math.random() * 0.18 : 0.30 + Math.random() * 0.30;
         const phase = Math.random() * every;
         for (let t = phase; t < secs; t += every) {
           const start = Math.floor(t * rate);
@@ -722,7 +729,9 @@
       }
       // A whisper of night air underneath so the gaps between chirps aren't
       // digital silence.
-      for (let i = 0; i < sz; i++) d[i] += (Math.random() * 2 - 1) * 0.05;
+      if (!sparse) {
+        for (let i = 0; i < sz; i++) d[i] += (Math.random() * 2 - 1) * 0.05;
+      }
     } else {
       for (let i = 0; i < sz; i++) {
         let v = Math.random() * 2 - 1;
@@ -740,7 +749,8 @@
     // makes a short loop audible as a repeating pulse, and a cricket pattern
     // needs room before the ear starts recognising the bar. Plain hiss hides
     // its own seam.
-    src.buffer = ambNoiseBuffer(ctx, shape === 'white' ? 2.0 : shape === 'crickets' ? 6.0 : 4.0, shape);
+    src.buffer = ambNoiseBuffer(ctx, shape === 'white' ? 2.0
+      : shape === 'cricketsSparse' ? 12.0 : shape === 'crickets' ? 6.0 : 4.0, shape);
     src.loop = true;
     const f = ctx.createBiquadFilter();
     f.type = type;
@@ -752,6 +762,53 @@
     src.start();
     ambSrcs.push(src);
   }
+
+  // Snow bells, baked once at 22 kHz into a stereo loop. Wrapped tails
+  // continue across the seam and share the ambience fade/stop.
+  const ambChimeBuffers = new Map();
+  function ambChimeBuffer(ctx, kind) {
+    if (kind !== 'snow') return null;
+    const rate = Math.min(ctx.sampleRate, 22050);
+    const key = kind + ':' + rate;
+    if (ambChimeBuffers.has(key)) return ambChimeBuffers.get(key);
+    const seconds = 21.6;
+    const size = Math.round(rate * seconds);
+    const buffer = ctx.createBuffer(2, size, rate);
+    const left = buffer.getChannelData(0), right = buffer.getChannelData(1);
+    function bell(at, frequency, volume, decay, pan) {
+      const l = Math.cos((pan + 1) * Math.PI / 4), r = Math.sin((pan + 1) * Math.PI / 4);
+      for (const [ratio, strength, tail] of [[1,1,1], [2.01,0.26,0.65], [2.76,0.12,0.40], [4.07,0.05,0.23]]) {
+        const duration = decay * tail, peak = volume * strength;
+        const slope = Math.log(0.00001 / peak) / (duration - 0.008);
+        for (let i = 0; i < Math.ceil(duration * rate); i++) {
+          const t = i / rate;
+          const env = t < 0.008 ? peak * t / 0.008 : peak * Math.exp(slope * (t - 0.008));
+          const value = Math.sin(2 * Math.PI * frequency * ratio * t) * env;
+          const index = (Math.round(at * rate) + i) % size;
+          left[index] += value * l; right[index] += value * r;
+        }
+      }
+    }
+    [783.99, 987.77, 1174.66, 987.77, 1318.51, 1174.66].forEach((note, i) => {
+      bell(2 + i * 3.6, note, 0.046, 3.2, Math.sin(i * 2) * 0.35);
+      if (i % 3 === 2) bell(2 + i * 3.6 + 0.38, 1567.98, 0.018, 2.6, -0.25);
+    });
+    ambChimeBuffers.set(key, buffer);
+    return buffer;
+  }
+
+  function ambChimes(ctx, master, kind) {
+    const buffer = ambChimeBuffer(ctx, kind);
+    if (!buffer) return;
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.loop = true;
+    const gain = ctx.createGain();
+    gain.gain.value = 1 / 0.19; // convert the demo's bell level to this master bus
+    src.connect(gain); gain.connect(master); src.start();
+    ambSrcs.push(src);
+  }
+
   function startAmbience(kind) {
     if (ambKind === kind) return;
     const ctx = getAudio();
@@ -765,22 +822,23 @@
     master.gain.setValueAtTime(0.0001, now);
     // Fade in under the black wipe rather than slamming on.
     master.gain.linearRampToValueAtTime(peak, now + 1.2);
-    master.connect(ctx.destination);
+    master.connect(audioOutput(ctx));
     ambGain = master;
+    const noise = ctx.createGain();
+    const noiseLevel = kind === 'rain' ? 1 : AMB_NOISE_LEVEL * (kind === 'snow' ? 0.5 : 1);
+    noise.gain.setValueAtTime(noiseLevel, now);
+    noise.connect(master);
     if (kind === 'rain') {
-      ambLayer(ctx, master, 'white', 'highpass', 1500, 0.7, 0.85); // spatter on the roofs
-      ambLayer(ctx, master, 'white', 'bandpass',  600, 0.8, 0.70); // the body of it
-      ambLayer(ctx, master, 'brown', 'lowpass',   260, 0.7, 0.55); // distant roar
+      ambLayer(ctx, noise, 'white', 'highpass', 1500, 0.7, 0.85); // spatter on the roofs
+      ambLayer(ctx, noise, 'white', 'bandpass',  600, 0.8, 0.70); // the body of it
+      ambLayer(ctx, noise, 'brown', 'lowpass',   260, 0.7, 0.55); // distant roar
     } else if (kind === 'snow') {
-      ambLayer(ctx, master, 'brown', 'lowpass',   300, 0.7, 0.80); // low hollow wind
-      ambLayer(ctx, master, 'white', 'bandpass',  700, 0.6, 0.55); // the part small speakers can carry
-      ambLayer(ctx, master, 'white', 'highpass', 2600, 0.7, 0.16); // thin whistle over the top
+      ambLayer(ctx, noise, 'brown', 'lowpass', 360, 0.7, 0.34);
+      ambLayer(ctx, noise, 'white', 'bandpass', 950, 0.45, 0.16);
+      ambChimes(ctx, master, 'snow');
     } else {
-      // Night of the Wolf. Crickets carry it, with just enough low air under
-      // them that the field doesn't sound like a dead room between chirps.
-      ambLayer(ctx, master, 'crickets', 'bandpass', 4200, 0.9, 0.95); // the chorus
-      ambLayer(ctx, master, 'brown',    'lowpass',   180, 0.7, 0.26); // still night air
-      ambLayer(ctx, master, 'white',    'bandpass', 1100, 0.5, 0.07); // faint distant rustle
+      // Only the cricket calls: no wind, hiss, bells or opening howl.
+      ambLayer(ctx, noise, 'cricketsSparse', 'bandpass', 3500, 0.65, 0.30);
     }
     // A slow sine summed into the master gain (an AudioParam adds any
     // connected signal to its own value), so the bed swells and eases instead
@@ -788,11 +846,11 @@
     // night it's the chorus rising and falling the way real crickets do.
     const lfo = ctx.createOscillator();
     lfo.type = 'sine';
-    lfo.frequency.setValueAtTime(AMB_LFO_HZ, now);
+    lfo.frequency.setValueAtTime(kind === 'rain' ? AMB_LFO_HZ : 0.055, now);
     const lfoAmt = ctx.createGain();
     lfoAmt.gain.setValueAtTime(0.0001, now);
-    lfoAmt.gain.linearRampToValueAtTime(peak * 0.35, now + 1.2);
-    lfo.connect(lfoAmt); lfoAmt.connect(master.gain);
+    lfoAmt.gain.linearRampToValueAtTime(kind === 'rain' ? 0.35 : noiseLevel * 0.147, now + 1.2);
+    lfo.connect(lfoAmt); lfoAmt.connect(noise.gain);
     lfo.start();
     ambSrcs.push(lfo);
     ambLfoDepth = lfoAmt;
@@ -807,9 +865,8 @@
       g.gain.cancelScheduledValues(t);
       g.gain.setValueAtTime(g.gain.value, t);
       g.gain.linearRampToValueAtTime(0.0001, t + 0.8); // fade out with the wipe
-      // The LFO depth has to come down too. It's summed into master.gain as a
-      // connected signal, and cancelScheduledValues only clears the param's
-      // own timeline — left running, it would hold the "faded" bed audible.
+      // Fade the noise modulation too, then stop every source, including the
+      // bell loop. The shared master fades the whole event together.
       if (lfoAmt) {
         lfoAmt.gain.cancelScheduledValues(t);
         lfoAmt.gain.setValueAtTime(lfoAmt.gain.value, t);
@@ -856,7 +913,7 @@
       g.gain.setValueAtTime(0.0001, now + off);
       g.gain.exponentialRampToValueAtTime(0.05, now + off + 0.004);
       g.gain.exponentialRampToValueAtTime(0.0001, now + off + 0.16);
-      osc.connect(bp); bp.connect(g); g.connect(ctx.destination);
+      osc.connect(bp); bp.connect(g); g.connect(audioOutput(ctx));
       osc.start(now + off); osc.stop(now + off + 0.17);
     }
     // A low thunk as the frame hits the dirt.
@@ -868,7 +925,7 @@
     g.gain.setValueAtTime(0.0001, now);
     g.gain.exponentialRampToValueAtTime(0.16, now + 0.006);
     g.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
-    osc.connect(g); g.connect(ctx.destination);
+    osc.connect(g); g.connect(audioOutput(ctx));
     osc.start(now); osc.stop(now + 0.22);
   }
 
@@ -900,7 +957,7 @@
     const g = ctx.createGain();
     g.gain.setValueAtTime(0.09, now);
     g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
-    src.connect(bp); bp.connect(g); g.connect(ctx.destination);
+    src.connect(bp); bp.connect(g); g.connect(audioOutput(ctx));
     src.start(now); src.stop(now + dur);
   }
 
@@ -922,7 +979,7 @@
       g.gain.setValueAtTime(0.0001, now + off);
       g.gain.exponentialRampToValueAtTime(0.05, now + off + 0.006);
       g.gain.exponentialRampToValueAtTime(0.0001, now + off + 0.22);
-      osc.connect(g); g.connect(ctx.destination);
+      osc.connect(g); g.connect(audioOutput(ctx));
       osc.start(now + off); osc.stop(now + off + 0.24);
     });
     // Brittle high shiver.
@@ -937,7 +994,7 @@
     const ng = ctx.createGain();
     ng.gain.setValueAtTime(0.05, now);
     ng.gain.exponentialRampToValueAtTime(0.0001, now + dur);
-    src.connect(hp); hp.connect(ng); ng.connect(ctx.destination);
+    src.connect(hp); hp.connect(ng); ng.connect(audioOutput(ctx));
     src.start(now); src.stop(now + dur);
   }
 
@@ -955,7 +1012,7 @@
     g.gain.setValueAtTime(0.0001, now);
     g.gain.exponentialRampToValueAtTime(0.035, now + 0.003);
     g.gain.exponentialRampToValueAtTime(0.0001, now + 0.045);
-    osc.connect(g); g.connect(ctx.destination);
+    osc.connect(g); g.connect(audioOutput(ctx));
     osc.start(now); osc.stop(now + 0.05);
   }
 
@@ -975,7 +1032,7 @@
     g.gain.setValueAtTime(0.0001, now);
     g.gain.exponentialRampToValueAtTime(0.14, now + 0.008);
     g.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
-    osc.connect(g); g.connect(ctx.destination);
+    osc.connect(g); g.connect(audioOutput(ctx));
     osc.start(now); osc.stop(now + 0.17);
     // Low-pass noise burst underneath for the body of the blow.
     const dur = 0.09;
@@ -989,7 +1046,7 @@
     const ng = ctx.createGain();
     ng.gain.setValueAtTime(0.18, now);
     ng.gain.exponentialRampToValueAtTime(0.0001, now + dur);
-    src.connect(lp); lp.connect(ng); ng.connect(ctx.destination);
+    src.connect(lp); lp.connect(ng); ng.connect(audioOutput(ctx));
     src.start(now); src.stop(now + dur);
   }
 
@@ -1012,7 +1069,7 @@
     const g = ctx.createGain();
     g.gain.setValueAtTime(0.12, now);
     g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
-    src.connect(bp); bp.connect(g); g.connect(ctx.destination);
+    src.connect(bp); bp.connect(g); g.connect(audioOutput(ctx));
     src.start(now); src.stop(now + dur);
   }
 
@@ -1039,7 +1096,7 @@
       lp.frequency.value = 2600;
       const ng = ctx.createGain();
       ng.gain.value = 0.5;
-      noise.connect(lp); lp.connect(ng); ng.connect(ctx.destination);
+      noise.connect(lp); lp.connect(ng); ng.connect(audioOutput(ctx));
       noise.start(at); noise.stop(at + dur);
       // Woody thunk — a short low tone dropping in pitch.
       const osc = ctx.createOscillator();
@@ -1049,7 +1106,7 @@
       const og = ctx.createGain();
       og.gain.setValueAtTime(0.5, at);
       og.gain.exponentialRampToValueAtTime(0.001, at + 0.10);
-      osc.connect(og); og.connect(ctx.destination);
+      osc.connect(og); og.connect(audioOutput(ctx));
       osc.start(at); osc.stop(at + 0.12);
     }
     hit(now);
@@ -1086,7 +1143,7 @@
 
     noise.connect(lp);
     lp.connect(noiseGain);
-    noiseGain.connect(ctx.destination);
+    noiseGain.connect(audioOutput(ctx));
     noise.start(now);
     noise.stop(now + dur);
 
@@ -1099,7 +1156,7 @@
     oscGain.gain.setValueAtTime(0.7, now);
     oscGain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
     osc.connect(oscGain);
-    oscGain.connect(ctx.destination);
+    oscGain.connect(audioOutput(ctx));
     osc.start(now);
     osc.stop(now + 0.25);
 
@@ -1112,7 +1169,7 @@
     crackGain.gain.setValueAtTime(0.12, now);
     crackGain.gain.exponentialRampToValueAtTime(0.001, now + 0.05);
     crack.connect(crackGain);
-    crackGain.connect(ctx.destination);
+    crackGain.connect(audioOutput(ctx));
     crack.start(now);
     crack.stop(now + 0.06);
   }
@@ -1140,7 +1197,7 @@
       bp.Q.value = 4;
       const g = ctx.createGain();
       g.gain.value = vol;
-      src.connect(bp); bp.connect(g); g.connect(ctx.destination);
+      src.connect(bp); bp.connect(g); g.connect(audioOutput(ctx));
       src.start(at);
       src.stop(at + dur);
     }
@@ -1171,7 +1228,7 @@
       filt.frequency.value = lp;
       const g = ctx.createGain();
       g.gain.value = vol;
-      src.connect(filt); filt.connect(g); g.connect(ctx.destination);
+      src.connect(filt); filt.connect(g); g.connect(audioOutput(ctx));
       src.start(at);
       src.stop(at + dur);
     }
@@ -1194,7 +1251,7 @@
       g.gain.setValueAtTime(0.0001, at);
       g.gain.exponentialRampToValueAtTime(vol, at + 0.012);
       g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
-      osc.connect(g); g.connect(ctx.destination);
+      osc.connect(g); g.connect(audioOutput(ctx));
       osc.start(at); osc.stop(at + dur);
     }
     tone(now,        320, 200, 0.12, 0.16);
@@ -1233,7 +1290,7 @@
       g.gain.exponentialRampToValueAtTime(vol, at + 0.015);
       g.gain.exponentialRampToValueAtTime(0.001, at + dur);
 
-      osc.connect(bp); bp.connect(g); g.connect(ctx.destination);
+      osc.connect(bp); bp.connect(g); g.connect(audioOutput(ctx));
       osc.start(at); lfo.start(at);
       osc.stop(at + dur); lfo.stop(at + dur);
     }
@@ -1257,7 +1314,7 @@
     hp.frequency.value = 2000;
     const ng = ctx.createGain();
     ng.gain.value = 0.12;
-    src.connect(hp); hp.connect(ng); ng.connect(ctx.destination);
+    src.connect(hp); hp.connect(ng); ng.connect(audioOutput(ctx));
     src.start(now + 0.08);
     src.stop(now + 0.08 + dur);
   }
@@ -1280,7 +1337,7 @@
     g.gain.setValueAtTime(0.001, now);
     g.gain.exponentialRampToValueAtTime(0.28, now + 0.015);
     g.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
-    osc.connect(bp); bp.connect(g); g.connect(ctx.destination);
+    osc.connect(bp); bp.connect(g); g.connect(audioOutput(ctx));
     osc.start(now);
     osc.stop(now + 0.16);
   }
@@ -1308,7 +1365,7 @@
     bp.Q.value = 1.4;
     const g = ctx.createGain();
     g.gain.value = 0.32;
-    noise.connect(bp); bp.connect(g); g.connect(ctx.destination);
+    noise.connect(bp); bp.connect(g); g.connect(audioOutput(ctx));
     noise.start(now);
     noise.stop(now + dur);
   }
@@ -1326,7 +1383,7 @@
     g.gain.setValueAtTime(0.001, now);
     g.gain.exponentialRampToValueAtTime(0.18, now + 0.006);
     g.gain.exponentialRampToValueAtTime(0.001, now + 0.13);
-    osc.connect(g); g.connect(ctx.destination);
+    osc.connect(g); g.connect(audioOutput(ctx));
     osc.start(now); osc.stop(now + 0.15);
   }
 
@@ -1343,7 +1400,7 @@
       g.gain.setValueAtTime(0.001, at);
       g.gain.exponentialRampToValueAtTime(vol, at + 0.01);
       g.gain.exponentialRampToValueAtTime(0.001, at + 0.22);
-      osc.connect(g); g.connect(ctx.destination);
+      osc.connect(g); g.connect(audioOutput(ctx));
       osc.start(at); osc.stop(at + 0.24);
     }
     chime(now,        988, 0.30);  // B5
@@ -1366,7 +1423,7 @@
       g.gain.setValueAtTime(0.001, at);
       g.gain.exponentialRampToValueAtTime(vol, at + 0.02);
       g.gain.exponentialRampToValueAtTime(0.001, at + dur);
-      osc.connect(g); g.connect(ctx.destination);
+      osc.connect(g); g.connect(audioOutput(ctx));
       osc.start(at); osc.stop(at + dur + 0.02);
     }
     shimmer(now,        660, 0.18, 0.45);
@@ -1393,7 +1450,7 @@
       const lp = ctx.createBiquadFilter();
       lp.type = 'lowpass';
       lp.frequency.value = 1800;
-      osc.connect(lp); lp.connect(g); g.connect(ctx.destination);
+      osc.connect(lp); lp.connect(g); g.connect(audioOutput(ctx));
       osc.start(at); osc.stop(at + dur + 0.02);
     }
     note(now,        392, 0.22, 0.18); // G4
@@ -1405,9 +1462,11 @@
   // wolf-howl glide. Distinctively ominous so it reads as "things just got
   // bad" without being a single jump scare.
   function playNightOfWolfStart() {
+    if (nightOfWolf) return; // the night event now has cricket ambience only
     queueNetSound('nightOfWolfStart');
     const ctx = getAudio();
     if (!ctx) return;
+    // Boss entrances retain their warning cue; they never overlap the night.
     const now = ctx.currentTime;
     // Low rumble drone — sub-bass sine pad sustained for a moment.
     const drone = ctx.createOscillator();
@@ -1418,7 +1477,7 @@
     dg.gain.setValueAtTime(0.001, now);
     dg.gain.exponentialRampToValueAtTime(0.32, now + 0.15);
     dg.gain.exponentialRampToValueAtTime(0.001, now + 2.2);
-    drone.connect(dg); dg.connect(ctx.destination);
+    drone.connect(dg); dg.connect(audioOutput(ctx));
     drone.start(now); drone.stop(now + 2.3);
     // Howl glide — sawtooth gliding up then slowly back down through a
     // bandpass, giving it that hollow wolf-cry shape.
@@ -1435,13 +1494,14 @@
     hg.gain.setValueAtTime(0.001, now + 0.25);
     hg.gain.exponentialRampToValueAtTime(0.22, now + 0.45);
     hg.gain.exponentialRampToValueAtTime(0.001, now + 2.1);
-    howl.connect(bp); bp.connect(hg); hg.connect(ctx.destination);
+    howl.connect(bp); bp.connect(hg); hg.connect(audioOutput(ctx));
     howl.start(now + 0.25); howl.stop(now + 2.2);
   }
 
   // Night of the Wolf — end: a relieved, bright two-note chime over a faint
   // residual howl tail, signalling sunrise / safety.
   function playNightOfWolfEnd() {
+    if (nightOfWolf) return; // no musical cue on a cricket-only night
     queueNetSound('nightOfWolfEnd');
     const ctx = getAudio();
     if (!ctx) return;
@@ -1454,7 +1514,7 @@
       g.gain.setValueAtTime(0.001, at);
       g.gain.exponentialRampToValueAtTime(vol, at + 0.02);
       g.gain.exponentialRampToValueAtTime(0.001, at + dur);
-      osc.connect(g); g.connect(ctx.destination);
+      osc.connect(g); g.connect(audioOutput(ctx));
       osc.start(at); osc.stop(at + dur + 0.02);
     }
     chime(now,        523, 0.30, 0.5);   // C5
@@ -1482,7 +1542,7 @@
     hp.frequency.value = 2200;
     const ng = ctx.createGain();
     ng.gain.value = 0.18;
-    noise.connect(hp); hp.connect(ng); ng.connect(ctx.destination);
+    noise.connect(hp); hp.connect(ng); ng.connect(audioOutput(ctx));
     noise.start(now); noise.stop(now + dur);
     // Square-wave sweep from high to mid — the "pew".
     const osc = ctx.createOscillator();
@@ -1497,7 +1557,7 @@
     g.gain.setValueAtTime(0.001, now);
     g.gain.exponentialRampToValueAtTime(0.22, now + 0.01);
     g.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
-    osc.connect(bp); bp.connect(g); g.connect(ctx.destination);
+    osc.connect(bp); bp.connect(g); g.connect(audioOutput(ctx));
     osc.start(now); osc.stop(now + 0.24);
   }
 
@@ -1519,7 +1579,7 @@
       const lp = ctx.createBiquadFilter();
       lp.type = 'lowpass';
       lp.frequency.value = 1400;
-      osc.connect(lp); lp.connect(g); g.connect(ctx.destination);
+      osc.connect(lp); lp.connect(g); g.connect(audioOutput(ctx));
       osc.start(at); osc.stop(at + dur + 0.02);
     }
     note(now,        523, 0.22, 0.28); // C5
@@ -1552,7 +1612,7 @@
     bp.Q.value = 0.7;
     const ng = ctx.createGain();
     ng.gain.value = 0.16;
-    noise.connect(bp); bp.connect(ng); ng.connect(ctx.destination);
+    noise.connect(bp); bp.connect(ng); ng.connect(audioOutput(ctx));
     noise.start(now); noise.stop(now + dur);
     // Warm rising three-note chime — the reward.
     function note(at, freq, vol) {
@@ -1563,7 +1623,7 @@
       g.gain.setValueAtTime(0.001, at);
       g.gain.exponentialRampToValueAtTime(vol, at + 0.015);
       g.gain.exponentialRampToValueAtTime(0.001, at + 0.26);
-      osc.connect(g); g.connect(ctx.destination);
+      osc.connect(g); g.connect(audioOutput(ctx));
       osc.start(at); osc.stop(at + 0.28);
     }
     note(now,        523, 0.24); // C5
@@ -1596,7 +1656,7 @@
     g.gain.setValueAtTime(0.0001, now);
     g.gain.exponentialRampToValueAtTime(0.5, now + 0.04);
     g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
-    osc.connect(bp); bp.connect(g); g.connect(ctx.destination);
+    osc.connect(bp); bp.connect(g); g.connect(audioOutput(ctx));
     osc.start(now); osc.stop(now + dur);
     vib.start(now); vib.stop(now + dur);
   }
@@ -1612,11 +1672,11 @@
     try {
       if (!wilhelmAudio) {
         wilhelmAudio = new Audio('https://cdn.freesound.org/previews/13/13797_40835-hq.mp3');
-        wilhelmAudio.volume = 0.55;
+        wilhelmAudio.volume = 0.55 * GAME_AUDIO_LEVEL;
         wilhelmAudio.addEventListener('error', () => { wilhelmFailed = true; });
       }
       const a = wilhelmAudio.cloneNode();
-      a.volume = 0.55;
+      a.volume = 0.55 * GAME_AUDIO_LEVEL;
       const pr = a.play();
       if (pr && pr.catch) pr.catch(() => { wilhelmFailed = true; playSynthScream(); });
     } catch (e) { wilhelmFailed = true; playSynthScream(); }
@@ -1632,7 +1692,7 @@
     try {
       if (!bossSpawnAudio) {
         bossSpawnAudio = new Audio('https://cdn.freesound.org/previews/858/858826_18150200-hq.mp3');
-        bossSpawnAudio.volume = 0.6;
+        bossSpawnAudio.volume = 0.6; // keep the FANGUS roar at its established level
         bossSpawnAudio.addEventListener('error', () => { bossSpawnFailed = true; });
       }
       const a = bossSpawnAudio.cloneNode();
@@ -1676,7 +1736,7 @@
     const ng = ctx.createGain();
     ng.gain.setValueAtTime(0.7, now);
     ng.gain.exponentialRampToValueAtTime(0.001, now + dur);
-    noise.connect(lp); lp.connect(ng); ng.connect(ctx.destination);
+    noise.connect(lp); lp.connect(ng); ng.connect(audioOutput(ctx));
     noise.start(now);
     noise.stop(now + dur);
     // Low body-thump — a fast sine drop for the punch.
@@ -1687,7 +1747,7 @@
     const og = ctx.createGain();
     og.gain.setValueAtTime(0.9, now);
     og.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
-    osc.connect(og); og.connect(ctx.destination);
+    osc.connect(og); og.connect(audioOutput(ctx));
     osc.start(now);
     osc.stop(now + 0.30);
     // Snappy high-frequency crack right at the start.
@@ -1698,7 +1758,7 @@
     const cg = ctx.createGain();
     cg.gain.setValueAtTime(0.18, now);
     cg.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
-    crack.connect(cg); cg.connect(ctx.destination);
+    crack.connect(cg); cg.connect(audioOutput(ctx));
     crack.start(now);
     crack.stop(now + 0.08);
   }
@@ -1719,7 +1779,7 @@
     og.gain.setValueAtTime(0.001, now);
     og.gain.exponentialRampToValueAtTime(0.26, now + 0.012);
     og.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
-    osc.connect(og); og.connect(ctx.destination);
+    osc.connect(og); og.connect(audioOutput(ctx));
     osc.start(now); osc.stop(now + 0.14);
     // Lip: a tiny filtered noise tick for the "p" of the pop.
     const dur = 0.04;
@@ -1737,7 +1797,7 @@
     bp.frequency.value = 1600;
     const ng = ctx.createGain();
     ng.gain.value = 0.18;
-    noise.connect(bp); bp.connect(ng); ng.connect(ctx.destination);
+    noise.connect(bp); bp.connect(ng); ng.connect(audioOutput(ctx));
     noise.start(now); noise.stop(now + dur);
   }
 
@@ -1762,7 +1822,7 @@
       g.gain.setValueAtTime(0.001, at);
       g.gain.exponentialRampToValueAtTime(0.22, at + 0.015);
       g.gain.exponentialRampToValueAtTime(0.001, at + 0.16);
-      osc.connect(lp); lp.connect(g); g.connect(ctx.destination);
+      osc.connect(lp); lp.connect(g); g.connect(audioOutput(ctx));
       osc.start(at); osc.stop(at + 0.18);
     }
     const beat = 0.18;
@@ -1783,7 +1843,7 @@
       g.gain.setValueAtTime(0.001, at);
       g.gain.exponentialRampToValueAtTime(0.2, at + 0.03);
       g.gain.exponentialRampToValueAtTime(0.001, at + dur);
-      osc.connect(lp); lp.connect(g); g.connect(ctx.destination);
+      osc.connect(lp); lp.connect(g); g.connect(audioOutput(ctx));
       osc.start(at); osc.stop(at + dur + 0.02);
     }
     horn(now + beat * 2, 196, 0.22); // G3
@@ -1809,7 +1869,7 @@
       dg.gain.setValueAtTime(0.001, now);
       dg.gain.exponentialRampToValueAtTime(0.12, now + 0.1);
       dg.gain.exponentialRampToValueAtTime(0.001, now + beat * 6);
-      drone.connect(dlp); dlp.connect(dg); dg.connect(ctx.destination);
+      drone.connect(dlp); dlp.connect(dg); dg.connect(audioOutput(ctx));
       drone.start(now); drone.stop(now + beat * 6 + 0.1);
     }
   }
@@ -1830,7 +1890,7 @@
     tg.gain.setValueAtTime(0.0001, now);
     tg.gain.exponentialRampToValueAtTime(0.4, now + 0.02);
     tg.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
-    thud.connect(tg); tg.connect(ctx.destination);
+    thud.connect(tg); tg.connect(audioOutput(ctx));
     thud.start(now); thud.stop(now + 0.32);
     // Impact dust — a burst of lowpassed noise for the hit on the ground.
     const dur = 0.16;
@@ -1848,7 +1908,7 @@
     lp.frequency.value = 900;
     const ng = ctx.createGain();
     ng.gain.value = 0.3;
-    noise.connect(lp); lp.connect(ng); ng.connect(ctx.destination);
+    noise.connect(lp); lp.connect(ng); ng.connect(audioOutput(ctx));
     noise.start(now); noise.stop(now + dur);
     // Groan — a brief sawtooth sliding down through a lowpass, the keeper's "oof".
     const groan = ctx.createOscillator();
@@ -1862,7 +1922,7 @@
     gg.gain.setValueAtTime(0.0001, now + 0.02);
     gg.gain.exponentialRampToValueAtTime(0.16, now + 0.07);
     gg.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
-    groan.connect(gp); gp.connect(gg); gg.connect(ctx.destination);
+    groan.connect(gp); gp.connect(gg); gg.connect(audioOutput(ctx));
     groan.start(now + 0.02); groan.stop(now + 0.4);
   }
 
@@ -1891,7 +1951,7 @@
         g.gain.exponentialRampToValueAtTime(vol, at + 0.008);
         g.gain.setValueAtTime(vol, at + 0.08);
         g.gain.exponentialRampToValueAtTime(0.0001, at + 0.13);
-        osc.connect(bp); bp.connect(g); g.connect(ctx.destination);
+        osc.connect(bp); bp.connect(g); g.connect(audioOutput(ctx));
         osc.start(at); osc.stop(at + 0.15);
       }
     }
@@ -1926,7 +1986,7 @@
     ng.gain.exponentialRampToValueAtTime(0.28, now + 0.06);
     ng.gain.setValueAtTime(0.28, now + 0.18);
     ng.gain.exponentialRampToValueAtTime(0.0001, now + dur);
-    noise.connect(bp); bp.connect(ng); ng.connect(ctx.destination);
+    noise.connect(bp); bp.connect(ng); ng.connect(audioOutput(ctx));
     noise.start(now); noise.stop(now + dur);
     // Low thruster rumble — a sine dropping in pitch under the whoosh.
     const rum = ctx.createOscillator();
@@ -1937,7 +1997,7 @@
     rg.gain.setValueAtTime(0.0001, now);
     rg.gain.exponentialRampToValueAtTime(0.22, now + 0.05);
     rg.gain.exponentialRampToValueAtTime(0.0001, now + dur);
-    rum.connect(rg); rg.connect(ctx.destination);
+    rum.connect(rg); rg.connect(audioOutput(ctx));
     rum.start(now); rum.stop(now + dur + 0.02);
   }
 
@@ -1961,7 +2021,7 @@
     og.gain.exponentialRampToValueAtTime(0.0001, now + 0.55);
     const lp = ctx.createBiquadFilter();
     lp.type = 'lowpass'; lp.frequency.value = 700;
-    o.connect(lp); lp.connect(og); og.connect(ctx.destination);
+    o.connect(lp); lp.connect(og); og.connect(audioOutput(ctx));
     o.start(now); o.stop(now + 0.6);
     // Noise whoosh.
     const dur = 0.45, sz = Math.floor(ctx.sampleRate * dur);
@@ -1971,7 +2031,7 @@
     const ns = ctx.createBufferSource(); ns.buffer = buf;
     const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1100; bp.Q.value = 0.7;
     const ng = ctx.createGain(); ng.gain.value = 0.16;
-    ns.connect(bp); bp.connect(ng); ng.connect(ctx.destination);
+    ns.connect(bp); bp.connect(ng); ng.connect(audioOutput(ctx));
     ns.start(now); ns.stop(now + dur);
   }
 
@@ -1987,13 +2047,13 @@
     const ns = ctx.createBufferSource(); ns.buffer = buf;
     const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 500; bp.Q.value = 0.8;
     const ng = ctx.createGain(); ng.gain.value = 0.5;
-    ns.connect(bp); bp.connect(ng); ng.connect(ctx.destination);
+    ns.connect(bp); bp.connect(ng); ng.connect(audioOutput(ctx));
     ns.start(now); ns.stop(now + dur);
     // Low thud.
     const o = ctx.createOscillator(); o.type = 'sine';
     o.frequency.setValueAtTime(140, now); o.frequency.exponentialRampToValueAtTime(50, now + 0.14);
     const og = ctx.createGain(); og.gain.setValueAtTime(0.3, now); og.gain.exponentialRampToValueAtTime(0.001, now + 0.16);
-    o.connect(og); og.connect(ctx.destination);
+    o.connect(og); og.connect(audioOutput(ctx));
     o.start(now); o.stop(now + 0.18);
   }
 
@@ -2012,9 +2072,39 @@
       g.gain.setValueAtTime(0.0001, t);
       g.gain.exponentialRampToValueAtTime(0.13, t + 0.015);
       g.gain.exponentialRampToValueAtTime(0.0001, t + 0.32);
-      o.connect(g); g.connect(ctx.destination);
+      o.connect(g); g.connect(audioOutput(ctx));
       o.start(t); o.stop(t + 0.36);
     });
+  }
+
+  // A short, soft major chord for a keeper brought back by their buddy.
+  // Sine harmonics give it a little choir-like shimmer, without a loud impact.
+  function playBuddyResurrect() {
+    queueNetSound('buddyResurrect');
+    const ctx = getAudio();
+    if (!ctx) return;
+    const now = ctx.currentTime;
+    [523.25, 659.25, 783.99, 1046.5].forEach((frequency, i) => {
+      const at = now + i * 0.09;
+      for (const [harmonic, strength] of [[1, 1], [2, 0.18]]) {
+        const osc = ctx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = frequency * harmonic;
+        const env = ctx.createGain();
+        env.gain.setValueAtTime(0.0001, at);
+        env.gain.exponentialRampToValueAtTime((i === 3 ? 0.035 : 0.055) * strength, at + 0.10);
+        env.gain.exponentialRampToValueAtTime(0.0001, at + 1.35);
+        osc.connect(env); env.connect(audioOutput(ctx));
+        osc.start(at); osc.stop(at + 1.40);
+      }
+    });
+  }
+
+  // The same rising shimmer marks a karma rescue and transcendence, relayed
+  // to the other keeper through the normal sound queue.
+  function playKarma() {
+    queueNetSound('karma');
+    playMetaverse();
   }
 
   function playMetaverse() {
@@ -2031,7 +2121,7 @@
       g.gain.setValueAtTime(0.0001, t);
       g.gain.exponentialRampToValueAtTime(0.18, t + 0.02);
       g.gain.exponentialRampToValueAtTime(0.0001, t + 0.4);
-      o.connect(g); g.connect(ctx.destination);
+      o.connect(g); g.connect(audioOutput(ctx));
       o.start(t); o.stop(t + 0.45);
     });
     // Shimmering pad swell underneath.
@@ -2045,7 +2135,7 @@
     pg.gain.setValueAtTime(0.0001, now);
     pg.gain.exponentialRampToValueAtTime(0.1, now + 0.25);
     pg.gain.exponentialRampToValueAtTime(0.0001, now + 0.9);
-    pad.connect(lp); lp.connect(pg); pg.connect(ctx.destination);
+    pad.connect(lp); lp.connect(pg); pg.connect(audioOutput(ctx));
     pad.start(now); pad.stop(now + 1.0);
   }
 
@@ -2063,7 +2153,7 @@
     sg.gain.setValueAtTime(0.0001, now);
     sg.gain.exponentialRampToValueAtTime(0.32, now + 0.01);
     sg.gain.exponentialRampToValueAtTime(0.0001, now + 0.22);
-    sub.connect(sg); sg.connect(ctx.destination);
+    sub.connect(sg); sg.connect(audioOutput(ctx));
     sub.start(now); sub.stop(now + 0.24);
     // Metallic "shing" — two detuned saws sweeping up through a bandpass.
     for (const det of [1, 1.5]) {
@@ -2077,7 +2167,7 @@
       g.gain.setValueAtTime(0.0001, now);
       g.gain.exponentialRampToValueAtTime(0.14, now + 0.008);
       g.gain.exponentialRampToValueAtTime(0.0001, now + 0.26);
-      osc.connect(bp); bp.connect(g); g.connect(ctx.destination);
+      osc.connect(bp); bp.connect(g); g.connect(audioOutput(ctx));
       osc.start(now); osc.stop(now + 0.28);
     }
     // Noise transient for the attack bite.
@@ -2089,7 +2179,7 @@
     const noise = ctx.createBufferSource(); noise.buffer = b;
     const nbp = ctx.createBiquadFilter(); nbp.type = 'highpass'; nbp.frequency.value = 2200;
     const ng = ctx.createGain(); ng.gain.value = 0.2;
-    noise.connect(nbp); nbp.connect(ng); ng.connect(ctx.destination);
+    noise.connect(nbp); nbp.connect(ng); ng.connect(audioOutput(ctx));
     noise.start(now); noise.stop(now + dur);
   }
 
@@ -2111,7 +2201,7 @@
     g.gain.exponentialRampToValueAtTime(0.16, now + 0.006);
     g.gain.exponentialRampToValueAtTime(0.0001, now + 0.14);
     const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 350;
-    osc.connect(hp); hp.connect(g); g.connect(ctx.destination);
+    osc.connect(hp); hp.connect(g); g.connect(audioOutput(ctx));
     osc.start(now); osc.stop(now + 0.16);
     // A bright sine sparkle on top for the "ping".
     const spk = ctx.createOscillator();
@@ -2122,7 +2212,7 @@
     sg.gain.setValueAtTime(0.0001, now);
     sg.gain.exponentialRampToValueAtTime(0.08, now + 0.004);
     sg.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
-    spk.connect(sg); sg.connect(ctx.destination);
+    spk.connect(sg); sg.connect(audioOutput(ctx));
     spk.start(now); spk.stop(now + 0.1);
   }
 

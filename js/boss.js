@@ -119,6 +119,11 @@
         crushed = true;
       }
     }
+    // Supply crates are flattened along with the other small structures.
+    // Snapshot the list: opening a crate removes it and resolves its cargo.
+    for (const cr of supplyCrates.slice()) {
+      if (dist2(cr.x, cr.y, b.x, b.y) < R2 && hurtSupplyCrate(cr, cr.hp, 'wolf')) crushed = true;
+    }
     if (crushed) { playBossCrush(); shake = Math.max(shake, 0.22); }
   }
 
@@ -166,9 +171,10 @@
       if (immortal && playerHats <= 1) return; // Immortal holds the last hat (silently)
       const lost = hatColors[hatColors.length - 1];
       playerHats--; hatColors.pop(); onHatLost(lost);
-      if (playerHats <= 0) { if (!tryKarmaResurrect()) killKeeper(player, 'host', 'crushed by FANGUS'); }
+      if (playerHats <= 0) killKeeper(player, 'host', 'crushed by FANGUS');
     } else if (k === player2) {
       player2.hats--;
+      if (Array.isArray(player2.hatColors)) player2.hatColors.pop();
       if (player2.hats <= 0) killKeeper(player2, 'guest', 'crushed by FANGUS');
     }
   }
@@ -567,6 +573,7 @@
     spawnSmoke(m.x, m.y, 7);
     shake = Math.max(shake, 0.3);
     explosionHitKeepers(m.x, m.y, BOSS_MISSILE_BLAST_R);
+    openCratesInBlast(m.x, m.y, BOSS_MISSILE_BLAST_R);
   }
 
   // A missile (boss OR the wave-51+ missile wolf) connects with a coop: it
@@ -637,6 +644,11 @@
         m.tilt = na;
       }
       const nx = m.x + m.vx * dt, ny = m.y + m.vy * dt;
+      const crate = supplyCrateAlongSegment(m.x, m.y, nx, ny, 0.55);
+      if (crate) {
+        m.x = crate.x; m.y = crate.y;
+        bossMissileExplode(m); bossMissiles.splice(i, 1); continue;
+      }
       // Direct coop strike — the missile's whole purpose.
       if (m.targetCoop && coops.includes(m.targetCoop) &&
           dist2(nx, ny, m.targetCoop.x, m.targetCoop.y) < 0.6) {
@@ -976,9 +988,10 @@
       if (immortal && playerHats <= 1) return; // Immortal holds the last hat (silently)
       const lost = hatColors[hatColors.length - 1];
       playerHats--; hatColors.pop(); onHatLost(lost);
-      if (playerHats <= 0) { if (!tryKarmaResurrect()) killKeeper(player, 'host', 'wolf'); }
+      if (playerHats <= 0) killKeeper(player, 'host', 'wolf');
     } else {
       k.hats--;
+      if (Array.isArray(k.hatColors)) k.hatColors.pop();
       if (k.hats <= 0) killKeeper(k, 'guest', 'wolf');
     }
   }
@@ -1291,13 +1304,13 @@
         w.attackT -= dt;
         if (w.attackT <= 0) {
           w.attackT = 0.7;
-          // Bad karma secretly spooks the pack: each -10 karma gives a ~2%
+          // Bad karma secretly spooks the pack: each -5 karma gives a 5%
           // chance (per attack) that the wolf turns tail and flees instead of
           // biting. Assassins are too committed to spook.
           const tgtKeeper = (target === player || target === player2) ? target : null;
           if (tgtKeeper && !w.assassin && !w.fleeing) {
             const tk = (tgtKeeper === player) ? player.karma : (tgtKeeper.karma || 0);
-            if (tk < 0 && Math.random() < 0.02 * Math.floor(-tk / 10)) w.fleeing = true;
+            if (tk < 0 && Math.random() < 0.05 * Math.floor(-tk / 5)) w.fleeing = true;
           }
           // Sword wolves swing their blade — kick off the white melee arc.
           if (w.sword && !w.fleeing) { w.meleeT = MELEE_ANIM_DUR; w.meleeDir = Math.atan2(dy, dx); }
@@ -1325,7 +1338,7 @@
                 hatColors.pop();
                 onHatLost(lost);
                 if (playerHats <= 0) {
-                  if (!tryKarmaResurrect()) killKeeper(player, 'host', 'wolf');
+                  killKeeper(player, 'host', 'wolf');
                 }
               }
               // Melee counter — a chance to strike the attacker back.
@@ -1344,6 +1357,7 @@
               breakLastStand(player2); // a bite knocks P2 out of the Last Stand pose
               if (!keeperDodgesHatLoss(player2)) { // hidden dodge — kept the hat
                 player2.hats--;
+                if (Array.isArray(player2.hatColors)) player2.hatColors.pop();
                 if (player2.hats <= 0) {
                   killKeeper(player2, 'guest', 'wolf');
                 }
@@ -1646,7 +1660,7 @@
   // Bookkeeping when a wolf/fox is killed: record the first sword-wolf kill
   // (it unlocks the Wolf's Blade upgrade), and drop any chicken it was
   // carrying as a corpse rather than letting it leave the map.
-  function onWolfKilled(w, killer) {
+  function onWolfKilled(w, killer, karmaSweep = false) {
     killer = killer || player;
     if (w.sword) swordWolfSlain = true;
     // Killing a snatcher mid-flight saves the chicken: drop it alive where
@@ -1686,14 +1700,14 @@
       spawnSmoke(w.x, w.y, 8);
       shake = Math.max(shake, 0.32);
       const r2 = HUNTER_WOLF_EXPLODE_R * HUNTER_WOLF_EXPLODE_R;
-      for (const o of wolves) {
+      for (const o of karmaSweep ? [] : wolves) {
         if (!o.alive || o === w || o.boss) continue;
         if (dist2(o.x, o.y, w.x, w.y) < r2) {
           const ddx = o.x - w.x, ddy = o.y - w.y, mm = Math.hypot(ddx, ddy) || 1;
           hurtWolf(o, HUNTER_WOLF_EXPLODE_DMG, (ddx / mm) * 0.35, (ddy / mm) * 0.35);
         }
       }
-      explosionHitKeepers(w.x, w.y, HUNTER_WOLF_EXPLODE_R);
+      if (!karmaSweep) explosionHitKeepers(w.x, w.y, HUNTER_WOLF_EXPLODE_R);
     }
     // Explosive wolves now also blow on death (not only on wall impact).
     if (w.bomb) {
@@ -1701,7 +1715,7 @@
       playExplosion();
       spawnSmoke(w.x, w.y, 8);
       shake = Math.max(shake, 0.32);
-      explosionHitKeepers(w.x, w.y, BOMB_BLAST_KEEPER_R);
+      if (!karmaSweep) explosionHitKeepers(w.x, w.y, BOMB_BLAST_KEEPER_R);
     }
     // Missile wolf — its back rockets cook off when it dies.
     if (w.missileWolf) {
@@ -1713,7 +1727,7 @@
     // Killing a brood wolf bursts it open: a harmless explosion flash plus a
     // random 2-5 pups scattered around where it fell. No toast — the burst is
     // self-explanatory.
-    if (w.breeder) {
+    if (w.breeder && !karmaSweep) {
       w.breeder = false; // belt-and-braces — don't double-fire if reprocessed
       spawnBlast(w.x, w.y);
       playExplosion();
@@ -1743,7 +1757,7 @@
     // Thing wolf — the body bursts and the head skitters off on spider legs.
     // No corpse is left (the corpse push skips w.thing, so the flag must stay
     // set here); instead a fleeing crawler spawns where it fell.
-    if (w.thing) {
+    if (w.thing && !karmaSweep) {
       spawnBlast(w.x, w.y);
       spawnSmoke(w.x, w.y, 5);
       shake = Math.max(shake, 0.2);
@@ -1850,18 +1864,7 @@
     w.hp -= dmg;
     w.hurtT = 0.12;
     if (w.hp <= 0) {
-      w.alive = false;
-      kills++;
-      attacker.kills = (attacker.kills || 0) + 1;
-      onWolfKilled(w, attacker);
-      // Late-game wolves sometimes fly apart instead of leaving a body.
-      if (!w.thing && !tryWolfDisassemble(w)) corpses.push({ x: w.x, y: w.y, kind: w.fox ? 'fox' : 'wolf', t: 5 });
-      if (w.fox) {
-        const bounty = 50 + wave;
-        addSharedMoney(bounty);
-        toast('Fox bagged! +$' + bounty, 1.8);
-      }
-      checkWaveDefended();
+      killWolf(w, attacker);
     } else {
       knockbackWolf(w, kx || 0, ky || 0);
       // Hunter wolf just lost a hat but lives: it goes briefly invincible and
@@ -1913,9 +1916,9 @@
     }
   }
 
-  // Karma resurrection — at ±KARMA_MAX the player cheats death once. A
+  // Karma resurrection — at ±KARMA_MAX either keeper cheats death once. A
   // melee-max-style explosion tears through the surrounding wolves and the
-  // player respawns with 7 hats: white for good karma, black for bad. The
+  // keeper respawns with 3 hats: white for good karma, black for bad. The
   // karma is spent by the rescue, resetting to 0 (and so does the shirt tint).
   // Knock a keeper down — in multiplayer they slip into ghost form and their
   // wallet is willed to the survivor; the run only ends once BOTH are down.
@@ -1927,6 +1930,7 @@
     who.deathCause = byWhat;
     // Ignore a hit that lands on a keeper already down — mid-fall or a ghost.
     if (who.ghost || who.dying) { checkBothDown(); return; }
+    if (tryKarmaResurrect(who)) return;
     // Plant a headstone on the spot. It's cleared by the next startWave, so
     // it marks this round only — and the game-over screen hides it (drawGraves
     // skips while gameOver/endScreen is up), which is why a solo death never
@@ -2023,11 +2027,14 @@
       hatColors.length = 0;
       for (let i = 0; i < 3; i++) hatColors.push('#5a3825');
       player.hurtT = 0;
+      playBuddyResurrect();
       toast('You rose again! +3 hats', 2.6);
     } else if (who === player2 && player2.ghost) {
       player2.ghost = false;
       player2.hats = 3;
+      player2.hatColors = Array(3).fill('#5a3825');
       player2.hurtT = 0;
+      playBuddyResurrect();
       toast('Buddy rose again! +3 hats', 2.6);
     }
   }
@@ -2039,14 +2046,48 @@
     return { read: () => money, spend: n => { money -= n; }, balance: () => money };
   }
 
-  function tryKarmaResurrect() {
-    if (karma < KARMA_MAX && karma > -KARMA_MAX) return false;
-    const good = karma >= KARMA_MAX;
-    playerHats = 7;
-    hatColors.length = 0;
-    for (let i = 0; i < 7; i++) hatColors.push(good ? '#f4f4f4' : '#161616');
+  // Shared death bookkeeping lets karma clear even shielded, airborne,
+  // ghost and hat-armoured wolves while keeping drops and rescues intact.
+  function killWolf(w, attacker, deferWaveCheck = false, karmaSweep = false) {
+    if (!w.alive || w.boss || w.dpsDummy) return;
+    w.alive = false;
+    w.hp = 0;
+    kills++;
+    attacker.kills = (attacker.kills || 0) + 1;
+    onWolfKilled(w, attacker, karmaSweep);
+    if (!w.thing && !tryWolfDisassemble(w)) corpses.push({ x: w.x, y: w.y, kind: w.fox ? 'fox' : 'wolf', t: 5 });
+    if (w.fox) {
+      addSharedMoney(50 + wave);
+      toast('Fox bagged! +$' + (50 + wave), 1.8);
+    }
+    if (!deferWaveCheck) checkWaveDefended();
+  }
+
+  function karmaWolfSweep(who, deferWaveCheck = false) {
+    for (const w of wolves.slice()) {
+      if (!w.alive || w.boss || w.dpsDummy) continue;
+      spawnBlast(w.x, w.y);
+      killWolf(w, who, true, true);
+    }
+    if (!deferWaveCheck) checkWaveDefended();
+  }
+
+  function tryKarmaResurrect(who = player) {
+    if (who.transcendentKarma || Math.abs(who.karma || 0) < KARMA_MAX) return false;
+    const good = who.karma >= KARMA_MAX;
+    const colors = Array(3).fill(good ? '#f4f4f4' : '#161616');
+    if (who === player) {
+      playerHats = 3;
+      hatColors.splice(0, hatColors.length, ...colors);
+    } else {
+      who.hats = 3;
+      who.hatColors = colors;
+    }
     shake = Math.max(shake, 0.9);
-    player.hurtT = 0;
+    who.hurtT = 0;
+    who.transcendStandT = 0;
+    breakLastStand(who);
+    playKarma();
     // Map-wide explosion: a ring of blasts across the world for the visual.
     // Good karma: wipes every wolf/fox/bomb wolf but spares chickens.
     // Bad karma: kills every living thing, chickens included.
@@ -2058,13 +2099,7 @@
     }
     // A single boom for the map-wide sweep instead of one per ring.
     playExplosion();
-    // Vapourise every wolf on the map regardless of distance.
-    for (const w of wolves) {
-      if (!w.alive) continue;
-      const wdx = w.x - player.x, wdy = w.y - player.y;
-      const wm = Math.hypot(wdx, wdy) || 1;
-      hurtWolf(w, 9999, (wdx / wm) * 0.6, (wdy / wm) * 0.6);
-    }
+    karmaWolfSweep(who, true);
     // Karma's wrath even cracks FANGUS — instakill the boss's current phase
     // (it soaks capped damage normally, so force its HP to zero directly).
     if (boss && boss.alive && bossPhase === 'fight') boss.hp = 0;
@@ -2078,11 +2113,14 @@
       }
       playChickenDeath();
     }
-    karma = 0; // the karma is consumed by the rescue
-    player.karma = 0;
-    toast(good
-      ? 'Good karma saves you — every wolf vapourised, 7 hats!'
-      : 'Bad karma saves you — the flock pays the price, 7 hats!', 3.2);
+    checkWaveDefended();
+    who.karma = 0; // consume only the rescued keeper's karma
+    if (who === player) karma = 0;
+    const note = good
+      ? 'Good karma saves you — every wolf vapourised, 3 hats!'
+      : 'Bad karma saves you — the flock pays the price, 3 hats!';
+    if (who === player) toast(note, 3.2);
+    else toastGuest(note, 3.2);
     return true;
   }
 
@@ -2230,11 +2268,18 @@
     // the target dies / drops out of range mid-flight, give it one more try.
     if (p.homing) {
       const hl = Math.min(p.homingLvl || 1, 5);
+      const seek = HOMING_SEEK_BY_LVL[hl];
+      // Don't yank a shot away from the crate the keeper aimed at. Once that
+      // crate opens, the normal wolf-seeking behavior resumes.
+      if (!p.homingCrate || p.homingCrate.opened || !supplyCrates.includes(p.homingCrate)) {
+        const speed = Math.hypot(p.vx, p.vy) || 1;
+        p.homingCrate = supplyCrateAlongSegment(p.x, p.y,
+          p.x + p.vx / speed * seek, p.y + p.vy / speed * seek, 0.55);
+      }
       // No lock roll — keep hunting the nearest wolf in seek range every frame
       // until one is found, then re-acquire if it dies / drops out of range.
       if (!p.homingTarget || !p.homingTarget.alive) {
         p.homingTarget = null;
-        const seek = HOMING_SEEK_BY_LVL[hl];
         let best = null, bd = seek * seek;
         for (const w of wolves) {
           if (!w.alive || w.fox || w.parachuting) continue; // foxes/airborne aren't fair pack targets
@@ -2243,9 +2288,10 @@
         }
         p.homingTarget = best;
       }
-      if (p.homingTarget && p.homingTarget.alive) {
-        const tx = p.homingTarget.x - p.x;
-        const ty = p.homingTarget.y - p.y;
+      const target = p.homingCrate || p.homingTarget;
+      if (target && (target === p.homingCrate || target.alive)) {
+        const tx = target.x - p.x;
+        const ty = target.y - p.y;
         const tAng = Math.atan2(ty, tx);
         const curAng = Math.atan2(p.vy, p.vx);
         let diff = tAng - curAng;
@@ -2258,6 +2304,7 @@
         p.vy = Math.sin(newAng) * sp;
       }
     }
+    const prevX = p.x, prevY = p.y;
     p.x += p.vx * dt;
     p.y += p.vy * dt;
     p.life -= dt;
@@ -2328,8 +2375,16 @@
     // it deliberately accepts hunter and wolf fire too — the pack shooting
     // your loot box open for you is a fair outcome.
     if (supplyCrates.length) {
-      const cr = supplyCrateAt(p.x, p.y, 0.55);
-      if (cr) { hurtSupplyCrate(cr, p.dmg, p.shooter); return false; }
+      const cr = supplyCrateAlongSegment(prevX, prevY, p.x, p.y, 0.55);
+      if (cr) {
+        // Enemy bullets normally carry zero HP damage because keeper hits
+        // remove hats directly. They still need to chip the crate's planks.
+        const damage = p.shooter === 'wolf' ? Math.max(1, p.dmg || 0) : p.dmg;
+        p.x = cr.x; p.y = cr.y;
+        hurtSupplyCrate(cr, damage, p.shooter);
+        p.didHit = true;
+        return false;
+      }
     }
     // Hit wolves — a pellet expires once its pierce budget runs out (1 for
     // normal pellets, 10 for the Tighter Pattern MAX slug). The hit set stops
@@ -2553,9 +2608,8 @@
           p.hit.add(c);
           continue;
         }
-        killChicken(c);
         // Per-shooter tally drives each keeper's karma drift independently;
-        // the lifetime count feeds the end-of-run scoreboard.
+        // count before the death, since a soldier's TNT can clear the wave.
         if (p.shooter === 2) {
           player2.chickensKilledThisWave++;
           player2.chickensShot++;
@@ -2563,6 +2617,7 @@
           chickensKilledByPlayer++;
           player.chickensShot++;
         }
+        killChicken(c);
         corpses.push({ x: c.x, y: c.y, kind: 'chicken', t: 4, frost: !!p.cold, fried: !!p.hot });
         playChickenDeath();
         explodeChickenMaybe(c);

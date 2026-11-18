@@ -3,7 +3,7 @@
   // overlay that reads one out.
   //
   // The scroll buys no power at all — it hands over one piece of farm lore,
-  // and it is the only upgrade in the pool gated on the BONUS pick (see the
+  // on bonus picks early on and on any pick from wave 51 onward (see the
   // 'scroll' entry in getUpgradePool). Hints are drawn from a bag without
   // replacement, so a session never shows the same one twice; once they have
   // all been read the upgrade stops being offered. Nothing is pinned to the
@@ -22,10 +22,13 @@
     'With friendly fire on, you can shoot a hat clean off your buddy\'s head.',
     'If I stand perfectly still in a last stand, maybe they won\'t see me at all.',
     'Every time they drag me back into the fight, the hospital bill gets steeper...',
+    'Reloading is harder when you are running. Try planting your boots first.',
+    'You can see behind the coops if you look at the farm like a builder.',
 
     // --- Karma, chickens and the flock ---
     'Every chicken you save, and every one you shoot, moves your karma.',
     'Karma pushed far enough either way starts handing out unnatural powers...',
+    'Some say there is a secret third karma state, beyond good and bad...',
     'Putting a chicken to the flame can have a delicious result.',
     'I doubt a wolf gets far hauling one of those fat chickens.',
     'Those foxes are worth a fortune!',

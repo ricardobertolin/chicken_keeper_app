@@ -437,6 +437,7 @@
           ghost: !!player.ghost, // host can now ghost too — sync the flag
           dying: !!player.dying, // mid-fall before the ghost — guest mirrors it
           karma: player.karma,    // per-player karma drives the shirt tint
+          transcendentKarma: !!player.transcendentKarma,
           kills: player.kills || 0,
           deaths: player.deaths || 0,
           chickensShot: player.chickensShot || 0,
@@ -475,6 +476,8 @@
           meleeDir:    player2.meleeDir,
           meleeFull:   !!player2.meleeFull,
           karma:       player2.karma,
+          transcendentKarma: !!player2.transcendentKarma,
+          hatColors: (player2.hatColors || []).slice(),
           kills:       player2.kills || 0,
           deaths:      player2.deaths || 0,
           chickensShot: player2.chickensShot || 0,
@@ -614,6 +617,7 @@
         player2.dying = msg.host.dying;
       }
       if (typeof msg.host.karma === 'number') player2.karma = msg.host.karma;
+      if (typeof msg.host.transcendentKarma === 'boolean') player2.transcendentKarma = msg.host.transcendentKarma;
       if (typeof msg.host.kills === 'number') player2.kills = msg.host.kills;
       if (typeof msg.host.deaths === 'number') player2.deaths = msg.host.deaths;
       if (typeof msg.host.chickensShot === 'number') player2.chickensShot = msg.host.chickensShot;
@@ -665,6 +669,7 @@
       player.meleeDir    = msg.guestWeapon.meleeDir || 0;
       player.meleeFull   = !!msg.guestWeapon.meleeFull;
       if (typeof msg.guestWeapon.karma === 'number') player.karma = msg.guestWeapon.karma;
+      if (typeof msg.guestWeapon.transcendentKarma === 'boolean') player.transcendentKarma = msg.guestWeapon.transcendentKarma;
       if (typeof msg.guestWeapon.kills === 'number') player.kills = msg.guestWeapon.kills;
       if (typeof msg.guestWeapon.deaths === 'number') player.deaths = msg.guestWeapon.deaths;
       if (typeof msg.guestWeapon.chickensShot === 'number') player.chickensShot = msg.guestWeapon.chickensShot;
@@ -691,6 +696,10 @@
         // Trim/pad the local hat-colour stack to match.
         while (hatColors.length > playerHats) hatColors.pop();
         while (hatColors.length < playerHats) hatColors.push('#5a3825');
+        if (Array.isArray(msg.guestWeapon?.hatColors)) {
+          hatColors.splice(0, hatColors.length, ...msg.guestWeapon.hatColors.slice(0, playerHats));
+          while (hatColors.length < playerHats) hatColors.push('#5a3825');
+        }
       }
       if (typeof msg.guest.hurtT === 'number') player.hurtT = msg.guest.hurtT;
       if (typeof msg.guest.wolfHitT === 'number') player.wolfHitT = msg.guest.wolfHitT;

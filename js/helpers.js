@@ -1080,17 +1080,13 @@
         // all. It reads out a piece of farm lore (js/hints.js) on a parchment
         // overlay, never the same one twice in a session.
         //
-        // The `bonusUpgradeAvailable` term is what makes it bonus-only: that
-        // flag is set just before the third screen builds its picks and
-        // cleared again in maybeFinishUpgradePhase, so the scroll is invisible
-        // to the two guaranteed picks and can never cost the player real
-        // progression. It also takes no money, which matters — the bonus round
-        // swaps out options that would lock a broke player in.
+        // Before endless play it belongs to the third (bonus) pick. From
+        // wave 51 onward it can also appear on either regular pick.
         id: 'scroll',
         title: 'Knowledge Scroll',
         available() {
           return wave >= SCROLL_UNLOCK_WAVE
-              && bonusUpgradeAvailable
+              && (bonusUpgradeAvailable || wave >= SCROLL_NORMAL_PICK_WAVE)
               && hintsLeft() > 0;
         },
         desc() {

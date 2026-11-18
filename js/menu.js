@@ -16,6 +16,7 @@
       player2.y = player.y + 0.5;
       // New-game-plus doubling applies to BOTH keepers (2^tier), matching P1.
       player2.hats = START_HATS * Math.pow(2, restartBonusTier);
+      player2.hatColors = Array(player2.hats).fill('#5a3825');
       player2.hurtT = 0;
       // Reset player2 weapon state for a fresh run.
       player2.chambered = true;

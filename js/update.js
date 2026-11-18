@@ -285,6 +285,8 @@
     }
     player.lastStandStealth = lsLvl >= 5 && lsCrouched
         && (player.lastStandNoShootT || 0) >= LAST_STAND_STEALTH_DELAY;
+    updateTranscendentKarma(player, dt);
+    if (player2.active) updateTranscendentKarma(player2, dt);
     // Stampede (maxed): a running player tramples wolves it barges into.
     if (player.moving && myLvls.sprint >= 5 && player.runT > RUN_WARMUP) {
       for (const w of wolves) {

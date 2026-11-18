@@ -49,17 +49,22 @@ test('the hint table is all unique, non-empty strings', () => {
   assert.ok(run('GAME_HINTS.every(h => typeof h === "string" && h.trim().length > 20)'));
 });
 
-test('the scroll is offered only past wave 50 AND only on the bonus pick', () => {
+test('the scroll is bonus-only before wave 51, then available on all picks', () => {
   const avail = (wave, bonus) => run(`
     wave = ${wave}; bonusUpgradeAvailable = ${bonus};
     getUpgradePool().find(o => o.id === 'scroll').available();
   `);
-  assert.equal(run('SCROLL_UNLOCK_WAVE'), 51);
-  assert.equal(avail(50, true),  false, 'wave 50 is the boss wave — still gated');
-  assert.equal(avail(51, false), false, 'wave 51 but a normal pick — must not appear');
-  assert.equal(avail(40, true),  false, 'bonus pick but too early — must not appear');
-  assert.equal(avail(51, true),  true,  'wave 51 on the bonus pick — offered');
-  assert.equal(avail(120, true), true,  'and it keeps being offered deep into endless');
+  assert.equal(run('SCROLL_NORMAL_PICK_WAVE'), 51);
+  assert.equal(run('SCROLL_UNLOCK_WAVE'), 1);
+  assert.equal(avail(0, true), false, 'no upgrades before the first wave');
+  for (const wave of [1, 10, 40, 49, 50]) {
+    assert.equal(avail(wave, false), false, 'normal picks are gated before wave 51');
+    assert.equal(avail(wave, true), true, 'early bonus picks can offer a scroll');
+  }
+  for (const wave of [51, 52, 120]) {
+    assert.equal(avail(wave, false), true, 'first and second picks can offer a scroll in endless');
+    assert.equal(avail(wave, true), true, 'bonus picks still offer scrolls in endless');
+  }
 });
 
 test('reading the whole bag never repeats a hint, and one more is refused', () => {
@@ -76,6 +81,8 @@ test('reading the whole bag never repeats a hint, and one more is refused', () =
   assert.equal(new Set(seen).size, total, 'a hint repeated inside one session');
   // Bag empty: the card stops being offered and a forced read is a no-op.
   assert.equal(run('hintsLeft()'), 0);
+  assert.equal(run("getUpgradePool().find(o => o.id === 'scroll').available()"), false);
+  run('bonusUpgradeAvailable = false');
   assert.equal(run("getUpgradePool().find(o => o.id === 'scroll').available()"), false);
   run('scrollNote = null; readKnowledgeScroll();');
   assert.equal(run('scrollNote'), null, 'an exhausted bag must not open a blank scroll');

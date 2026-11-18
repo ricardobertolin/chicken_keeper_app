@@ -166,7 +166,7 @@ test('breaking a crate open removes it and yields one of exactly three payloads'
     // visible flight plus a pendingHatLanding that credits it on arrival.
     const gotHats = run('pendingHatLandings.length');
     const gotBirds = run('chickens.length');
-    if (gotHats > 0) { seen.hats++; assert.equal(gotHats, 3, 'hat pack must be 3 hats'); }
+    if (gotHats > 0) { seen.hats++; assert.ok(gotHats === 1 || gotHats === 3, 'hat cargo must be one or three hats'); }
     else if (gotBirds > 0) {
       seen.cargo++;
       assert.ok(gotBirds >= run('CRATE_CHICKENS_MIN') && gotBirds <= run('CRATE_CHICKENS_MAX'),
@@ -181,9 +181,10 @@ test('breaking a crate open removes it and yields one of exactly three payloads'
 });
 
 // Open a landed crate with the payload roll pinned to `roll`.
-function openWithRoll(roll, shooter) {
+function openWithRoll(roll, shooter, hatRoll = 0.99) {
   const realRandom = Math.random;
-  Math.random = () => roll;
+  let first = true;
+  Math.random = () => { if (first) { first = false; return roll; } return hatRoll; };
   try { run(`hurtSupplyCrate(supplyCrates[0], ${run('CRATE_HP')}, ${shooter === undefined ? 'undefined' : shooter});`); }
   finally { Math.random = realRandom; }
 }
@@ -390,4 +391,122 @@ test('a crate shot open by the buddy sends the hats to the buddy', () => {
   assert.equal(run('player2.hats'), 5, 'the buddy did not receive its three hats');
   assert.equal(run('playerHats'), p1, 'the host was credited for the buddy\'s crate');
   run('player2.active = false;');
+});
+
+test('hat cargo rolls one or three hats, addressed to whoever opened it', () => {
+  for (const shooter of [undefined, 1, 2]) for (const [roll, count] of [[0, 1], [0.99, 3]]) {
+    reset();
+    run('player.ghost = false; player2.active = true; player2.ghost = false; player2.hats = 2;');
+    run('flyHats.length = 0; pendingHatLandings.length = 0;');
+    landedCrate();
+    openWithRoll(run('CRATE_PAYLOAD_BOOM') + 0.01, shooter, roll);
+    assert.equal(run('pendingHatLandings.length'), count);
+    assert.equal(run('flyHats.length'), count);
+    if (shooter !== undefined) {
+      assert.equal(run(`pendingHatLandings.every(h => h.to === ${shooter === 2 ? 'player2' : 'player'})`), true);
+    }
+  }
+  run('player2.active = false;');
+});
+
+test('a soldier killed before or during its fuse detonates once and counts one death', () => {
+  for (const fuse of [0, 0.25]) {
+    reset(); hits.wolves.length = 0;
+    run(`spawnCrateChicken(0, 0, true); chickens[0].x = 0; chickens[0].y = 0;
+      chickens[0].savedT = 0; chickens[0].fuseT = ${fuse};
+      wolves.push({alive:true, x:1, y:0, hp:100});`);
+    const before = run('chickenDeathsThisWave');
+    run('killChicken(chickens[0]); killChicken(chickens[0]); detonateSoldierChicken(chickens[0]);');
+    assert.equal(run('chickens[0].alive'), false);
+    assert.equal(run('chickenDeathsThisWave'), before + 1);
+    assert.equal(hits.wolves.length, 1);
+    assert.equal(hits.wolves[0].dmg, run('SOLDIER_BLAST_DMG'));
+  }
+});
+
+test('a refused kill cannot detonate a shielded soldier', () => {
+  reset(); hits.wolves.length = 0;
+  run('spawnCrateChicken(0, 0, true); wolves.push({alive:true, x:1, y:0, hp:100}); killChicken(chickens[0]);');
+  assert.equal(run('chickens[0].alive'), true);
+  assert.equal(hits.wolves.length, 0);
+});
+
+// Exercise the actual projectile and boss collision paths without replacing
+// hurtWolf, whose hit log the crate and soldier assertions above depend on.
+const bossCode = fs.readFileSync(new URL('js/boss.js', ROOT), 'utf8');
+for (const [start, end] of [
+  ['  function bossCrushFences(', '  // Keep the boss from parking'],
+  ['  function bossMissileExplode(', '  // A missile (boss OR'],
+  ['  function updateBossMissiles(', '  function bossTick('],
+  ['  function stoneFenceBlocks(', '  function updatePellet('],
+]) vm.runInContext(bossCode.slice(bossCode.indexOf(start), bossCode.indexOf(end, bossCode.indexOf(start))), ctxObj);
+vm.runInContext(bossCode.slice(bossCode.indexOf('  function updatePellet(')), ctxObj);
+seed.inBounds = (x, y) => Math.abs(x) <= 20 && Math.abs(y) <= 20;
+
+function pellet(shooter = 1) {
+  return { x:-2, y:0, vx:20, vy:0, life:2, dmg:2, pierce:1, shooter, homing:true, homingLvl:5 };
+}
+
+test('homing pellets aimed at crates hit them even with a nearer wolf beside the firing line', () => {
+  for (const shooter of [1, 2]) {
+    reset(); landedCrate();
+    run('wolves.push({alive:true, x:-2, y:1.5, hp:100});');
+    seed.testPellet = pellet(shooter);
+    for (let i = 0; i < 20; i++) if (!run('updatePellet(testPellet, 0.016)')) break;
+    assert.equal(run('supplyCrates[0].hp'), run('CRATE_HP') - 2);
+    assert.equal(seed.testPellet.didHit, true);
+  }
+});
+
+test('fast rounds collide across the whole step and cannot target airborne crates', () => {
+  reset(); landedCrate();
+  seed.testPellet = { ...pellet(), vx:100 };
+  assert.equal(run('updatePellet(testPellet, 0.05)'), false);
+  assert.equal(run('supplyCrates[0].hp'), run('CRATE_HP') - 2);
+  run('supplyCrates[0].para = true');
+  seed.testPellet = pellet();
+  run('updatePellet(testPellet, 0.05)');
+  assert.equal(seed.testPellet.homingCrate, null);
+  assert.equal(run('supplyCrates[0].hp'), run('CRATE_HP') - 2);
+});
+
+test('homing lasers reach an aimed crate and damage it once per beam, not once per segment', () => {
+  reset(); landedCrate();
+  run('wolves.push({alive:true, x:-2, y:1.5, hp:100});');
+  run(`(() => {
+    const segments = tracedHomingBeam(-2, 0, 0, 6, 5, false);
+    const hit = new Set();
+    for (const s of segments) applyPlayerBeam(s.x1, s.y1, s.x2, s.y2, 2, 1, true, hit);
+  })()`);
+  assert.equal(run('supplyCrates[0].hp'), run('CRATE_HP') - 2);
+});
+
+test('FANGUS crushes every nearby grounded crate but spares airborne and distant crates', () => {
+  reset();
+  run(`for (const [x, para] of [[0,false],[0.4,false],[0,true],[10,false]]) {
+    supplyCrates.push({x, y:0, hp:CRATE_HP, para, landT:0});
+  }
+  bossCrushFences({x:0, y:0});`);
+  assert.equal(run('supplyCrates.length'), 2);
+  assert.equal(run('supplyCrates.some(cr => cr.para)'), true);
+  assert.equal(run('supplyCrates.some(cr => cr.x === 10)'), true);
+});
+
+test('FANGUS bullets and lasers damage crates despite zero keeper-HP bullet damage', () => {
+  reset(); landedCrate();
+  seed.testPellet = { ...pellet('wolf'), homing:false, bossBullet:true, dmg:0, vx:100 };
+  assert.equal(run('updatePellet(testPellet, 0.05)'), false);
+  assert.equal(run('supplyCrates[0].hp'), run('CRATE_HP') - 1);
+  run('player.x = 15; player.y = 15; player2.active = false; applyBeamDamage(-2, 0, 2, 0)');
+  assert.equal(run('supplyCrates[0].hp'), run('CRATE_HP') - 2);
+});
+
+test('FANGUS missile strikes and nearby missile blasts open supply crates', () => {
+  reset(); landedCrate();
+  run('bossMissiles.length = 0; bossMissiles.push({x:-2, y:0, vx:100, vy:0, life:2, ignoreWalls:true}); updateBossMissiles(0.05)');
+  assert.equal(run('supplyCrates.length'), 0);
+  assert.equal(run('bossMissiles.length'), 0);
+  landedCrate();
+  run('bossMissileExplode({x:0.5, y:0})');
+  assert.equal(run('supplyCrates.length'), 0);
 });

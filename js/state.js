@@ -28,6 +28,8 @@
     critShots: 0,       // count of upcoming crit shots after a critical reload (5 for machine-gun)
     ghost: false,       // on the guest's screen, true once they've died — they wander on as an immortal spectre
     karma: 0,           // per-player karma — drives the shirt tint (mirrors the legacy `karma` global)
+    transcendentKarma: false,
+    transcendStandT: 0,
     chickensKilledThisWave: 0,
     chickensShot: 0,    // lifetime chickens shot (for the end-of-run scoreboard)
     deathCause: '',     // last reason this keeper fell — 'wolf', 'friendly fire', ...
@@ -91,6 +93,8 @@
     buildType: 0,
     // Per-player karma so each keeper's shirt tint reflects their own deeds.
     karma: 0,
+    transcendentKarma: false,
+    transcendStandT: 0,
     chickensKilledThisWave: 0,
     chickensShot: 0,
     deathCause: '',
@@ -643,7 +647,9 @@
   // P2 gets an extra second so network lag can't eat the guest's dodge window.
   const KEEPER_IFRAMES    = 2.5;
   const KEEPER_IFRAMES_P2 = 3.5;
-  function iframesFor(k) { return k === player2 ? KEEPER_IFRAMES_P2 : KEEPER_IFRAMES; }
+  function iframesFor(k) {
+    return (k === player2 ? KEEPER_IFRAMES_P2 : KEEPER_IFRAMES) * (k.transcendentKarma ? 2 : 1);
+  }
   let rocketLaunch = null; // post-boss restart cutscene state, or null
   let fade = null;         // black screen wipe: { t, dur, phase:'out'|'in', onBlack } or null
   // Money helpers — in separateMoney mode, money goes to whoever earned it
@@ -758,9 +764,40 @@
   // without shooting a chicken nudges karma good; a wave with a friendly-fire
   // kill nudges it bad. At ±KARMA_MAX the player cheats death once, then the
   // karma is spent. Karma also slowly tints the player's shirt.
-  const KARMA_MAX = 50;          // the resurrect threshold (and the glow threshold)
-  const KARMA_HARD_CAP = 100;    // karma may climb beyond ±KARMA_MAX, but is capped at ±100
+  const KARMA_MAX = 25;          // rescue, glow and hard-cap threshold
+  const KARMA_HARD_CAP = KARMA_MAX;
+  const TRANSCEND_STAND_SECONDS = 30;
   let karma = 0;
+
+  function advanceKarma(who, chickensShot) {
+    who.karma = who.transcendentKarma ? 0
+      : clamp(who.karma + (chickensShot > 0 ? -1 : 1), -KARMA_HARD_CAP, KARMA_HARD_CAP);
+    // A change away from zero breaks the continuous Last Stand requirement.
+    if (who.karma !== 0) who.transcendStandT = 0;
+    if (who === player) karma = who.karma;
+  }
+
+  // The host owns both keepers' unlocks; the guest receives the lasting state
+  // through snapshots. Only time actually spent in Last Stand at zero counts.
+  function updateTranscendentKarma(who, dt) {
+    if (multiplayer && !isHost) return;
+    if (who.transcendentKarma) {
+      who.karma = 0;
+      if (who === player) karma = 0;
+      return;
+    }
+    if (inMenu || who.ghost || who.dying || who.karma !== 0
+        || !(lvlsFor(who).metaverse > 0) || !lastStandCrouched(who)) {
+      who.transcendStandT = 0;
+      return;
+    }
+    who.transcendStandT = (who.transcendStandT || 0) + dt;
+    if (who.transcendStandT < TRANSCEND_STAND_SECONDS) return;
+    who.transcendentKarma = true;
+    who.karma = 0;
+    if (who === player) karma = 0;
+    playKarma();
+  }
   let wave = 0;         // startWave() increments first, so wave 1 = first real wave
   let waveTimer = 12;   // seconds until next wave (also: grace period at game start)
   let nextWolves = 1;
@@ -853,9 +890,11 @@
   const WEATHER_PER_WAVE_CHANCE = 0.16;
   const WEATHER_MAX_PER_RUN = 3;
   const weatherEvents = {
-    rain: { count: 0, blockStart: -1, nextWave: -1, force: false },
-    snow: { count: 0, blockStart: -1, nextWave: -1, force: false },
+    rain: { count: 0, blockStart: -1, nextWave: -1, lastWave: -5, force: false },
+    snow: { count: 0, blockStart: -1, nextWave: -1, lastWave: -5, force: false },
   };
+  const nightEvent = { blockStart: -1, nextWave: -1, lastWave: -5 };
+  const EVENT_COOLDOWN_WAVES = 5;
   const RAIN_CONFUSE_CHANCE   = 0.66; // roughly two thirds of the pack loses the plot
   const RAIN_SHORT_OUT_PER_SEC = 0.05; // per-wolf per-second chance to cook off
   const RAIN_BLAST_R   = 2.0;  // tiles a short-out blast reaches
@@ -891,13 +930,10 @@
   let nightOfWolfDebugForce = false; // debug toggle — next startWave becomes a night wave
   // ---------- Wave-50 boss fight ----------
   const BOSS_WAVE = 50;
-  // Knowledge Scroll (js/hints.js): endless-waves only, and only ever offered
-  // on the third (bonus) pick screen. By wave 51 the run has nothing left to
-  // teach the hard way, and a card that spends a pick on lore rather than
-  // power belongs on the pick the player was handed for free. Declared here
-  // rather than up with the other pick-screen state because it reads
-  // BOSS_WAVE, which is initialised on the line above.
-  const SCROLL_UNLOCK_WAVE = BOSS_WAVE + 1;
+  // Knowledge Scroll is bonus-pick eligible from wave 1. Endless play also
+  // adds it to the first and second upgrade picks.
+  const SCROLL_UNLOCK_WAVE = 1;
+  const SCROLL_NORMAL_PICK_WAVE = BOSS_WAVE + 1;
   const BOSS_INTRO_DELAY = 2.6;   // seconds of dusk-shift + shaking before it appears
   const BOSS_HP = 2000;           // HP per side (it's beaten 4 times) — cut by a third from 3000
   const BOSS_MAX_DPS = 65;        // cap on damage it can take per second (anti-melt, like player i-frames)
@@ -952,11 +988,6 @@
   const BOSS_EXPLODE_FADE_T   = 2.0; // seconds of red-sky fade after the final blast
   const BOSS_EXPLODE_DUR      = BOSS_EXPLODE_BLASTS_T + BOSS_EXPLODE_FADE_T;
   let endScreen = false;          // post-boss "restart or continue" screen
-  // Post-wave-50 the event escapes its run-cap and instead schedules itself
-  // once randomly inside every consecutive 5-wave block. These two track
-  // which block we last rolled for and which wave inside it was picked.
-  let lateNightBlockStart = 0;
-  let nextLateNightWave = 0;
   // Ranged wolves — from wave 35, a sit-and-shoot type that fires red pellets
   // at the closest live player or chicken from a safe distance.
   const RANGED_WAVE = 35;
@@ -1053,6 +1084,7 @@
   // there's no tell). They must sum to 1.
   const CRATE_PAYLOAD_BOOM = 0.25;  // a dud — it was ordnance, and it goes off
   const CRATE_PAYLOAD_HATS = 0.20;  // a hat pack
+  const CRATE_SINGLE_HAT_CHANCE = 0.50; // hat payload: one hat instead of three
   // ...the remaining 0.55 is live cargo (chickens).
   const CRATE_SOLDIER_CHANCE = 0.45; // per bird in a live-cargo crate
   // Birds out of a crate land in the middle of a fight, so they get a few

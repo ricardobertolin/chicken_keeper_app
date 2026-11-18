@@ -4,8 +4,10 @@ import { test } from 'node:test';
 import vm from 'node:vm';
 
 const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
-const lobbyCode = html.slice(html.indexOf('  // ---------- Online lobby (PeerJS)'), html.indexOf('  function netSendPosition()'))
-  + html.slice(html.indexOf('  async function hostLobby()'), html.indexOf('  // ---------- Upgrade tree overlay'));
+const netCode = await readFile(new URL('../js/net.js', import.meta.url), 'utf8');
+const uiCode = await readFile(new URL('../js/ui.js', import.meta.url), 'utf8');
+const lobbyCode = netCode.slice(0, netCode.indexOf('  function netSendPosition()'))
+  + netCode.slice(netCode.indexOf('  async function hostLobby()'));
 const turn = {
   urls: ['turn:relay.example:80', 'turns:relay.example:443?transport=tcp'],
   username: 'client-user', credential: 'client-password',
@@ -262,7 +264,7 @@ test('join Back button tears down the pending lobby', () => {
   const button = { dataset: { back: 'online' }, addEventListener: (name, cb) => handlers.set(name, cb) };
   const calls = [];
   const marker = "  document.querySelectorAll('#menu .menu-back[data-back]')";
-  const source = html.slice(html.indexOf(marker), html.indexOf('  requestAnimationFrame(loop);', html.indexOf(marker)));
+  const source = uiCode.slice(uiCode.indexOf(marker), uiCode.indexOf('  requestAnimationFrame(loop);', uiCode.indexOf(marker)));
   vm.runInNewContext(source, {
     document: { querySelectorAll: () => [button] },
     teardownConnection: () => calls.push('teardown'), showScreen: screen => calls.push(screen),
@@ -293,6 +295,9 @@ test('service worker never caches config, including relay-query URLs, or interce
   assert.ok(!assets.includes('./multiplayer-config.json'));
 });
 
-test('all inline game scripts parse', () => {
+test('all inline and external game scripts parse', async () => {
   for (const match of html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)) new vm.Script(match[1]);
+  for (const match of html.matchAll(/<script\b[^>]*src="(js\/[^\"]+)"/g)) {
+    new vm.Script(await readFile(new URL('../' + match[1], import.meta.url), 'utf8'), { filename: match[1] });
+  }
 });

@@ -1246,6 +1246,17 @@
     ctx.restore();
   }
 
+  // Small, clock-driven tremor for the two secret cards. Their click targets
+  // stay fixed, and the animation never consumes gameplay random rolls.
+  function shakeUpgradeCard(option, rect, index) {
+    if (option.id !== 'metaverse' && option.id !== 'scroll') return;
+    const phase = Date.now() / 36 + index * 1.7;
+    const cx = rect.x + rect.w / 2, cy = rect.y + rect.h / 2;
+    ctx.translate(cx + Math.sin(phase) * 1.6, cy + Math.sin(phase * 1.31) * 0.8);
+    ctx.rotate(Math.sin(phase * 0.73) * 0.012);
+    ctx.translate(-cx, -cy);
+  }
+
   // Guest-side: simplified upgrade window using P2's own option list. No
   // star history / cross-locks (those mechanics live in the main pool which
   // the host owns).
@@ -1275,6 +1286,8 @@
       if (!option) continue;
       const rect = rects[i];
       const hovered = !upgradePicked2 && mouse.x >= rect.x && mouse.x <= rect.x + rect.w && mouse.y >= rect.y && mouse.y <= rect.y + rect.h;
+      ctx.save();
+      shakeUpgradeCard(option, rect, i);
       // Resurrect Buddy reads red here too, matching the host's picker so the
       // guest sees the same "this is the revive" cue.
       const accent2 = option.id === 'resurrect' ? '#ff5a5a' : null;
@@ -1286,6 +1299,7 @@
       // Easter-egg chicken filler — just the chicken, no text.
       if (option.id === 'chicken') {
         drawChickenIcon(rect.x + rect.w / 2, rect.y + rect.h / 2 + 6, 2.6);
+        ctx.restore();
         continue;
       }
       ctx.fillStyle = '#fff';
@@ -1302,6 +1316,7 @@
       ctx.font = '13px "Lucida Console", Consolas, monospace';
       ctx.fillStyle = '#d7d7d7';
       wrapText(option.desc(), rect.x + 14, rect.y + 56, rect.w - 28, 15, 3);
+      ctx.restore();
     }
     ctx.fillStyle = '#9aa0a8';
     ctx.textAlign = 'center';
@@ -1422,6 +1437,8 @@
       if (!option) continue; // never index past the available options — empty slots stay blank
       const rect = rects[i];
       const hovered = mouse.x >= rect.x && mouse.x <= rect.x + rect.w && mouse.y >= rect.y && mouse.y <= rect.y + rect.h;
+      ctx.save();
+      shakeUpgradeCard(option, rect, i);
       // Times this upgrade has already been taken, and its cap.
       const count = upgradeLevels[option.id] || 0;
       const max = option.id === 'cash' ? Infinity
@@ -1478,6 +1495,7 @@
       // drawn dead-centre on the card.
       if (option.id === 'chicken') {
         drawChickenIcon(rect.x + rect.w / 2, rect.y + rect.h / 2 + 6, 2.6);
+        ctx.restore();
         continue;
       }
 
@@ -1527,6 +1545,7 @@
         ctx.textAlign = 'left';
         ctx.fillText('Locks out ' + locksOut, rect.x + 14, rect.y + 96);
       }
+      ctx.restore();
     }
 
     ctx.fillStyle = '#ffd166';
@@ -2473,7 +2492,8 @@
       }
       for (let i = 0; i < playerHats; i++) {
         const by = cy - 34 + crouchYAdd - i * HAT_STEP;
-        const baseHat = isGuestSelf ? GUEST_HAT_COLOR : (hatColors[i] || '#5a3825');
+        const baseHat = isGuestSelf && (!hatColors[i] || hatColors[i] === '#5a3825')
+          ? GUEST_HAT_COLOR : (hatColors[i] || '#5a3825');
         drawHat(cx, by, baseHat, hurt, i === playerHats - 1);
       }
       if (iframesOn) ctx.restore();
@@ -2722,7 +2742,8 @@
       }
       for (let i = 0; i < hatCount; i++) {
         const by = cy - 34 + crouchYAdd2 - i * HAT_STEP;
-        const baseHat = haveColors ? (player2.hatColors[i] || fallbackHat) : fallbackHat;
+        const color = haveColors ? (player2.hatColors[i] || fallbackHat) : fallbackHat;
+        const baseHat = isHost && color === '#5a3825' ? GUEST_HAT_COLOR : color;
         drawHat(cx, by, baseHat, hurt, i === hatCount - 1);
       }
       if (iframesOn2) ctx.restore();
