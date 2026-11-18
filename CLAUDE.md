@@ -32,7 +32,7 @@ The game was one 20k-line index.html. It is now split into classic scripts that 
 
 ## Service worker
 
-`sw.js` precaches the js/ files cache-first. Bump `VERSION` in sw.js on every release or returning players keep the old build. Keep it in step with the title-screen label (`.menu-version` in index.html). A new js/ file has to be added to the `ASSETS` list too. HTML is network-first.
+`sw.js` precaches the js/ files cache-first. Bump `BUILD_VERSION` in sw.js on every release, alongside the title-screen label (`.menu-version`) and every JS/CSS `?v=` URL in index.html. The worker maps its JS/CSS `ASSETS` entries to that same versioned URL, so an old worker/browser cache cannot pair a fresh title screen with an old renderer. `tests/cache-version.test.mjs` checks these stay aligned. A new js/ file has to be added to `ASSETS` too. HTML is network-first.
 
 ## Robot allies (MK-1 / MK-2 / MK-3)
 

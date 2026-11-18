@@ -3,7 +3,8 @@
 // purged and returning visitors kept getting that build served to them.
 // Must match the version printed on the title screen (index.html, .menu-version)
 // so a player's reported build maps to a known cache.
-const VERSION = 'chicken-keeper-v0.16.6';
+const BUILD_VERSION = '0.16.7';
+const VERSION = 'chicken-keeper-v' + BUILD_VERSION;
 
 // Only files index.html actually references. app.js / manifest.webmanifest /
 // icon.svg are unused stubs and are not precached. The game script is split
@@ -32,7 +33,7 @@ const ASSETS = [
   './js/menu.js',
   './js/net.js',
   './js/ui.js',
-];
+].map(asset => /\.(js|css)$/.test(asset) ? asset + '?v=' + BUILD_VERSION : asset);
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
