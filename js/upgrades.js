@@ -263,6 +263,71 @@
     ctx.restore();
   }
 
+  // ---------- Co-op upgrade bookkeeping ----------
+  // Which ids player 2 has its OWN ladder for (see makeP2PersonalOptions).
+  // Everything else in P2's pool is a world upgrade whose apply() pokes the
+  // single shared ladder, so both keepers' picks stack into one level — that's
+  // what lets a 4-of-5 card be reachable from two screens at the same time.
+  let _p2PersonalIds = null;
+  function p2PersonalIds() {
+    if (!_p2PersonalIds) _p2PersonalIds = new Set(Object.keys(makeP2PersonalOptions()));
+    return _p2PersonalIds;
+  }
+  function upgradeIsShared(id) { return !p2PersonalIds().has(id); }
+
+  // Co-op re-validation, run at click time rather than deal time. Both keepers
+  // choose from cards dealt before either of them clicked, so between the deal
+  // and the click the buddy's pick can have taken the last level of this very
+  // card or committed the other half of its exclusive pair. Applying it anyway
+  // pushed a 4/5 shared ladder to 6/5 and could leave both halves of an
+  // either/or owned at once.
+  // Deliberately NOT a re-run of option.available(): several of those are
+  // random (Longer Barrel past its cap) or money-gated, and re-rolling them
+  // here would bounce perfectly good picks.
+  function coopPickStale(option) {
+    if (!multiplayer || !isHost || !player2.active) return false;
+    if (!option || !option.id || option.id === 'cash' || option.id === 'chicken') return false;
+    if (!upgradeIsShared(option.id)) return false; // personal ladders can't collide
+    const lvl = upgradeLevels[option.id] || 0;
+    const node = SKILL_TREE_BY_ID[option.id];
+    // A ladder at its cap is only stale if the upgrade has genuinely stopped
+    // being offerable — Longer Barrel overflows on purpose, and Dog Friend
+    // wraps round at 4 to retire the pack.
+    const stillOffered = !option.available || option.available();
+    if (!stillOffered && node && !node.supply && !node.overflow && lvl >= node.max) return true;
+    const pair = PAIRED_WITH[option.id];
+    return !!(pair && lvl === 0 && !metaverseOn() && (upgradeLevels[pair] || 0) > 0);
+  }
+
+  // Every fresh deal of P2's cards gets a new sequence number. The guest sends
+  // it back with its pick, so a click on a screen the host has already replaced
+  // (the second pick re-rolls the cards) can't land on whatever option happens
+  // to occupy that slot now. Rejected picks re-offer the same cards under a new
+  // number, which is also what re-arms the guest's click.
+  function setUpgradeOptions2(list) {
+    upgradeOptions2 = list;
+    upgradeOptions2Seq++;
+  }
+  function reofferP2Cards(list) {
+    setUpgradeOptions2(list || upgradeOptions2);
+    upgradePicked2 = false;
+  }
+  // The card data the guest needs to draw its own picker: the live level of
+  // whichever ladder this option writes to, the buddy's level in their copy of
+  // it, and the lock-out warning. Without these the guest drew every card in
+  // plain gold with no stars and no MAX flag.
+  function p2CardPayload(o) {
+    const shared = upgradeIsShared(o.id);
+    return {
+      id: o.id, title: o.title, desc: o.desc(),
+      level: (shared ? upgradeLevels[o.id] : upgradeLevels2[o.id]) || 0,
+      buddyLevel: upgradeLevels[o.id] || 0,
+      shared,
+      locksOut: optionLocksOut(o, shared ? upgradeLevels : upgradeLevels2)
+        ? LOCKS_OUT[o.id] : null,
+    };
+  }
+
   function pickDistinct(pool, n, cashFn, levels) {
     cashFn = cashFn || makeCashOption;
     const seen = new Set();
@@ -392,14 +457,10 @@
     // Individual-upgrades mode: also generate a parallel pool for player2.
     if (multiplayer && isHost && gameOpts.individualUpgrades) {
       upgradePicked2 = !!player2.ghost; // dead buddy skips their pick too
-      if (upgradePicked2) {
-        upgradeOptions2 = [];
-      } else {
-        upgradeOptions2 = buildP2UpgradePicks();
-      }
+      setUpgradeOptions2(upgradePicked2 ? [] : buildP2UpgradePicks());
     } else {
       // Otherwise the buddy just spectates the host's pick.
-      upgradeOptions2 = [];
+      setUpgradeOptions2([]);
       upgradePicked2 = true;
     }
     // If everyone is already done (e.g. host ghost in shared mode with no
@@ -429,7 +490,7 @@
   function finishUpgradePhase() {
     upgradeMode = false;
     upgradeOptions = [];
-    upgradeOptions2 = [];
+    setUpgradeOptions2([]);
     upgradePicked2 = false;
     waveTimer = 6;
     postUpgradeLockT = 1.0; // brief input lock so a fast pick-click doesn't carry into a shot
@@ -660,10 +721,19 @@
     // Money-gated picks (hats, oils) are always shown, even when broke. Clicking
     // one you can't afford just buzzes — it doesn't consume your pick.
     if (option.affordable && !option.affordable()) { playCantBuy(); return; }
+    // The buddy's pick landed on this same shared ladder between the deal and
+    // the click. Bounce it and deal fresh cards instead of overshooting the cap.
+    if (coopPickStale(option)) {
+      playCantBuy();
+      toast('Buddy already took that one — fresh picks!', 2.4);
+      upgradeOptions = buildUpgradePicks();
+      return;
+    }
     const _hatPricePaid = option.id === 'buyHat' ? hatPrice : 0; // capture before apply() changes it
     applyPickedUpgrade(option);
     playCashRegister(); // ka-ching — every pick is a "purchase"
     upgradePicked = true;
+    maybeRedealP2Cards(); // this pick may have just invalidated one of P2's
     toast(option.id === 'cash' ? 'Picked up $10'
         : option.id === 'chicken' ? 'Bock bock bagawk!'
         // The scroll puts its own parchment up — a toast over the top of it
@@ -719,21 +789,49 @@
     if (needP2 && !upgradePicked2) return;
     upgradeMode = false;
     upgradeOptions = [];
-    upgradeOptions2 = [];
+    setUpgradeOptions2([]);
     bonusUpgradeAvailable = false;
     waveTimer = 6;
     postUpgradeLockT = 1.0;
   }
 
-  // Host-side handler: the guest forwarded its upgrade pick.
-  function selectUpgradeP2OnHost(index) {
+  // A host pick can land on a shared ladder one of the buddy's cards is still
+  // offering. Swap out just the stale card — re-dealing the whole hand would
+  // yank away options the guest is still reading.
+  function maybeRedealP2Cards() {
+    if (!(multiplayer && isHost && gameOpts.individualUpgrades)) return;
+    if (upgradePicked2 || !upgradeOptions2.length) return;
+    let changed = false;
+    for (let i = 0; i < upgradeOptions2.length; i++) {
+      if (!coopPickStale(upgradeOptions2[i])) continue;
+      const fresh = buildP2UpgradePicks()
+        .find(o => !coopPickStale(o) && !upgradeOptions2.some(x => x.id === o.id));
+      upgradeOptions2[i] = fresh || makeP2CashOption();
+      changed = true;
+    }
+    if (changed) upgradeOptions2Seq++; // the guest's hand changed under it
+  }
+
+  // Host-side handler: the guest forwarded its upgrade pick. `id` and `seq`
+  // identify WHICH card on WHICH deal was clicked — the index alone used to be
+  // enough, but the second pick re-rolls the hand, so a click that crossed with
+  // a re-deal could be applied to a completely different upgrade.
+  function selectUpgradeP2OnHost(index, id, seq) {
     if (!multiplayer || !isHost) return;
     if (!gameOpts.individualUpgrades) return;
     if (player2.ghost) return; // ghost sits out
     if (upgradePicked2) return;
+    if (seq !== undefined && seq !== upgradeOptions2Seq) return; // stale screen
     const option = upgradeOptions2[index];
     if (!option) return;
-    if (option.affordable && !option.affordable()) { playCantBuy(); return; }
+    if (id && option.id !== id) return; // stale slot — not the card they clicked
+    // Re-offer rather than swallow, so the guest's picker comes back live.
+    if (option.affordable && !option.affordable()) { playCantBuy(); reofferP2Cards(); return; }
+    if (coopPickStale(option)) {
+      toastGuest('Your buddy already took that one — pick again', 2.4);
+      reofferP2Cards(buildP2UpgradePicks());
+      return;
+    }
     applyPickedUpgrade(option); // Fast mode stacks 5 levels here too
     upgradePicked2 = true;
     toast('Buddy picked ' + option.title, 1.4);
@@ -743,19 +841,25 @@
     if (!extraPickUsedThisWave2) {
       extraPickUsedThisWave2 = true;
       upgradePicked2 = false;
-      upgradeOptions2 = buildP2UpgradePicks();
+      setUpgradeOptions2(buildP2UpgradePicks());
       return;
     }
     maybeFinishUpgradePhase();
   }
 
-  // Guest-side click on a P2 upgrade card.
+  // Guest-side click on a P2 upgrade card. One click per deal: the optimistic
+  // lock below can be cleared by a snapshot that was already in flight when we
+  // clicked, so the deal number — not the lock — is what stops a double pick.
   function selectUpgradeP2(index) {
     if (!multiplayer || isHost) return;
     if (!gameOpts.individualUpgrades) return;
     if (player.ghost) return; // ghost guest doesn't pick
     if (upgradePicked2) return;
-    sendP2Input('upgrade', { index });
+    if (p2PickSentSeq === upgradeOptions2Seq) return; // already clicked this hand
+    const option = upgradeOptions2[index];
+    if (!option) return;
+    p2PickSentSeq = upgradeOptions2Seq;
+    sendP2Input('upgrade', { index, id: option.id, seq: upgradeOptions2Seq });
     upgradePicked2 = true; // optimistic — host's snapshot will confirm
   }
   function selectUpgradeP2At(x, y) {

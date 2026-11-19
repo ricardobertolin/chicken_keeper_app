@@ -371,9 +371,12 @@
   const wolves = [];    // {x,y,vx,vy,target,attackT,alive}
   const pellets = [];   // {x,y,vx,vy,life,dmg,pierce,hit}
   const corpses = [];   // {x,y,kind,t}
-  // A little headstone wherever a keeper fell. Cleared at the next wave, the
-  // same way the hunters' burnt-out fireplace ages away.
-  const graves = [];    // {x,y,wave,lean}
+  // A little headstone wherever a keeper fell. The next wave doesn't snatch it
+  // away: startWave starts it fading and updateGraves sinks it out over
+  // GRAVE_FADE_T seconds. Host-authoritative and synced, so both keepers see
+  // the marker wherever either of them fell.
+  const graves = [];    // {x,y,wave,lean,fadeT}
+  const GRAVE_FADE_T = 2.0; // seconds a headstone takes to fade away
   // Scrap thrown off a wolf that came apart instead of dying normally.
   const wolfScrap = []; // {x,y,vx,vy,z,vz,spin,spinV,t,kind}
   // From this wave on, a share of kills end with the wolf flying to pieces
@@ -652,8 +655,33 @@
   // P2 gets an extra second so network lag can't eat the guest's dodge window.
   const KEEPER_IFRAMES    = 2.5;
   const KEEPER_IFRAMES_P2 = 3.5;
+  // The ninja's conical straw hat is the one trophy with a stat attached: while
+  // it is anywhere in your stack, every post-hit window lasts a second longer.
+  const NINJA_HAT_IFRAME_BONUS = 1;
+  // The hat stack belonging to a keeper or robot. Player 1's lives in the
+  // `hatColors` global; everyone else carries their own array.
+  function hatStackOf(k) {
+    if (!k) return [];
+    if (k === player2 || k.robot) return k.hatColors || [];
+    return hatColors;
+  }
+  function wearsNinjaHat(k) {
+    const stack = hatStackOf(k);
+    return !!(stack && stack.includes(NINJA_STRAW_HAT_COLOR));
+  }
   function iframesFor(k) {
-    return (k === player2 ? KEEPER_IFRAMES_P2 : KEEPER_IFRAMES) * (k.transcendentKarma ? 2 : 1);
+    const base = (k === player2 ? KEEPER_IFRAMES_P2 : KEEPER_IFRAMES) * (k.transcendentKarma ? 2 : 1);
+    return base + (wearsNinjaHat(k) ? NINJA_HAT_IFRAME_BONUS : 0);
+  }
+  // Player 2 walks 10% faster than player 1, for the same reason it gets the
+  // extra i-frame second: the guest is always a round-trip behind, so it is
+  // handed a little more ground to cover what the lag eats.
+  const P2_SPEED_BONUS = 1.10;
+  // Movement multiplier for the LOCAL keeper. Each client drives its own
+  // keeper through `player`, so this is only a bonus on the guest — where
+  // `player` IS player 2.
+  function localKeeperSpeedMul() {
+    return (multiplayer && !isHost) ? P2_SPEED_BONUS : 1;
   }
   let rocketLaunch = null; // post-boss restart cutscene state, or null
   let fade = null;         // black screen wipe: { t, dur, phase:'out'|'in', onBlack } or null
@@ -866,6 +894,12 @@
 
   function ninjaIsWatching(w) {
     return !!(w.ninja && w.ninjaPhase !== 'raiding');
+  }
+  // Did this hit come from a robot ally rather than a keeper? Robot rounds are
+  // the one attack a hidden ninja ignores completely — see hurtWolf/killWolf
+  // and the pellet path in updatePellet.
+  function robotAttack(attacker) {
+    return !!(attacker && (attacker.robot || attacker === 'robot'));
   }
   // ---- Weather events ----------------------------------------------------
   // Two siblings of Night of the Wolf, rolled on exactly the same gate (see
@@ -1360,6 +1394,12 @@
   // P2's parallel pick state — only used when gameOpts.individualUpgrades is on.
   let upgradeOptions2 = [];
   let upgradePicked2 = false;
+  // Which deal of those cards the guest is looking at. The host bumps it on
+  // every fresh (or re-offered) set; the guest mirrors it from the snapshot and
+  // sends it back with its pick, so a stale click can't be applied to a card
+  // that has since been replaced. See setUpgradeOptions2 / selectUpgradeP2.
+  let upgradeOptions2Seq = 0;
+  let p2PickSentSeq = -1; // guest-side: the deal we have already clicked on
   let shotgunLife = 0.30;        // level 1 of "longer barrel"
   let shotgunCooldown = 0.75;    // level 1 of "trigger work"
   let shotgunSpread = 12 * Math.PI / 180; // level 1 of the pattern skills (12°)

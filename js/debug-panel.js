@@ -443,7 +443,7 @@
         // playable field so it can't land in the treeline.
         const gx = clamp(player.x + 1.1, -HALF_MAP + 2, HALF_MAP - 2);
         const gy = clamp(player.y + 1.1, -HALF_MAP + 2, HALF_MAP - 2);
-        graves.push({ x: gx, y: gy, wave: wave, lean: rand(-0.16, 0.16) });
+        graves.push({ x: gx, y: gy, wave: wave, lean: rand(-0.16, 0.16), fadeT: 0 });
         toast('Tombstone planted', 1.0);
       } else if (action === 'force-snow') {
         nightOfWolfDebugForce = false;

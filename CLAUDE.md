@@ -45,10 +45,13 @@ Summoned by typing `robot1` / `robot2` / `robot3` in-game, or from the debug pan
 - **Parry cuts both ways.** `parryLungeTarget` lets a wolf wind its sparkle-lunge up at a robot that is `ROBOT_PARRY_AGGRO` times closer than the keeper, and `parryDashHitKeeper` resolves a robot hit through `hurtRobot`. `robotTryParry` rolls the robot out of the way: one read per lunge (lunges carry a `parryId`), odds by mark, plus a panic roll when a wolf is inside `ROBOT_PARRY_PANIC_R`. The roll sets `wolfHitT`, so a read lunge is genuinely parried.
 - **Scared of FANGUS.** `bossTarget` lets a robot standing `BOSS_ROBOT_AGGRO` times closer than the keeper pull the boss's walk, charge and laser lock onto itself, and `bossContactDamage` crushes robots. `robotCheckFear` rolls the unit's nerve once per `ROBOT_FEAR_CD` while the boss is within `ROBOT_FEAR_R`; a failed roll makes it drop everything and run for `ROBOT_FEAR_T` seconds. The fright clears the moment the boss is gone — the flee branch reads `boss.x`.
 - Wolves consider robots at 1/16 of normal squared-distance priority. Contact damage also covers special wolves, respects fences, and stays active during boot/reboot. Shared 25% training milestones reboot all live units of that mark for 15/10/5 seconds. Each wave rolls a 20/10/0% malfunction chance (double in rain), lasting four seconds with random fire. Death always throws scrap; snapshots include hats, eye/reboot/fault state, the dodge-roll, the fright and flying parts.
+- **The forest watcher is not its business.** A robot can neither kill a hidden ninja nor scare one off: `hurtWolf`, `killWolf` and the pellet branch in `updatePellet` all check `robotAttack(attacker)` and swallow the hit without calling `provokeNinjaWolf`, on top of `robotPickTarget` never aiming at one. Only a keeper can start that encounter.
 - `robotTraining` is held **per mark**, not per unit, so rebuilding a destroyed MK-2 keeps what the last one learned. Reset by `resetWorld`.
 - Robot health and training/reboot progress use hunter-style pips, with no overhead names. Both hunters and robots show their readouts only within four tiles of a living keeper. Robot and possessed-wolf eyes are drawn above the night mask.
 
 Ninja wolves hide in the outer treeline (8% per wave from wave 10, boosted by Cryptid Radar). A hit makes one retreat without dying, then raid on the next wave with fox AI. Killing the raider awards a conical straw hat to the killer; the debug panel can spawn the encounter or grant the hat. Hidden ninjas do not block wave completion.
+
+The conical straw hat is the one trophy with a stat attached: anywhere in your stack it adds `NINJA_HAT_IFRAME_BONUS` (one second) to every post-hit invincibility window, on top of the transcendence doubling (`iframesFor` in state.js).
 
 Transcendence requires Metaverse, 30 uninterrupted seconds in Last Stand, and a personal good/bad karma rescue on the current wave or within the previous two waves. Current karma does not matter; transcendence freezes it at zero. Debug can force the state for the selected keeper(s). Respawn and buddy revival grant five seconds of both melee and projectile protection.
 
@@ -65,6 +68,20 @@ FANGUS arriving puts the farm on a war footing, spread across a few files:
 - **Soldier chickens** (`c.soldier`) only arrive in a crate or via the debug panel — the coops never hatch them. They charge the nearest wolf and detonate. A detonating soldier counts as a chicken lost for the bonus-pick roll, matching the worker chicken's fence-rebuild sacrifice.
 
 Covered by `tests/wartime.test.mjs`.
+
+## Co-op (see also MULTIPLAYER.md)
+
+Each client drives its own keeper through the local `player` object and mirrors the other one as `player2`; the host simulates the world and ships snapshots.
+
+- **Player 2 is handed a small edge for the lag it eats.** `KEEPER_IFRAMES_P2` is a second longer than `KEEPER_IFRAMES`, and `localKeeperSpeedMul()` gives the guest's keeper `P2_SPEED_BONUS` (+10%) move speed. The multiplier is applied in update.js to the LOCAL keeper only, which is why it keys off `multiplayer && !isHost` rather than off `player2`.
+- **Headstones are shared.** `graves` is host-authoritative and synced, so either keeper's fall marks the spot on both screens. `startWave` sets `fadeT` instead of emptying the array and `updateGraves` sinks the stone out over `GRAVE_FADE_T`; on the guest the fade rides in on the snapshot.
+- **Ghosts have no body.** The movement step in update.js skips fence collision while `player.ghost` (the same branch flight uses), which is what lets a ghost drift through walls to reach the wolves it sabotages.
+- **The upgrade picker has two hands on it.** `upgradeIsShared(id)` says whether an option writes to the single shared ladder (every world upgrade) or to a keeper's own copy (everything `makeP2PersonalOptions` re-targets). Shared cards are reachable from both screens at once, so:
+  - `coopPickStale(option)` re-checks a *shared* card at click time and bounces it when the buddy has since taken its last level or committed the other half of its either/or pair. It is not simply a re-run of `available()` — several of those are random or money-gated — and a capped ladder only counts as stale once the upgrade has stopped being offerable at all (Longer Barrel overflows by design, Dog Friend wraps at 4 to retire the pack). The host's own bounced pick re-deals; the guest's is re-offered with a toast. `maybeRedealP2Cards` swaps just the stale card out of the buddy's hand after a host pick.
+  - Every deal of P2's cards carries `upgradeOptions2Seq`. The guest sends `{index, id, seq}` and `selectUpgradeP2OnHost` ignores anything that doesn't match the current deal, so a click crossing with a re-roll can't land on a different upgrade. The deal number is also what gates the guest's click, since a snapshot already in flight can clear its optimistic `upgradePicked2`.
+  - `p2CardPayload` ships level, buddy level, shared flag and lock-out text so `drawUpgradeWindowP2` can use the same `upgradeCardLook` / `drawUpgradeCardLevel` as the host's picker (accent colours, stars, MAX). It used to draw every card in plain gold. `upgradeCoopNote` adds the SHARED / "buddy N" footnote.
+
+Covered by `tests/coop-upgrades.test.mjs` and `tests/multiplayer.test.mjs`.
 
 ## Knowledge Scroll hints
 

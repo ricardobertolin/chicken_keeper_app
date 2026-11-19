@@ -72,6 +72,24 @@ test('hidden ninja watches passively, is ignored by allies, and cannot stall wav
   assert.equal(run('waveActive'), false);
 });
 
+test('a robot can neither kill nor scare off the ninja watching from the forest', () => {
+  const { run } = game();
+  run('spawnNinjaWolf(false, 1, 0); spawnRobot(3, HALF_MAP - 2, 0)');
+  // Pellet, blade/beam damage and the kill path all pass straight through it.
+  run(`updatePellet({x:HALF_MAP+0.2,y:0,vx:0,vy:0,life:1,dmg:999,pierce:1,
+        shooter:'robot',robotRef:robots[0]}, 0.01)`);
+  run('hurtWolf(wolves[0], 999, 0, 0, robots[0])');
+  run('killWolf(wolves[0], robots[0])');
+  assert.equal(run('wolves[0].alive'), true);
+  assert.equal(run('wolves[0].hp'), run('NINJA_HP'));
+  assert.equal(run('wolves[0].ninjaPhase'), 'hidden', 'a robot must not start the encounter');
+  assert.equal(run('pendingNinjaReturn'), null);
+  // A keeper's shot still provokes it, exactly as before.
+  run('hurtWolf(wolves[0], 999, 0, 0, player)');
+  assert.equal(run('wolves[0].ninjaPhase'), 'retreating');
+  assert.equal(run('pendingNinjaReturn.wave'), 11);
+});
+
 test('raiding ninja runs like a fox, snatches chickens and drops its hat for either killer', () => {
   for (const who of ['player', 'player2']) {
     const { run } = game();
@@ -387,3 +405,51 @@ test('Respawn and buddy revival protect against melee, bullets, lasers and blast
   assert.equal(run('playerHats'), 1);
 });
 
+
+test('the ninja conical hat is worth one extra second of post-hit invincibility', () => {
+  const { run } = game();
+  assert.equal(run('iframesFor(player)'), run('KEEPER_IFRAMES'));
+  assert.equal(run('iframesFor(player2)'), run('KEEPER_IFRAMES_P2'));
+  // The trophy works wherever it sits in the stack, and for either keeper.
+  run(`player2.hatColors = ['#5a3825'];
+       hatColors.unshift(NINJA_STRAW_HAT_COLOR);
+       player2.hatColors.push(NINJA_STRAW_HAT_COLOR);`);
+  assert.equal(run('iframesFor(player)'), run('KEEPER_IFRAMES + 1'));
+  assert.equal(run('iframesFor(player2)'), run('KEEPER_IFRAMES_P2 + 1'));
+  // It stacks on top of the transcendence doubling rather than being doubled.
+  run('player.transcendentKarma = true');
+  assert.equal(run('iframesFor(player)'), run('KEEPER_IFRAMES * 2 + 1'));
+  // Losing it gives the second back.
+  run('hatColors.shift()');
+  assert.equal(run('iframesFor(player)'), run('KEEPER_IFRAMES * 2'));
+});
+
+test('player 2 moves 10% faster, and only on the client that owns player 2', () => {
+  const { run } = game();
+  assert.equal(run('P2_SPEED_BONUS'), 1.1);
+  run('multiplayer = true; isHost = true');
+  assert.equal(run('localKeeperSpeedMul()'), 1, "the host's own keeper is unchanged");
+  run('isHost = false');
+  assert.equal(run('localKeeperSpeedMul()'), 1.1);
+  run('multiplayer = false');
+  assert.equal(run('localKeeperSpeedMul()'), 1, 'single player is never the guest');
+});
+
+test('a headstone marks either keeper, fades out after its wave, and rides the snapshot', () => {
+  const { run } = game();
+  run('graves.length = 0; player2.x = 5; player2.y = 5; player2.hats = 0');
+  run("killKeeper(player2, 'guest', 'wolf')");
+  assert.equal(run('graves.length'), 1);
+  assert.equal(run('graves[0].x'), 5);
+  assert.equal(run('graves[0].fadeT'), 0, 'it stays put while its wave runs');
+  // Both clients see it: the snapshot carries position, lean and fade.
+  assert.deepEqual(run('JSON.stringify(SNAP_FIELDS.graves)'), '["x","y","lean","fadeT"]');
+  // The next wave starts it fading instead of deleting it outright.
+  run('startWave()');
+  assert.equal(run('graves.length'), 1);
+  assert.equal(run('graves[0].fadeT'), run('GRAVE_FADE_T'));
+  run('updateGraves(GRAVE_FADE_T * 0.5)');
+  assert.equal(run('graves.length'), 1, 'still half-visible');
+  run('updateGraves(GRAVE_FADE_T * 0.5)');
+  assert.equal(run('graves.length'), 0);
+});

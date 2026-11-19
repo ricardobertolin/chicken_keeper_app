@@ -213,6 +213,7 @@
       case 'harvest':      playHarvest(); break;
       case 'build':        playBuild(); break;
       case 'explosion':    playExplosion(); break;
+      case 'rocketExplosion': playRocketExplosion(true); break;
       case 'huntersArrive': playHuntersArrive(); break;
       case 'huntersLeave':  playHuntersLeave(); break;
       case 'nightOfWolfStart': playNightOfWolfStart(); break;
@@ -1705,14 +1706,48 @@
   // the karma-resurrect map sweep. A low body-thump under a wide noise blast
   // tail so it reads as "boom" rather than "shotgun blast".
   let lastExplosionAudioT = 0; // throttle for stacked blasts (rocket + laser bursts)
+  function audioNowMs() {
+    return (typeof performance !== 'undefined') ? performance.now() : Date.now();
+  }
   function playExplosion() {
     // A laser shot that detonates a whole row of rocket-tipped pellets can fire
     // a dozen explosions on the same frame — collapse those into one sound so
     // the audio doesn't stack into a clipped, bugged roar.
-    const nowMs = (typeof performance !== 'undefined') ? performance.now() : Date.now();
+    const nowMs = audioNowMs();
     if (nowMs - lastExplosionAudioT < 70) return;
     lastExplosionAudioT = nowMs;
     queueNetSound('explosion');
+    explosionTone(1);
+  }
+
+  // Rocket-launcher detonations are their own case. Every pellet in the burst
+  // can carry a warhead, so one trigger pull lands a whole handful of blasts
+  // inside a couple of frames — at full volume that reads as a broken, spammy
+  // roar rather than a rocket. So: a launcher boom is quieter than a real one
+  // to begin with, only one per ROCKET_BOOM_GAP_MS is actually heard, and each
+  // one heard inside the same salvo is quieter than the last.
+  const ROCKET_BOOM_VOL       = 0.5;  // a pellet warhead, not a bomb-wolf
+  const ROCKET_BOOM_GAP_MS    = 220;  // minimum gap between audible booms
+  const ROCKET_BOOM_WINDOW_MS = 800;  // blasts closer than this count as one salvo
+  const ROCKET_BOOM_FADE      = [1, 0.72, 0.52, 0.4]; // volume by position in the salvo
+  let rocketBoomWindowT = 0, rocketBoomHeard = 0;
+  function playRocketExplosion(replay = false) {
+    const nowMs = audioNowMs();
+    if (nowMs - rocketBoomWindowT > ROCKET_BOOM_WINDOW_MS) rocketBoomHeard = 0;
+    rocketBoomWindowT = nowMs;
+    // The host has already thinned the stream it ships, so a replayed boom only
+    // has to be kept from landing on top of the previous one in the same frame.
+    if (nowMs - lastExplosionAudioT < (replay ? 60 : ROCKET_BOOM_GAP_MS)) return;
+    lastExplosionAudioT = nowMs;
+    queueNetSound('rocketExplosion');
+    const fade = ROCKET_BOOM_FADE[Math.min(rocketBoomHeard, ROCKET_BOOM_FADE.length - 1)];
+    rocketBoomHeard++;
+    explosionTone(ROCKET_BOOM_VOL * fade);
+  }
+
+  // The boom itself, at `vol` of full volume. Split out of playExplosion so the
+  // rocket launcher can fire the same shape of sound more quietly.
+  function explosionTone(vol) {
     const ctx = getAudio();
     if (!ctx) return;
     const now = ctx.currentTime;
@@ -1733,7 +1768,7 @@
     lp.frequency.setValueAtTime(1800, now);
     lp.frequency.exponentialRampToValueAtTime(120, now + dur);
     const ng = ctx.createGain();
-    ng.gain.setValueAtTime(0.7, now);
+    ng.gain.setValueAtTime(0.7 * vol, now);
     ng.gain.exponentialRampToValueAtTime(0.001, now + dur);
     noise.connect(lp); lp.connect(ng); ng.connect(audioOutput(ctx));
     noise.start(now);
@@ -1744,7 +1779,7 @@
     osc.frequency.setValueAtTime(180, now);
     osc.frequency.exponentialRampToValueAtTime(35, now + 0.22);
     const og = ctx.createGain();
-    og.gain.setValueAtTime(0.9, now);
+    og.gain.setValueAtTime(0.9 * vol, now);
     og.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
     osc.connect(og); og.connect(audioOutput(ctx));
     osc.start(now);
@@ -1755,7 +1790,7 @@
     crack.frequency.setValueAtTime(2200, now);
     crack.frequency.exponentialRampToValueAtTime(500, now + 0.05);
     const cg = ctx.createGain();
-    cg.gain.setValueAtTime(0.18, now);
+    cg.gain.setValueAtTime(0.18 * vol, now);
     cg.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
     crack.connect(cg); cg.connect(audioOutput(ctx));
     crack.start(now);

@@ -158,3 +158,35 @@ test('buddy resurrection plays a short soft chime and relays once without echoin
   assert.equal(nodes.filter(n => n.kind === 'oscillator').length, voices.length * 2, 'guest did not play the cue');
   assert.equal(run('pendingNetSounds.length'), 0, 'guest must not send the sound back');
 });
+
+test('rocket-launcher blasts are quieter than a real boom and thinned inside a salvo', () => {
+  const {run, nodes} = audioGame();
+  // Loudest level any gain node is set to — the perceived punch of the boom.
+  const peak = () => Math.max(...nodes.filter(n => n.kind === 'gain')
+    .flatMap(n => n.gain.events.filter(e => e[0] === 'set').map(e => e[1])));
+  run('multiplayer = true; isHost = true');
+  run('playExplosion()');
+  const full = peak();
+  const booms = () => nodes.filter(n => n.kind === 'source').length;
+
+  // A burst of warhead pellets all landing together: one boom, not eight.
+  nodes.length = 0;
+  run('pendingNetSounds.length = 0; lastExplosionAudioT = 0; rocketBoomWindowT = 0');
+  run('for (let i = 0; i < 8; i++) playRocketExplosion();');
+  assert.equal(booms(), 1, 'a salvo must collapse into a single audible blast');
+  assert.equal(run('pendingNetSounds.join()'), 'rocketExplosion', 'only audible blasts are relayed');
+  const first = peak();
+  assert.ok(first < full * 0.6, 'a pellet warhead should be well under a real explosion');
+
+  // The next one that IS heard in the same salvo comes in quieter still.
+  nodes.length = 0;
+  run('lastExplosionAudioT = 0; playRocketExplosion()');
+  assert.equal(booms(), 1);
+  const second = peak();
+  assert.ok(second < first, 'a long salvo should keep fading, not keep hammering');
+
+  // A fresh salvo starts back at the top of the fade.
+  nodes.length = 0;
+  run('lastExplosionAudioT = 0; rocketBoomWindowT = 0; playRocketExplosion()');
+  assert.ok(Math.abs(peak() - first) < 1e-12);
+});

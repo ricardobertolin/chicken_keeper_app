@@ -1010,6 +1010,8 @@
     upgradeMode = false;
     upgradeOptions = [];
     upgradeOptions2 = [];
+    upgradeOptions2Seq++;  // a fresh run is a fresh deal
+    p2PickSentSeq = -1;
     upgradePicked = false;
     upgradePicked2 = false;
     upgradeDelayT = 0;
@@ -1458,6 +1460,8 @@
     coopsPlaced = 0;
     pendingMapExpansions = 0;
     upgradeOptions2 = [];
+    upgradeOptions2Seq++;
+    p2PickSentSeq = -1;
     upgradePicked2 = false;
     for (const k in upgradeLevels2) upgradeLevels2[k] = 0;
   }

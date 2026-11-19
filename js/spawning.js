@@ -2178,8 +2178,9 @@
       f.hp = f.maxHp;
     }
     // Headstones only mark the round in which someone fell (same one-wave life
-    // as the hunters' burnt-out fireplace).
-    graves.length = 0;
+    // as the hunters' burnt-out fireplace) — but they sink away rather than
+    // blinking out of existence. updateGraves finishes the job.
+    for (const g of graves) if (!(g.fadeT > 0)) g.fadeT = GRAVE_FADE_T;
     // Age out the post-blizzard dusting.
     if (snowLeftover > 0) {
       snowLeftover--;
@@ -3168,7 +3169,7 @@
   // the keeper also owns Rocket Launcher) Laser Shots that strike a wolf.
   function rocketBlastAt(x, y, shooter) {
     spawnBlast(x, y);
-    playExplosion();
+    playRocketExplosion(); // quieter + thinned: a burst can land a dozen of these
     const r2 = ROCKET_EXPLODE_R * ROCKET_EXPLODE_R;
     for (const w of wolves) {
       if (!w.alive) continue;
@@ -3206,6 +3207,17 @@
     flyHats.push({ fromWx: wx, fromWy: wy, color, t: -(delay || 0), life: 0.55,
                    to: to || player,
                    spin: (Math.random() > 0.5 ? 1 : -1) * (5 + Math.random() * 8), rot: 0 });
+  }
+
+  // Headstones sinking away after the wave they belong to ended. Host-side
+  // only in multiplayer — the guest reads fadeT straight off the snapshot.
+  function updateGraves(dt) {
+    for (let i = graves.length - 1; i >= 0; i--) {
+      const g = graves[i];
+      if (!(g.fadeT > 0)) continue;
+      g.fadeT -= dt;
+      if (g.fadeT <= 0) graves.splice(i, 1);
+    }
   }
 
   function updateFlyHats(dt) {

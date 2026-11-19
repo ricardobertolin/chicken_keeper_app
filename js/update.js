@@ -247,11 +247,14 @@
       // Flying skips fence collision entirely so the player can soar over
       // walls / fence pens for the duration.
       const flyMul = flying ? ROCKET_BOOTS_SPEED : 1;
-      const sp = player.speed * moveMul * runMul * flyMul * critBoost * weatherSpeedMul();
+      const sp = player.speed * moveMul * runMul * flyMul * critBoost * weatherSpeedMul()
+               * localKeeperSpeedMul();
       const pInside = fenceBlocks(player.x, player.y);
       const pStepX = player.x + mx * sp * dt;
       const pStepY = player.y + my * sp * dt;
-      if (flying) {
+      // A ghost has no body to stop: it drifts through fences and walls the
+      // same way flight carries the keeper over them.
+      if (flying || player.ghost) {
         player.x = pStepX;
         player.y = pStepY;
       } else {
@@ -383,6 +386,7 @@
     updateFlyHats(dt);
     updateBeams(dt);
     if (!(multiplayer && !isHost)) {
+      updateGraves(dt);       // headstones sinking away after their wave ended
       updateBossMissiles(dt); // boss MK-04 + missile-wolf rockets (any wave)
     }
     // Decoy hit-flash timer drains naturally each frame.

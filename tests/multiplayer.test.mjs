@@ -60,24 +60,66 @@ function client({ search = '', settings = { iceServers: [turn] }, fetcher, libra
   return { context, peers, calls, timers, el, scripts, Peer };
 }
 
-test('host and guest use configured client credentials before opening PeerJS', async () => {
+// Flush the microtasks an escalation runs through (armRelay is async).
+const flush = () => new Promise(resolve => setTimeout(resolve, 0));
+// Expire the pending connection attempt — that is what arms the relay.
+async function expirePending(c) {
+  const pending = [...c.timers.values()].at(-1);
+  pending.cb();
+  await flush();
+  return pending;
+}
+
+test('a lobby opens direct-only: no TURN in the config until an attempt fails', async () => {
   for (const host of [true, false]) {
-    const c = client();
-    await (host ? c.context.hostLobby() : c.context.joinLobby('ABC123'));
-    assert.equal(c.peers.length, 1);
-    assert.equal(c.calls.length, 1);
-    assert.equal(c.calls[0].init.cache, 'no-store');
+    const c = await offered(host);
     const config = c.peers[0].options.config;
-    assert.deepEqual(JSON.parse(JSON.stringify(config.iceServers[1])), turn);
+    assert.equal(c.calls.length, 1, 'only the settings file is read up front');
+    assert.equal(c.calls[0].init.cache, 'no-store');
+    assert.deepEqual(JSON.parse(JSON.stringify(config.iceServers)), [{ urls: 'stun:stun.l.google.com:19302' }]);
     assert.equal(config.iceTransportPolicy, 'all');
+    // A direct attempt is given a shorter leash, then the relay comes up — on
+    // the same peer and the same lobby code. The host's leash is shorter still,
+    // so its relay is armed before the guest's retry offer lands.
+    assert.equal((await expirePending(c)).delay, host ? 5000 : 8000);
+    assert.equal(c.peers.length, 1);
+    assert.equal(c.peers[0].destroyed, undefined);
+    assert.deepEqual(JSON.parse(JSON.stringify(config.iceServers[1])), turn);
     assert.ok(!JSON.stringify(config).includes('openrelayproject'));
+    assert.equal(c.channel.closed, true, 'the dead attempt is closed');
+    // The guest redials straight away; the host waits for the guest to come
+    // back to the same code. Either way the relayed try gets the full wait.
+    if (host) c.peers[0].emit('connection', connection());
+    assert.equal([...c.timers.values()].at(-1).delay, 15000, 'the relay try gets the full wait');
   }
+});
+
+test('a relayed retry keeps the lobby code and still starts the game', async () => {
+  const c = await offered(false);
+  await expirePending(c);
+  const retry = c.peers[0].outgoing;
+  assert.notEqual(retry, c.channel);
+  assert.equal(c.peers[0].remoteId, 'chicken-mp-v1-ABC123');
+  assert.match(c.el('joinStatus').textContent, /relay/i);
+  retry.emit('open');
+  assert.equal(c.context.starts, 1);
+  // The host side has nothing to redial; it waits on the same code.
+  const h = await offered(true);
+  await expirePending(h);
+  assert.match(h.el('hostStatus').textContent, /try that code again/i);
+  const second = connection();
+  h.peers[0].emit('connection', second);
+  second.emit('open');
+  assert.equal(h.context.starts, 1);
 });
 
 test('the deployed configuration has authenticated TURN and a TLS route on 443', async () => {
   const settings = JSON.parse(await readFile(new URL('../multiplayer-config.json', import.meta.url), 'utf8'));
   const c = client({ settings });
   await c.context.hostLobby();
+  c.peers[0].emit('open');
+  c.peers[0].emit('connection', connection());
+  await expirePending(c);
   assert.equal(c.peers.length, 1);
   assert.ok(c.peers[0].options.config.iceServers.some(s => {
     const urls = Array.isArray(s.urls) ? s.urls : [s.urls];
@@ -94,15 +136,21 @@ test('relay-only mode applies inside the RTC config for both players', async () 
   }
 });
 
-test('temporary credentials are fetched over HTTPS using an uncached POST', async () => {
+test('temporary credentials are minted over HTTPS only once a direct try fails', async () => {
   for (const host of [true, false]) {
     const c = client({ settings: { turnCredentialsUrl: endpoint, iceServers: [] } });
     await (host ? c.context.hostLobby() : c.context.joinLobby('ABC123'));
+    const p = c.peers[0];
+    p.emit('open');
+    const channel = host ? connection() : p.outgoing;
+    if (host) p.emit('connection', channel);
+    assert.equal(c.calls.length, 1, 'the credential service is untouched while direct is viable');
+    await expirePending({ ...c, channel });
     assert.equal(c.calls[1].url, endpoint);
     assert.equal(c.calls[1].init.method, 'POST');
     assert.equal(c.calls[1].init.cache, 'no-store');
     assert.equal(c.calls[1].init.credentials, 'omit');
-    assert.deepEqual(JSON.parse(JSON.stringify(c.peers[0].options.config.iceServers[1])), turn);
+    assert.deepEqual(JSON.parse(JSON.stringify(p.options.config.iceServers[1])), turn);
   }
 });
 
@@ -124,19 +172,24 @@ test('invalid, conflicting or incomplete settings block lobby creation and allow
   }
 });
 
-test('settings and configured service failures do not fall back to obsolete relays', async () => {
+test('a failing credential service ends the lobby instead of reaching for a public relay', async () => {
   for (const failure of [
     () => new Response('', { status: 503 }),
     () => new Response('', { status: 429 }),
     () => Response.json({ iceServers: [] }),
+    () => Response.json({ iceServers: [{ urls: 'turn:relay.example', username: 'no-password' }] }),
     () => { throw new Error('Network unavailable'); },
   ]) {
     const c = client({ fetcher: async url => url === './multiplayer-config.json'
       ? Response.json({ turnCredentialsUrl: endpoint }) : failure() });
     await c.context.joinLobby('ABC123');
-    assert.equal(c.peers.length, 0);
+    c.peers[0].emit('open');
+    const config = c.peers[0].options.config;
+    await expirePending(c);
+    assert.equal(c.peers[0].destroyed, true);
     assert.equal(c.el('btnJoinConnect').disabled, false);
     assert.ok(c.el('joinStatus').textContent.trim());
+    assert.deepEqual(JSON.parse(JSON.stringify(config.iceServers)), [{ urls: 'stun:stun.l.google.com:19302' }]);
   }
   const c = client({ fetcher: async () => new Response('', { status: 404 }) });
   await c.context.hostLobby();
@@ -202,15 +255,34 @@ async function offered(host) {
 test('host and guest timeouts close pending channels and ignore late opens', async () => {
   for (const host of [true, false]) {
     const c = await offered(host);
-    const timer = [...c.timers.values()][0];
-    assert.equal(timer.delay, 15000);
-    timer.cb();
-    assert.equal(c.channel.closed, true);
+    await expirePending(c); // direct attempt expires → relay armed
+    const relayed = host ? connection() : c.peers[0].outgoing;
+    if (host) c.peers[0].emit('connection', relayed);
+    const relayTimer = [...c.timers.values()].at(-1);
+    assert.equal(relayTimer.delay, 15000);
+    relayTimer.cb();
+    assert.equal(relayed.closed, true);
     assert.equal(c.peers[0].destroyed, true);
     assert.match(c.el(host ? 'hostStatus' : 'joinStatus').textContent, /even through the relay/);
-    c.channel.emit('open');
+    relayed.emit('open');
     assert.equal(c.context.starts, 0);
     assert.equal(c.timers.size, 0);
+  }
+});
+
+test('with no relay configured a single timeout ends the attempt', async () => {
+  for (const host of [true, false]) {
+    const c = client({ settings: {} });
+    await (host ? c.context.hostLobby() : c.context.joinLobby('ABC123'));
+    c.peers[0].emit('open');
+    const channel = host ? connection() : c.peers[0].outgoing;
+    if (host) c.peers[0].emit('connection', channel);
+    const timer = [...c.timers.values()].at(-1);
+    assert.equal(timer.delay, 15000);
+    timer.cb();
+    assert.equal(channel.closed, true);
+    assert.equal(c.peers[0].destroyed, true);
+    assert.match(c.el(host ? 'hostStatus' : 'joinStatus').textContent, /TURN relay, which is not configured/);
   }
 });
 
@@ -224,12 +296,30 @@ test('successful channels start both roles and clear connection timers', async (
 });
 
 test('pending channel errors and broker errors settle promptly', async () => {
+  // With no relay to fall back to, a dead channel ends the attempt at once.
+  for (const name of ['error', 'close']) {
+    const c = client({ settings: {} });
+    await c.context.joinLobby('ABC123');
+    c.peers[0].emit('open');
+    const channel = c.peers[0].outgoing;
+    channel.emit(name);
+    assert.equal(c.timers.size, 0);
+    assert.equal(c.el('btnJoinConnect').disabled, false);
+    channel.emit('open');
+    assert.equal(c.context.starts, 0);
+  }
+  // With one configured, the first failure escalates and the second settles.
   for (const name of ['error', 'close']) {
     const c = await offered(false);
     c.channel.emit(name);
+    await flush();
+    const relayed = c.peers[0].outgoing;
+    assert.notEqual(relayed, c.channel);
+    relayed.emit(name);
     assert.equal(c.timers.size, 0);
+    assert.equal(c.peers[0].destroyed, true);
     assert.equal(c.el('btnJoinConnect').disabled, false);
-    c.channel.emit('open');
+    relayed.emit('open');
     assert.equal(c.context.starts, 0);
   }
   const c = await offered(false);
@@ -238,7 +328,22 @@ test('pending channel errors and broker errors settle promptly', async () => {
   assert.match(c.el('joinStatus').textContent, /No lobby/);
 });
 
-test('retries ignore old broker and channel events; host reserves one pending slot', async () => {
+test('a newer offer replaces a still-pending one, but never an established game', async () => {
+  const c = await offered(true);
+  const retry = connection();
+  c.peers[0].emit('connection', retry);          // the guest having another go
+  assert.equal(c.channel.closed, true, 'the stale pending offer is dropped');
+  c.channel.emit('open');                        // a late open on it is ignored
+  assert.equal(c.context.starts, 0);
+  retry.emit('open');
+  assert.equal(c.context.starts, 1);
+  const gatecrasher = connection();
+  c.peers[0].emit('connection', gatecrasher);
+  assert.equal(gatecrasher.closed, true, 'a running game keeps its slot');
+  assert.equal(retry.closed, false);
+});
+
+test('retries ignore old broker and channel events', async () => {
   const c = await offered(false);
   await c.context.joinLobby('NEW123');
   c.peers[0].emit('open');
@@ -251,12 +356,6 @@ test('retries ignore old broker and channel events; host reserves one pending sl
   c.channel.emit('close');
   assert.equal(c.context.starts, 1);
   assert.equal(c.peers[1].outgoing.closed, false);
-  const host = await offered(true);
-  const extra = connection();
-  host.peers[0].emit('connection', extra);
-  assert.equal(extra.closed, true);
-  host.channel.emit('open');
-  assert.equal(host.context.starts, 1);
 });
 
 test('join Back button tears down the pending lobby', () => {

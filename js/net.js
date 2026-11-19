@@ -27,7 +27,36 @@
 
   // Static client credentials or an HTTPS temporary-credential service, as in
   // Stacker. Explicit settings replace PeerJS's bundled TURN defaults.
-  async function loadPeerOptions() {
+  //
+  // The relay is a FALLBACK, never the opening move. A lobby starts STUN-only:
+  // no relay candidates are gathered, and a credential service isn't even
+  // called. Only once a direct attempt has actually failed does armRelay()
+  // splice the TURN servers into the live RTCConfiguration and the same lobby
+  // code get retried — so TURN is used if, and only if, player 2 can't get in
+  // the normal way. Static server lists are still validated up front, because
+  // broken settings should stop a lobby from opening at all rather than
+  // surfacing minutes later when the fallback needs them.
+  function validateIceServers(iceServers, badShape, badCreds, noTurn) {
+    if (!Array.isArray(iceServers) || !iceServers.length) throw new Error(noTurn);
+    let hasTurn = false;
+    for (const server of iceServers) {
+      const urls = Array.isArray(server?.urls) ? server.urls : [server?.urls];
+      if (!urls.length || urls.some(u => typeof u !== 'string' || !/^(stun|stuns|turn|turns):\S+$/.test(u))) {
+        throw new Error(badShape);
+      }
+      if (urls.some(u => /^turns?:/.test(u))) {
+        if (typeof server.username !== 'string' || !server.username ||
+            typeof server.credential !== 'string' || !server.credential) {
+          throw new Error(badCreds);
+        }
+        hasTurn = true;
+      }
+    }
+    if (!hasTurn) throw new Error(noTurn);
+    return iceServers;
+  }
+
+  async function loadMultiplayerSettings() {
     const configResponse = await fetch('./multiplayer-config.json', {
       cache: 'no-store', signal: AbortSignal.timeout(10000),
     });
@@ -35,55 +64,86 @@
     const settings = await configResponse.json();
     if (!settings || typeof settings !== 'object') throw new Error('Invalid multiplayer settings.');
     const endpoint = settings.turnCredentialsUrl ?? '';
-    let iceServers = settings.iceServers === undefined ? [] : settings.iceServers;
+    const iceServers = settings.iceServers === undefined ? [] : settings.iceServers;
     if (typeof endpoint !== 'string' || !Array.isArray(iceServers)) throw new Error('Invalid multiplayer settings.');
     if (endpoint.trim() && iceServers.length) throw new Error('Choose static TURN servers or a credential service URL, not both.');
+    if (endpoint.trim() && new URL(endpoint).protocol !== 'https:') {
+      throw new Error('The TURN credential service must use HTTPS.');
+    }
+    // A static list is checked now; a credential service can only be checked
+    // when it is actually called (see fetchRelayServers).
+    if (iceServers.length) {
+      validateIceServers(iceServers, 'Invalid multiplayer settings.',
+        'Invalid multiplayer settings.', 'Invalid multiplayer settings.');
+    }
+    return { endpoint: endpoint.trim(), iceServers };
+  }
+
+  // The TURN servers themselves — static, or minted by the credential service.
+  // Never falls back to a public relay: if this throws, the lobby says so.
+  async function fetchRelayServers(settings) {
+    if (!settings.endpoint) return settings.iceServers;
+    const response = await fetch(new URL(settings.endpoint).href, {
+      method: 'POST', cache: 'no-store', credentials: 'omit',
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!response.ok) throw new Error(response.status === 429
+      ? 'Too many connection attempts. Try again in a minute.'
+      : 'The connection relay is unavailable. Please try again shortly.');
+    const { iceServers } = await response.json();
+    return validateIceServers(iceServers,
+      'The relay service returned invalid servers.',
+      'The relay service returned incomplete credentials.',
+      'The relay service returned no TURN servers.');
+  }
+
+  async function loadPeerOptions() {
+    const settings = await loadMultiplayerSettings();
     const relayOnly = new URLSearchParams(location.search).get('relay') === '1';
-    const config = {
+    netSettings = settings;
+    netRelayAvailable = !!(settings.endpoint || settings.iceServers.length);
+    netRelayArmed = false;
+    // Phase 1: STUN only. peerConfig stays the live object PeerJS reads, so
+    // armRelay can add to it later without rebuilding the peer or the lobby.
+    peerConfig = {
       iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
       iceTransportPolicy: relayOnly ? 'relay' : 'all',
     };
-    if (!endpoint.trim() && !iceServers.length) {
-      if (relayOnly) throw new Error('Relay testing needs a configured TURN service.');
-      return { debug: 0, config };
-    }
-    if (endpoint.trim()) {
-      const endpointUrl = new URL(endpoint);
-      if (endpointUrl.protocol !== 'https:') throw new Error('The TURN credential service must use HTTPS.');
-      const response = await fetch(endpointUrl.href, {
-        method: 'POST', cache: 'no-store', credentials: 'omit',
-        signal: AbortSignal.timeout(10000),
-      });
-      if (!response.ok) throw new Error(response.status === 429
-        ? 'Too many connection attempts. Try again in a minute.'
-        : 'The connection relay is unavailable. Please try again shortly.');
-      ({ iceServers } = await response.json());
-    }
-    if (!Array.isArray(iceServers) || !iceServers.length) throw new Error('The relay service returned no servers.');
-    let hasTurn = false;
-    for (const server of iceServers) {
-      const urls = Array.isArray(server?.urls) ? server.urls : [server?.urls];
-      if (!urls.length || urls.some(u => typeof u !== 'string' || !/^(stun|stuns|turn|turns):\S+$/.test(u))) {
-        throw new Error('The relay service returned invalid servers.');
-      }
-      if (urls.some(u => /^turns?:/.test(u))) {
-        if (typeof server.username !== 'string' || !server.username ||
-            typeof server.credential !== 'string' || !server.credential) {
-          throw new Error('The relay service returned incomplete credentials.');
-        }
-        hasTurn = true;
-      }
-    }
-    if (!hasTurn) throw new Error('The relay service returned no TURN servers.');
-    config.iceServers.push(...iceServers);
-    return { debug: 0, config };
+    if (!netRelayAvailable && relayOnly) throw new Error('Relay testing needs a configured TURN service.');
+    // ?relay=1 is a deliberate relay-only test — nothing to fall back from, so
+    // the relay comes up immediately.
+    if (relayOnly) await armRelay();
+    return { debug: 0, config: peerConfig };
+  }
+
+  // Bring the relay up for the NEXT connection attempt. PeerJS reads
+  // `peer.options.config` each time it builds an RTCPeerConnection, so pushing
+  // onto the live iceServers array is enough — the lobby (and its code) stays
+  // exactly where it is.
+  async function armRelay() {
+    if (netRelayArmed) return true;
+    if (!netRelayAvailable || !peerConfig) return false;
+    const servers = await fetchRelayServers(netSettings);
+    peerConfig.iceServers.push(...servers);
+    netRelayArmed = true;
+    return true;
   }
 
   // Each incoming or outgoing data channel gets a bounded connection attempt.
   const CONNECT_TIMEOUT_MS = 15000;
+  // The direct-only attempt gets a shorter leash: when a relay is configured,
+  // waiting the full fifteen seconds before even trying it is most of a minute
+  // of staring at a lobby screen. The HOST gives up on direct sooner still —
+  // it has nothing to redial, so the only thing its leash buys is having the
+  // relay armed before the guest's retry offer arrives.
+  const DIRECT_CONNECT_TIMEOUT_MS = 8000;
+  const HOST_DIRECT_TIMEOUT_MS = 5000;
   let netSession = 0;
   let netConnectTimer = null;
-  let netHasRelay = false;
+  let netSettings = null;        // parsed multiplayer-config.json for this lobby
+  let peerConfig = null;         // the live RTCConfiguration the peer reads
+  let netRelayAvailable = false; // a TURN relay is configured at all
+  let netRelayArmed = false;     // ...and has been spliced into peerConfig
 
   let peer = null;
   let conn = null;
@@ -143,7 +203,10 @@
     const oldConn = conn, oldPeer = peer;
     conn = peer = null;
     netRole = null;
-    netHasRelay = false;
+    netRelayArmed = false;
+    netRelayAvailable = false;
+    peerConfig = null;
+    netSettings = null;
     document.getElementById('btnJoinConnect').disabled = false;
     if (oldConn) { try { oldConn.close(); } catch (_) {} }
     if (oldPeer) { try { oldPeer.destroy(); } catch (_) {} }
@@ -160,8 +223,6 @@
     try {
       const [, options] = await Promise.all([requirePeerJS(), loadPeerOptions()]);
       if (session !== netSession) return null;
-      netHasRelay = options.config.iceServers.some(s =>
-        (Array.isArray(s.urls) ? s.urls : [s.urls]).some(u => /^turns?:/.test(u)));
       setStatus(target, 'Connecting to broker…');
       return { session, options };
     } catch (e) {
@@ -173,20 +234,54 @@
     }
   }
 
-  function watchLobbyConnection(c) {
+  // A pending lobby channel: bounded wait, then either escalate to the relay or
+  // give up. `redial` is how the dialling side re-attempts once the relay is
+  // armed — the host has nothing to redial (the guest comes back to the same
+  // code), it just keeps the lobby open with the relay now in its config.
+  function watchLobbyConnection(c, redial) {
     conn = c;
     const target = document.getElementById(isHost ? 'hostStatus' : 'joinStatus');
+    let settled = false;
     function fail(message) {
-      if (conn !== c || !inMenu) return;
+      if (conn !== c || !inMenu || settled) return;
+      settled = true;
+      // The direct route didn't work — THIS is the moment TURN is allowed in.
+      if (!netRelayArmed && netRelayAvailable) { escalateToRelay(c, redial, target); return; }
       teardownConnection();
       setStatus(target, message, 'bad');
     }
     clearTimeout(netConnectTimer);
-    netConnectTimer = setTimeout(() => fail(netHasRelay
+    const leash = (!netRelayArmed && netRelayAvailable)
+      ? (isHost ? HOST_DIRECT_TIMEOUT_MS : DIRECT_CONNECT_TIMEOUT_MS)
+      : CONNECT_TIMEOUT_MS;
+    netConnectTimer = setTimeout(() => fail(netRelayArmed
       ? 'Could not connect, even through the relay. Keep the host tab open and try again.'
-      : 'Could not connect directly. This network may need a TURN relay, which is not configured.'), CONNECT_TIMEOUT_MS);
+      : 'Could not connect directly. This network may need a TURN relay, which is not configured.'), leash);
     c.on('close', () => fail('The connection closed before the game started. Try again.'));
     c.on('error', () => fail('The connection could not be established. Check the lobby code and try again.'));
+  }
+
+  // Direct failed: fetch the relay, splice it into the live config and try the
+  // same lobby code again. The peer and the code survive, so the other player
+  // doesn't have to be told a new one.
+  async function escalateToRelay(c, redial, target) {
+    const session = netSession;
+    clearTimeout(netConnectTimer);
+    netConnectTimer = null;
+    setStatus(target, 'No direct route — bringing the relay up…');
+    conn = null;
+    if (c) { try { c.close(); } catch (_) {} }
+    try {
+      await armRelay();
+    } catch (e) {
+      if (session !== netSession) return;
+      teardownConnection();
+      setStatus(target, e.message || 'The connection relay is unavailable.', 'bad');
+      return;
+    }
+    if (session !== netSession || !inMenu) return;
+    if (redial) redial();
+    else setStatus(target, 'Relay ready — waiting for the other player to try that code again…');
   }
 
   // Timestamp of the last message we got from the peer. The PeerJS `close`
@@ -295,7 +390,7 @@
         else if (msg.action === 'reload')    tryReloadP2();
         else if (msg.action === 'doubleShot') doubleShotP2();
         else if (msg.action === 'magDump')   magDumpP2();
-        else if (msg.action === 'upgrade')   selectUpgradeP2OnHost(msg.index | 0);
+        else if (msg.action === 'upgrade')   selectUpgradeP2OnHost(msg.index | 0, msg.id, msg.seq);
         else if (msg.action === 'buildToggle') p2BuildToggle();
         else if (msg.action === 'buildScroll') p2BuildScroll(msg.dir | 0);
         return;
@@ -396,6 +491,9 @@
     dogs:     ['x','y','facingLeft','bob','variant','personality'], // personality drives the collar colour
 
     corpses:  ['x','y','kind','t','frost','fried'],
+    // Headstones. Either keeper's fall plants one, and BOTH screens show it —
+    // fadeT rides along so the stone fades out in step on the two clients.
+    graves:   ['x','y','lean','fadeT'],
     pellets:  ['x','y','vx','vy','r','color','trail','pierce','crit','critCol','homing','wolfHoming','rooftop'],
     smoke:    ['x','y','t','life','r'],
     blasts:   ['x','y','t','life','col'],
@@ -500,8 +598,12 @@
         gameOpts: { friendlyFire: gameOpts.friendlyFire, separateMoney: gameOpts.separateMoney, individualUpgrades: gameOpts.individualUpgrades },
         money2: money2,
         runMoneyEarned: runMoneyEarned, // run earnings — guest shows the 1% carry on its REMATCH button
-        guestUpgradeOptions: gameOpts.individualUpgrades ? upgradeOptions2.map(o => ({ id: o.id, title: o.title, desc: o.desc() })) : null,
+        // Card data for the guest's own picker: level, buddy level, lock-out
+        // warning — see p2CardPayload. The deal number goes with it so the
+        // guest's click can be matched back to the hand it was shown.
+        guestUpgradeOptions: gameOpts.individualUpgrades ? upgradeOptions2.map(p2CardPayload) : null,
         guestUpgradePicked: !!upgradePicked2,
+        guestUpgradeSeq: upgradeOptions2Seq,
         // Mirror the host's overlay state so the guest's render matches.
         upgradeMode: upgradeMode,
         paused: paused,
@@ -527,6 +629,7 @@
         farms:    snapList(farms,    SNAP_FIELDS.farms),
         dogs:     snapList(dogs,     SNAP_FIELDS.dogs),
         corpses:  snapList(corpses,  SNAP_FIELDS.corpses),
+        graves:   snapList(graves,   SNAP_FIELDS.graves),
         pellets:  snapList(pellets,  SNAP_FIELDS.pellets),
         smoke:    snapList(smoke,    SNAP_FIELDS.smoke),
         blasts:   snapList(blasts,   SNAP_FIELDS.blasts),
@@ -691,12 +794,17 @@
       if (typeof msg.guestWeapon.skillCheckLockoutT === 'number') player.skillCheckLockoutT = msg.guestWeapon.skillCheckLockoutT;
     }
     if (msg.guestUpgradeOptions) {
-      // Guest reconstructs lightweight upgrade options for its own picker.
+      // Guest reconstructs lightweight upgrade options for its own picker —
+      // including the level/buddy-level/lock-out data the cards are drawn from.
       upgradeOptions2 = msg.guestUpgradeOptions.map(o => ({
         id: o.id, title: o.title, desc: () => o.desc,
+        level: o.level || 0, buddyLevel: o.buddyLevel || 0,
+        shared: !!o.shared, locksOut: o.locksOut || null,
       }));
     }
     if (typeof msg.guestUpgradePicked === 'boolean') upgradePicked2 = msg.guestUpgradePicked;
+    // The host owns the deal number; a new one re-arms this guest's click.
+    if (typeof msg.guestUpgradeSeq === 'number') upgradeOptions2Seq = msg.guestUpgradeSeq;
     // Host echoes the guest's own hat count back so the guest sees its damage.
     if (msg.guest) {
       if (typeof msg.guest.hats === 'number') {
@@ -737,6 +845,7 @@
     replaceArray(farms,    msg.farms);
     replaceArray(dogs,     msg.dogs);
     replaceArray(corpses,  msg.corpses);
+    if (msg.graves) replaceArray(graves, msg.graves);
     replaceArray(pellets,  msg.pellets);
     replaceArray(smoke,    msg.smoke);
     replaceArray(blasts,   msg.blasts);
@@ -826,13 +935,21 @@
     peer.on('open', () => {
       if (session !== netSession) return;
       setStatus(document.getElementById('hostStatus'), 'Waiting for the other player…' +
-        (netHasRelay ? '' : ' Direct connections only; some networks need a relay.'));
+        (netRelayAvailable ? '' : ' Direct connections only; some networks need a relay.'));
     });
     peer.on('connection', incoming => {
-      if (session !== netSession || conn) {
-        // Reserve the slot while connecting as well as during a game.
+      if (session !== netSession || (conn && conn.open)) {
+        // An established game keeps its slot for the whole run.
         try { incoming.close(); } catch (_) {}
         return;
+      }
+      // A channel that is still trying, though, is almost always the same guest
+      // having another go — most importantly its relay retry, which must not be
+      // turned away because the first (direct) offer is still pending here.
+      if (conn) {
+        const stale = conn;
+        conn = null;
+        try { stale.close(); } catch (_) {}
       }
       watchLobbyConnection(incoming);
       setStatus(document.getElementById('hostStatus'), 'Connecting to the other player…');
@@ -852,15 +969,22 @@
     peer.on('open', () => {
       if (session !== netSession) return;
       setStatus(document.getElementById('joinStatus'), 'Reaching host…' +
-        (netHasRelay ? '' : ' Direct connections only; some networks need a relay.'));
-      const c = peer.connect(ID_PREFIX + code, { reliable: true });
-      watchLobbyConnection(c);
-      c.on('open', () => {
-        if (session !== netSession || conn !== c) return;
-        attachConn(c);
-        setStatus(document.getElementById('joinStatus'), 'Connected!', 'good');
-        startGame(true);
-      });
+        (netRelayAvailable ? '' : ' Direct connections only; some networks need a relay.'));
+      // Dial the same code. Called a second time if the direct attempt failed
+      // and the relay had to be brought up (see escalateToRelay).
+      const dial = () => {
+        if (session !== netSession) return;
+        const c = peer.connect(ID_PREFIX + code, { reliable: true });
+        watchLobbyConnection(c, dial);
+        if (netRelayArmed) setStatus(document.getElementById('joinStatus'), 'Reaching host through the relay…');
+        c.on('open', () => {
+          if (session !== netSession || conn !== c) return;
+          attachConn(c);
+          setStatus(document.getElementById('joinStatus'), 'Connected!', 'good');
+          startGame(true);
+        });
+      };
+      dial();
     });
   }
 

@@ -1892,7 +1892,13 @@
 
   function hurtWolf(w, dmg, kx, ky, attacker) {
     if (!w.alive) return;
-    if (ninjaIsWatching(w)) { if (dmg > 0) provokeNinjaWolf(w); return; }
+    // The forest watcher is the keepers' business. A robot can neither kill it
+    // nor scare it off: machine damage is swallowed whole, so a stray MK round
+    // can't start the ninja encounter on the players' behalf.
+    if (ninjaIsWatching(w)) {
+      if (dmg > 0 && !robotAttack(attacker)) provokeNinjaWolf(w);
+      return;
+    }
     // The boss takes capped, status-immune damage and never dies here
     // (bossTick decides when a side is beaten); no knockback either.
     if (w.boss) { bossTakeDamage(w, dmg); return; }
@@ -1994,7 +2000,7 @@
     // it marks this round only — and the game-over screen hides it (drawGraves
     // skips while gameOver/endScreen is up), which is why a solo death never
     // shows one but a co-op death or a RESPAWN revive does.
-    graves.push({ x: who.x, y: who.y, lean: rand(-0.16, 0.16) });
+    graves.push({ x: who.x, y: who.y, wave: wave, lean: rand(-0.16, 0.16), fadeT: 0 });
     if (!multiplayer || !player2.active) {
       // Single-player: freeze into game-over, but first let the keeper visibly
       // topple. `dying` keeps drawPlayer rendering the body flat on the ground
@@ -2116,7 +2122,7 @@
   // ghost and hat-armoured wolves while keeping drops and rescues intact.
   function killWolf(w, attacker, deferWaveCheck = false, karmaSweep = false) {
     if (!w.alive || w.boss || w.dpsDummy) return;
-    if (ninjaIsWatching(w)) { provokeNinjaWolf(w); return; }
+    if (ninjaIsWatching(w)) { if (!robotAttack(attacker)) provokeNinjaWolf(w); return; }
     w.alive = false;
     w.hp = 0;
     kills++;
@@ -2474,6 +2480,9 @@
       const hitRadius = (0.35 + slugBoost + bossBoost) * (w.size || 1);
       if (dist2(p.x, p.y, w.x, w.y) < hitRadius) {
         if (ninjaIsWatching(w)) {
+          // A robot's round passes clean through the watcher — no damage, no
+          // retreat, no encounter. Only a keeper can start that fight.
+          if (p.robotRef || p.shooter === 'robot') continue;
           provokeNinjaWolf(w);
           p.didHit = true;
           if (p.hit) p.hit.add(w);

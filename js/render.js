@@ -1247,6 +1247,99 @@
     ctx.restore();
   }
 
+  // The level cap an upgrade card counts against. Keyed on the id alone, so
+  // both pickers (and the guest, which has no pool objects of its own) can ask
+  // for it.
+  function upgradeCardMax(option) {
+    return option.id === 'cash' ? Infinity
+      : (option.id === 'focusUp' || option.id === 'focusDown') ? MAX_FOCUS_LEVEL
+      : (option.id === 'woodFence' || option.id === 'stoneWall' || option.id === 'wolfDelay' || option.id === 'hatchRate'
+         || option.id === 'crazyTrigger' || option.id === 'calmWaves' || option.id === 'roughWaves'
+         || option.id === 'doubleBarrel' || option.id === 'machineGun' || option.id === 'counter'
+         || option.id === 'sprint' || option.id === 'softBullet' || option.id === 'hardBullet'
+         || option.id === 'rust' || option.id === 'farm'
+         || option.id === 'dummy' || option.id === 'statue') ? 5
+      : MAX_LEVEL;
+  }
+
+  // How one card should read: accent colour, whether that accent owns the
+  // border, and the "this pick maxes it" flags. Shared by the host's picker and
+  // the guest's, so the same card looks the same on both screens — the guest
+  // used to draw every option in plain gold with no stars and no MAX flag.
+  function upgradeCardLook(option, count, max) {
+    // Longer Barrel keeps being offered past MAX as a visual-only pick.
+    const rangeMaxed = option.id === 'range' && count >= MAX_LEVEL;
+    const isLast = count === max - 1; // picking it now maxes this upgrade out
+    // Rusty Springs' final tier (the golden gun) reads as yellow, not blue.
+    const goldTier = option.id === 'rust' && isLast;
+    const accent = rangeMaxed             ? '#b06fff'   // purple — Longer Barrel maxed
+                 : option.id === 'cash'   ? '#5fd06a'   // green  — Pocket Money
+                 : option.id === 'buyHat' ? '#ff8ad8'   // pink   — Buy Hat
+                 : option.id === 'resurrect' ? '#ff5a5a' // red    — Resurrect Buddy
+                 : option.id === 'sword'  ? '#5b9bff'   // blue   — Wolf's Blade
+                 : option.id === 'hunters'? '#ffee33'   // yellow — Call the Hunters
+                 : option.id === 'hunterPower'? '#ffd23f' // yellow — Hunter Gear
+                 : option.id === 'hunterCaravan'? '#8a5a2a' // brown  — Hunter Caravan
+                 : option.id === 'weaponOil'? '#ffe23d' // yellow — Weapon Oil
+                 : option.id === 'advancedOil'? '#7fd0ff' // cyan   — Advanced Oil
+                 : option.id === 'hatPack'? '#ff8ad8'   // pink   — Buy Hat Pack
+                 : option.id === 'bribeWolves'? '#c9a23a' // gold-brown — Bribe Wolves
+                 : option.id === 'metaverse' ? ('hsl(' + Math.floor((Date.now() / 8) % 360) + ',90%,65%)') // shimmering rainbow — Metaverse
+                 : option.id === 'goldenChicken' ? '#ffd23f' // yellow — Golden Chicken
+                 : option.id === 'scroll' ? '#e8dcb5'   // parchment — Knowledge Scroll
+                 : goldTier               ? '#ffd23f'   // yellow — golden-gun (Rusty Springs max)
+                 : isLast                 ? '#5fd0ff'   // blue   — final level
+                 :                          '#ffd166';  // gold   — standard
+    const colored = rangeMaxed || option.id === 'cash' || option.id === 'buyHat' || option.id === 'hatPack' || option.id === 'resurrect' || option.id === 'sword' || option.id === 'hunters' || option.id === 'hunterPower' || option.id === 'hunterCaravan' || option.id === 'weaponOil' || option.id === 'advancedOil' || option.id === 'bribeWolves' || option.id === 'metaverse' || option.id === 'goldenChicken' || option.id === 'scroll' || goldTier;
+    return { accent, colored, isLast, goldTier, rangeMaxed, isMetaverse: option.id === 'metaverse' };
+  }
+
+  // The stars / "x12" counter / MAX flag strip under a card title. Identical on
+  // both pickers; `count` is the level the card's own ladder sits at.
+  function drawUpgradeCardLevel(rect, count, look) {
+    // One star per time this upgrade was already taken — capped at 10,
+    // with a 'x12' style counter past that so the row doesn't overflow.
+    const stars = Math.min(count, 10);
+    for (let s = 0; s < stars; s++) {
+      drawStar(rect.x + 17 + s * 8, rect.y + 37, 3, look.accent);
+    }
+    if (count > 10) {
+      ctx.fillStyle = look.accent;
+      ctx.font = 'bold 10px "Lucida Console", Consolas, monospace';
+      ctx.textAlign = 'left';
+      ctx.fillText('x' + count, rect.x + 17 + stars * 8 + 1, rect.y + 41);
+    }
+    // Flag the final possible level.
+    if (look.isLast) {
+      ctx.fillStyle = look.accent;
+      ctx.font = 'bold 9px "Lucida Console", Consolas, monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText('MAX', rect.x + rect.w - 11, rect.y + 40);
+      ctx.textAlign = 'left';
+    }
+  }
+
+  // Co-op footnote on a card: either "both keepers' picks land on this one
+  // ladder" or "your buddy already owns N of these". Without it a shared
+  // upgrade sitting at 4/5 looked like it had levels nobody had bought, and a
+  // card both keepers can reach gave no hint that the other might take it too.
+  function drawUpgradeCardCoop(rect, info) {
+    if (!info || !info.text) return;
+    ctx.fillStyle = info.color;
+    ctx.font = 'bold 9px "Lucida Console", Consolas, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(info.text, rect.x + rect.w - 11, rect.y + rect.h - 6);
+    ctx.textAlign = 'left';
+  }
+  // What that footnote should say. `shared` = the option writes to the one
+  // shared ladder; `buddyLevel` = the other keeper's level on their own ladder.
+  function upgradeCoopNote(shared, buddyLevel) {
+    if (!(multiplayer && player2.active && gameOpts.individualUpgrades)) return null;
+    if (shared) return { text: 'SHARED', color: '#7fd0ff' };
+    if (buddyLevel > 0) return { text: 'buddy ' + buddyLevel, color: '#9aa0a8' };
+    return null;
+  }
+
   // Small, clock-driven tremor for the two secret cards. Their click targets
   // stay fixed, and the animation never consumes gameplay random rolls.
   function shakeUpgradeCard(option, rect, index) {
@@ -1289,14 +1382,24 @@
       const hovered = !upgradePicked2 && mouse.x >= rect.x && mouse.x <= rect.x + rect.w && mouse.y >= rect.y && mouse.y <= rect.y + rect.h;
       ctx.save();
       shakeUpgradeCard(option, rect, i);
-      // Resurrect Buddy reads red here too, matching the host's picker so the
-      // guest sees the same "this is the revive" cue.
-      const accent2 = option.id === 'resurrect' ? '#ff5a5a' : null;
-      ctx.fillStyle = hovered ? 'rgba(255, 209, 102, 0.24)' : 'rgba(255, 255, 255, 0.08)';
+      // Same accent / star / MAX treatment as the host's picker. The level and
+      // the buddy's level ride in on the snapshot (option.level / buddyLevel),
+      // because the ladder a given card writes to is the host's business.
+      const count = option.level || 0;
+      const max = upgradeCardMax(option);
+      const look = upgradeCardLook(option, count, max);
+      ctx.fillStyle = hovered         ? 'rgba(255, 209, 102, 0.24)'
+                    : look.isMetaverse ? 'rgba(160, 90, 255, 0.16)'
+                    : look.goldTier   ? 'rgba(255, 210, 63, 0.16)'
+                    : look.isLast     ? 'rgba(95, 208, 255, 0.14)'
+                    :                   'rgba(255, 255, 255, 0.08)';
       ctx.fillRect(rect.x, rect.y, rect.w, rect.h);
-      ctx.strokeStyle = accent2 || (hovered ? '#ffd166' : 'rgba(255,255,255,0.18)');
-      ctx.lineWidth = uiLineW(2);
+      ctx.strokeStyle = (look.isLast || look.colored) ? look.accent
+                      : (hovered ? '#ffd166' : 'rgba(255,255,255,0.18)');
+      ctx.lineWidth = uiLineW(look.isMetaverse ? 3 : 2);
+      if (look.isMetaverse) { ctx.save(); ctx.shadowColor = look.accent; ctx.shadowBlur = 14 + 6 * Math.sin(Date.now() / 140); }
       ctx.strokeRect(rect.x + 1, rect.y + 1, rect.w - 2, rect.h - 2);
+      if (look.isMetaverse) ctx.restore();
       // Easter-egg chicken filler — just the chicken, no text.
       if (option.id === 'chicken') {
         drawChickenIcon(rect.x + rect.w / 2, rect.y + rect.h / 2 + 6, 2.6);
@@ -1314,9 +1417,19 @@
         ctx.font = 'bold ' + titleSize2 + 'px "Lucida Console", Consolas, monospace';
       }
       ctx.fillText(titleText2, rect.x + 14, rect.y + 22);
+      drawUpgradeCardLevel(rect, count, look);
       ctx.font = '13px "Lucida Console", Consolas, monospace';
       ctx.fillStyle = '#d7d7d7';
       wrapText(option.desc(), rect.x + 14, rect.y + 56, rect.w - 28, 15, 3);
+      // Taking this would freshly lock its counterpart out of P2's own ladder.
+      if (option.locksOut) {
+        ctx.fillStyle = '#ff9d4d';
+        ctx.font = 'bold 9px "Lucida Console", Consolas, monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText('Locks out ' + option.locksOut, rect.x + 14, rect.y + 96);
+      } else {
+        drawUpgradeCardCoop(rect, upgradeCoopNote(!!option.shared, option.buddyLevel || 0));
+      }
       ctx.restore();
     }
     ctx.fillStyle = '#9aa0a8';
@@ -1442,43 +1555,15 @@
       shakeUpgradeCard(option, rect, i);
       // Times this upgrade has already been taken, and its cap.
       const count = upgradeLevels[option.id] || 0;
-      const max = option.id === 'cash' ? Infinity
-                : (option.id === 'focusUp' || option.id === 'focusDown') ? MAX_FOCUS_LEVEL
-                : (option.id === 'woodFence' || option.id === 'stoneWall' || option.id === 'wolfDelay' || option.id === 'hatchRate'
-                   || option.id === 'crazyTrigger' || option.id === 'calmWaves' || option.id === 'roughWaves'
-                   || option.id === 'doubleBarrel' || option.id === 'machineGun' || option.id === 'counter'
-                   || option.id === 'sprint' || option.id === 'softBullet' || option.id === 'hardBullet'
-                   || option.id === 'rust' || option.id === 'farm'
-                   || option.id === 'dummy' || option.id === 'statue') ? 5
-                : MAX_LEVEL;
-      const isLast = count === max - 1; // picking it now maxes this upgrade out
-      // Longer Barrel keeps being offered past MAX as a visual-only pick.
-      const rangeMaxed = option.id === 'range' && count >= MAX_LEVEL;
-      // Rusty Springs' final tier (the golden gun) reads as yellow, not blue.
-      const goldTier = option.id === 'rust' && isLast;
-      const accent = rangeMaxed             ? '#b06fff'   // purple — Longer Barrel maxed
-                   : option.id === 'cash'   ? '#5fd06a'   // green  — Pocket Money
-                   : option.id === 'buyHat' ? '#ff8ad8'   // pink   — Buy Hat
-                   : option.id === 'resurrect' ? '#ff5a5a' // red    — Resurrect Buddy
-                   : option.id === 'sword'  ? '#5b9bff'   // blue   — Wolf's Blade
-                   : option.id === 'hunters'? '#ffee33'   // yellow — Call the Hunters
-                   : option.id === 'hunterPower'? '#ffd23f' // yellow — Hunter Gear
-                   : option.id === 'hunterCaravan'? '#8a5a2a' // brown  — Hunter Caravan
-                   : option.id === 'weaponOil'? '#ffe23d' // yellow — Weapon Oil
-                   : option.id === 'advancedOil'? '#7fd0ff' // cyan   — Advanced Oil
-                   : option.id === 'hatPack'? '#ff8ad8'   // pink   — Buy Hat Pack
-                   : option.id === 'bribeWolves'? '#c9a23a' // gold-brown — Bribe Wolves
-                   : option.id === 'metaverse' ? ('hsl(' + Math.floor((Date.now() / 8) % 360) + ',90%,65%)') // shimmering rainbow — Metaverse
-                   : option.id === 'goldenChicken' ? '#ffd23f' // yellow — Golden Chicken
-                   : option.id === 'scroll' ? '#e8dcb5'   // parchment — Knowledge Scroll
-                   : goldTier               ? '#ffd23f'   // yellow — golden-gun (Rusty Springs max)
-                   : isLast                 ? '#5fd0ff'   // blue   — final level
-                   :                          '#ffd166';  // gold   — standard
-      const colored = rangeMaxed || option.id === 'cash' || option.id === 'buyHat' || option.id === 'hatPack' || option.id === 'resurrect' || option.id === 'sword' || option.id === 'hunters' || option.id === 'hunterPower' || option.id === 'hunterCaravan' || option.id === 'weaponOil' || option.id === 'advancedOil' || option.id === 'bribeWolves' || option.id === 'metaverse' || option.id === 'goldenChicken' || option.id === 'scroll' || goldTier;
+      const max = upgradeCardMax(option);
+      const look = upgradeCardLook(option, count, max);
+      const { accent, colored, isLast, goldTier, isMetaverse } = look;
       // First pick of an exclusive upgrade permanently disables its counterpart
       // — unless the Metaverse has dissolved the locks.
       const locksOut = (!metaverseOn() && count === 0 && LOCKS_OUT[option.id]) || null;
-      const isMetaverse = option.id === 'metaverse';
+      // Co-op: say so when this card's ladder is the shared one, or when the
+      // buddy already holds levels in their own copy of it.
+      const coopNote = upgradeCoopNote(upgradeIsShared(option.id), upgradeLevels2[option.id] || 0);
 
       ctx.fillStyle = hovered  ? 'rgba(255, 209, 102, 0.24)'
                     : isMetaverse ? 'rgba(160, 90, 255, 0.16)'
@@ -1513,31 +1598,13 @@
       }
       ctx.fillText(titleText, rect.x + 14, rect.y + 22);
 
-      // One star per time this upgrade was already taken — capped at 10,
-      // with a 'x12' style counter past that so the row doesn't overflow.
-      const stars = Math.min(count, 10);
-      for (let s = 0; s < stars; s++) {
-        drawStar(rect.x + 17 + s * 8, rect.y + 37, 3, accent);
-      }
-      if (count > 10) {
-        ctx.fillStyle = accent;
-        ctx.font = 'bold 10px "Lucida Console", Consolas, monospace';
-        ctx.textAlign = 'left';
-        ctx.fillText('x' + count, rect.x + 17 + stars * 8 + 1, rect.y + 41);
-      }
-      // Flag the final possible level.
-      if (isLast) {
-        ctx.fillStyle = accent;
-        ctx.font = 'bold 9px "Lucida Console", Consolas, monospace';
-        ctx.textAlign = 'right';
-        ctx.fillText('MAX', rect.x + rect.w - 11, rect.y + 40);
-        ctx.textAlign = 'left';
-      }
+      drawUpgradeCardLevel(rect, count, look);
 
       // Description
       ctx.font = '13px "Lucida Console", Consolas, monospace';
       ctx.fillStyle = '#d7d7d7';
       wrapText(option.desc(), rect.x + 14, rect.y + 56, rect.w - 28, 15, 3);
+      if (!locksOut) drawUpgradeCardCoop(rect, coopNote);
 
       // Warn that taking this will permanently lock out the paired upgrade.
       if (locksOut) {
@@ -3665,8 +3732,14 @@
   // scoreboard just reads as clutter.
   function drawGrave(g) {
     if (gameOver || endScreen) return;
+    // Once the wave it marks is over the stone fades out (and sinks a little)
+    // instead of vanishing between two frames.
+    const fade = g.fadeT > 0 ? Math.max(0, Math.min(1, g.fadeT / GRAVE_FADE_T)) : 1;
+    if (fade <= 0) return;
     const p = worldToScreen(g.x, g.y);
-    const cx = p.x, cy = p.y + TILE_H / 2;
+    const cx = p.x, cy = p.y + TILE_H / 2 + (1 - fade) * 5;
+    ctx.save();
+    ctx.globalAlpha = fade;
     drawShadow(g.x, g.y, 0.42);
     // A low mound of turned earth the stone is planted in.
     ctx.fillStyle = 'rgba(74, 52, 30, 0.55)';
@@ -3721,6 +3794,7 @@
     ctx.moveTo(cx - 7, cy + 0.5); ctx.lineTo(cx - 8.4, cy - 2.4);
     ctx.moveTo(cx + 7, cy + 0.5); ctx.lineTo(cx + 8.2, cy - 2.0);
     ctx.stroke();
+    ctx.restore();
   }
 
   // Parts flung off a wolf that came apart on death — plates, struts and cogs
